@@ -5,14 +5,16 @@ import * as React from "react";
 
 /**
  * Denison-styled Campaign Builder
- * - Import from Denison URL (via /api/scrape, mode:"vessel")
- * - Left form / right live preview (email HTML)
- * - Outline CTA, two-up gallery, navy SPECIFICATIONS block (2 rows × 3 cols)
+ * - Persistent banner (localStorage)
+ * - Mode toggle: Listing | Newsletter
+ * - Import from Denison URL (Listing mode; /api/scrape)
+ * - Email-safe HTML (table layout), outline CTA, two-up gallery, navy specs block
  * - Co-broker toggles: Paolo Ameglio / Peter Quintal
  */
 
 type Spec = { label: string; value: string };
 type Agent = { name: string; title: string; email: string; cell: string; office: string; photo: string };
+type Mode = "Listing" | "Newsletter";
 
 const NAVY = "#0b2a55";
 const ORANGE = "#e57b2e";
@@ -58,15 +60,25 @@ const PAOLO: Agent = {
     ),
 };
 
-/* --------------------------- Component --------------------------- */
 export default function CampaignsPage(): React.ReactElement {
-  /* Import URL */
+  /* Mode */
+  const [mode, setMode] = React.useState<Mode>("Listing");
+
+  /* Import URL (Listing mode) */
   const [importUrl, setImportUrl] = React.useState("");
 
-  /* Brand banner (PNG/JPG). If you have an official hosted image, paste it here. */
+  /* Banner (persisted) */
   const [bannerUrl, setBannerUrl] = React.useState(
+    // Default Denison navy banner with white logo
     "https://www.denisonyachtsales.com/wp-content/uploads/2023/08/Rectangle-557.png"
   );
+  React.useEffect(() => {
+    const saved = localStorage.getItem("yotcrm.bannerUrl");
+    if (saved) setBannerUrl(saved);
+  }, []);
+  React.useEffect(() => {
+    localStorage.setItem("yotcrm.bannerUrl", bannerUrl);
+  }, [bannerUrl]);
 
   /* Basics */
   const [subject, setSubject] = React.useState("35m (115') AvA Yachts 2022 — Back in Monaco");
@@ -76,9 +88,9 @@ export default function CampaignsPage(): React.ReactElement {
   const [subBanner, setSubBanner] = React.useState("Back in Monaco After a Successful Charter Season");
   const [ctaText, setCtaText] = React.useState("HIGHLIGHT VIDEO");
   const [ctaHref, setCtaHref] = React.useState("https://www.denisonyachtsales.com/yachts-for-sale/ducale-120-120-ocean-king-I");
-  const [price, setPrice] = React.useState("€10,450,000");
 
-  /* Images */
+  /* Listing-only extras */
+  const [price, setPrice] = React.useState("€10,450,000");
   const [heroUrl, setHeroUrl] = React.useState(
     "https://images.boatsgroup.com/resize/1/54/57/2027-ocean-king-ducale-120-power-9685457-20250217074103462-1_XLARGE.jpg?w=1200&h=720&format=webp"
   );
@@ -88,13 +100,17 @@ export default function CampaignsPage(): React.ReactElement {
       "https://images.boatsgroup.com/resize/1/54/57/2027-ocean-king-ducale-120-power-9685457-20250217074114935-1_XLARGE.jpg?w=800&h=533&format=webp",
     ].join("\n")
   );
+  const gallery = React.useMemo(
+    () => galleryText.split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 2),
+    [galleryText]
+  );
 
-  /* Intro */
+  /* Shared body content */
   const [intro, setIntro] = React.useState(
     "M/Y INFINITY NINE is the hull #2 of the Kando 110 model, extended to 35m. Delivered in 2022 by AvA Yachts with a steel hull and aluminium superstructure, her incredible range is 6000 miles. Interior features great volumes and 12 guests in 6 luxury cabins."
   );
 
-  /* Specs (render as 2 rows × 3 cols) */
+  /* Listing specs */
   const [specs, setSpecs] = React.useState<Spec[]>([
     { label: "LENGTH", value: "35m (115')" },
     { label: "BEAM", value: "25' 7''" },
@@ -104,7 +120,16 @@ export default function CampaignsPage(): React.ReactElement {
     { label: "POWER", value: "650 hp" },
   ]);
 
-  /* Features (one per line) */
+  /* Newsletter items (one per line: use plain bullets, or "Title — link") */
+  const [newsItems, setNewsItems] = React.useState(
+    [
+      "Yachting Festival Cannes — Highlights & Market Takeaways — https://www.cannesyachtingfestival.com/",
+      "FLIBS 2025 — What to expect this year — https://www.flibs.com/",
+      "Industry financing trends: rates, timelines, best practices",
+    ].join("\n")
+  );
+
+  /* Features (Listing mode) */
   const [featuresText, setFeaturesText] = React.useState(
     [
       "Amazing explorer with 333 GT and unmatched 6000-mile range",
@@ -135,14 +160,9 @@ export default function CampaignsPage(): React.ReactElement {
     return arr;
   }, [showPeter, showPaolo]);
 
-  /* Gallery list */
-  const gallery = React.useMemo(
-    () => galleryText.split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 2),
-    [galleryText]
-  );
-
-  /* Import from Denison URL */
+  /* Import (Listing mode) */
   async function handleImport() {
+    if (mode !== "Listing") return;
     const url = importUrl.trim();
     if (!url) return;
     try {
@@ -164,16 +184,21 @@ export default function CampaignsPage(): React.ReactElement {
     } catch (e: any) { alert(e?.message || "Import failed."); }
   }
 
-  /* Build HTML */
+  /* Build HTML (switch by mode) */
   const html = React.useMemo(
     () =>
-      buildHtml({
-        subject, preheader, bannerUrl, heroUrl, subBanner, headline, location, ctaText, ctaHref, price,
-        intro, gallery, specs, featuresText, primary: me, coBrokers
-      }),
+      mode === "Listing"
+        ? buildListingHtml({
+            subject, preheader, bannerUrl, heroUrl, subBanner, headline, location,
+            ctaText, ctaHref, price, intro, gallery, specs, featuresText, primary: me, coBrokers
+          })
+        : buildNewsletterHtml({
+            subject, preheader, bannerUrl, heroUrl, subBanner, headline, location,
+            ctaText, ctaHref, intro, newsItems, primary: me, coBrokers
+          }),
     [
-      subject, preheader, bannerUrl, heroUrl, subBanner, headline, location,
-      ctaText, ctaHref, price, intro, galleryText, specs, featuresText, me, coBrokers
+      mode, subject, preheader, bannerUrl, heroUrl, subBanner, headline, location,
+      ctaText, ctaHref, price, intro, galleryText, specs, featuresText, newsItems, me, coBrokers
     ]
   );
 
@@ -192,6 +217,7 @@ export default function CampaignsPage(): React.ReactElement {
     );
   }
 
+  /* ---------------- UI ---------------- */
   return (
     <main style={{ minHeight: "100dvh", background: "#f8fafc", padding: 24 }}>
       {/* Top bar */}
@@ -203,9 +229,26 @@ export default function CampaignsPage(): React.ReactElement {
             <div style={{fontSize:12,color:"#64748b"}}>Denison style email</div>
           </div>
         </div>
-        <div style={{display:"flex",gap:8}}>
-          <input value={importUrl} onChange={(e)=>setImportUrl(e.target.value)} placeholder="Paste Denison listing URL…" style={input({width:360})}/>
-          <button onClick={handleImport} style={btn("outline")}>Import</button>
+
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          {/* Mode toggle */}
+          <div style={{display:"flex",gap:6,marginRight:8}}>
+            {(["Listing","Newsletter"] as Mode[]).map(m => {
+              const active = mode === m;
+              return (
+                <button key={m} onClick={()=>setMode(m)}
+                  style={{
+                    fontSize:12,padding:"6px 10px",borderRadius:8,border:"1px solid #e2e8f0",
+                    background: active ? "#e2e8f0" : "#fff", color:"#0f172a", cursor:"pointer"
+                  }}>
+                  {m}
+                </button>
+              );
+            })}
+          </div>
+
+          <input value={importUrl} onChange={(e)=>setImportUrl(e.target.value)} placeholder="Paste Denison listing URL… (Listing mode)" style={input({width:360})}/>
+          <button onClick={handleImport} style={btn("outline")} disabled={mode!=="Listing"}>Import</button>
           <button onClick={copyHtml} style={btn("solid")}>Copy HTML</button>
         </div>
       </header>
@@ -215,37 +258,47 @@ export default function CampaignsPage(): React.ReactElement {
         {/* Left form */}
         <div style={panel()}>
           <h3 style={h3()}>Brand</h3>
-          <Field label="Banner (logo) URL" value={bannerUrl} onChange={setBannerUrl}/>
+          <Field label="Banner (logo) URL (persistent)" value={bannerUrl} onChange={setBannerUrl}/>
 
           <h3 style={h3()}>Basics</h3>
           <Field label="Subject" value={subject} onChange={setSubject}/>
           <Field label="Preheader" value={preheader} onChange={setPreheader}/>
           <Field label="Headline" value={headline} onChange={setHeadline}/>
-          <Field label="Location (UPPERCASE)" value={location} onChange={setLocation}/>
+          <Field label="Location" value={location} onChange={setLocation}/>
           <Field label="Orange Sub-Banner" value={subBanner} onChange={setSubBanner}/>
           <Field label="CTA Text" value={ctaText} onChange={setCtaText}/>
           <Field label="CTA Link" value={ctaHref} onChange={setCtaHref}/>
-          <Field label="Price (optional)" value={price} onChange={setPrice}/>
 
-          <h3 style={h3()}>Images</h3>
-          <Field label="Hero URL" value={heroUrl} onChange={setHeroUrl}/>
-          <TextArea label="Gallery (one per line, 2 shown)" rows={3} value={galleryText} onChange={setGalleryText}/>
+          {mode === "Listing" ? (
+            <>
+              <Field label="Price (optional)" value={price} onChange={setPrice}/>
+              <h3 style={h3()}>Images</h3>
+              <Field label="Hero URL" value={heroUrl} onChange={setHeroUrl}/>
+              <TextArea label="Gallery (one per line, 2 shown)" rows={3} value={galleryText} onChange={setGalleryText}/>
 
-          <h3 style={h3()}>Intro</h3>
-          <TextArea label="Intro paragraph" rows={6} value={intro} onChange={setIntro}/>
+              <h3 style={h3()}>Intro</h3>
+              <TextArea label="Intro paragraph" rows={6} value={intro} onChange={setIntro}/>
 
-          <h3 style={h3()}>Specs (2 rows × 3 cols)</h3>
-          {specs.map((s,i)=>(
-            <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,marginBottom:8}}>
-              <input value={s.label} onChange={e=>updateSpec(i,"label",e.target.value)} placeholder="LABEL (UPPERCASE)" style={input()}/>
-              <input value={s.value} onChange={e=>updateSpec(i,"value",e.target.value)} placeholder="Value" style={input()}/>
-              <button onClick={()=>delSpec(i)} style={btn("ghost")}>Del</button>
-            </div>
-          ))}
-          <button onClick={addSpec} style={btn("outline")}>Add spec</button>
+              <h3 style={h3()}>Specs (2 rows × 3 cols)</h3>
+              {specs.map((s,i)=>(
+                <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,marginBottom:8}}>
+                  <input value={s.label} onChange={e=>updateSpec(i,"label",e.target.value)} placeholder="LABEL (UPPERCASE)" style={input()}/>
+                  <input value={s.value} onChange={e=>updateSpec(i,"value",e.target.value)} placeholder="Value" style={input()}/>
+                  <button onClick={()=>delSpec(i)} style={btn("ghost")}>Del</button>
+                </div>
+              ))}
+              <button onClick={addSpec} style={btn("outline")}>Add spec</button>
 
-          <h3 style={h3()}>Key Features</h3>
-          <TextArea label="One per line" rows={6} value={featuresText} onChange={setFeaturesText}/>
+              <h3 style={h3()}>Key Features</h3>
+              <TextArea label="One per line" rows={6} value={featuresText} onChange={setFeaturesText}/>
+            </>
+          ) : (
+            <>
+              <h3 style={h3()}>Newsletter Body</h3>
+              <TextArea label="Top paragraph" rows={6} value={intro} onChange={setIntro}/>
+              <TextArea label="Articles / Events (one per line)" rows={6} value={newsItems} onChange={setNewsItems}/>
+            </>
+          )}
 
           <h3 style={h3()}>Primary Agent</h3>
           <Field label="Name" value={me.name} onChange={v=>setMe({...me,name:v})}/>
@@ -296,16 +349,46 @@ function TextArea({label,value,onChange,rows=4}:{label:string;value:string;onCha
   </div>;
 }
 
-/* ----------------------- HTML generator ------------------------- */
-function buildHtml(opts:{
+/* ----------------------- HTML builders -------------------------- */
+function contactCard(a: Agent): string {
+  return `
+  <tr>
+    <td style="padding:0 24px;">
+      <table role="presentation" width="100%" style="border-top:1px solid #e2e8f0; padding-top:16px;">
+        <tr>
+          <td width="110" valign="top" style="padding-right:16px;">
+            <div style="width:100px; height:100px; border-radius:50%; overflow:hidden; background:#e2e8f0;">
+              <img src="${escapeAttr(a.photo)}" width="100" height="100" style="display:block; width:100px; height:100px; object-fit:cover;" />
+            </div>
+          </td>
+          <td valign="top" style="font-size:14px; color:${TEXT};">
+            <div style="font-weight:800;">${escapeHtml(a.name)}</div>
+            <div style="font-size:12px; color:#64748b;">${escapeHtml(a.title)}</div>
+
+            <div style="margin-top:10px; font-size:12px; color:${ORANGE}; font-weight:800;">EMAIL</div>
+            <div><a href="mailto:${escapeAttr(a.email)}" style="color:${NAVY}; text-decoration:none;">${escapeHtml(a.email)}</a></div>
+
+            <div style="margin-top:10px; font-size:12px; color:${ORANGE}; font-weight:800;">CELL</div>
+            <div>${escapeHtml(a.cell)}</div>
+
+            <div style="margin-top:10px; font-size:12px; color:${ORANGE}; font-weight:800;">OFFICE</div>
+            <div>${escapeHtml(a.office)}</div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>`;
+}
+
+/** Listing email */
+function buildListingHtml(opts:{
   subject:string; preheader:string; bannerUrl:string; heroUrl:string; subBanner:string;
   headline:string; location:string; ctaText:string; ctaHref:string; price?:string;
   intro:string; gallery:string[]; specs:Spec[]; featuresText:string; primary:Agent; coBrokers:Agent[];
 }):string{
-  const { subject, preheader, bannerUrl, heroUrl, subBanner, headline, location, ctaText, ctaHref, price,
-          intro, gallery, specs, featuresText, primary, coBrokers } = opts;
+  const { subject, preheader, bannerUrl, heroUrl, subBanner, headline, location,
+          ctaText, ctaHref, price, intro, gallery, specs, featuresText, primary, coBrokers } = opts;
 
-  // Two spec rows of three columns
   const r1 = specs.slice(0,3);
   const r2 = specs.slice(3,6);
 
@@ -319,9 +402,7 @@ function buildHtml(opts:{
       `).join("")}
     </tr>`;
 
-  const featuresLis = featuresText
-    .split("\n").map(t=>t.trim()).filter(Boolean)
-    .map(t=>`<li>${escapeHtml(t)}</li>`).join("");
+  const featuresLis = featuresText.split("\n").map(t=>t.trim()).filter(Boolean).map(t=>`<li>${escapeHtml(t)}</li>`).join("");
 
   const galleryTwoUp = gallery.length ? `
     <tr>
@@ -361,26 +442,21 @@ function buildHtml(opts:{
   <table role="presentation" width="100%" bgcolor="${NAVY}" style="background:${NAVY};">
     <tr>
       <td align="center" class="pad" style="padding:0;">
-        <!-- Navy banner with centered Denison logo -->
         <table role="presentation" width="100%" style="background:${NAVY};">
           <tr><td align="center" style="padding:12px 0;">
             <img src="${escapeAttr(bannerUrl)}" width="240" style="display:block; width:240px; height:auto;" />
           </td></tr>
         </table>
 
-        <!-- Container -->
         <table role="presentation" width="600" class="container" style="width:600px; background:#ffffff;">
-          <!-- Hero -->
           <tr><td><img src="${escapeAttr(heroUrl)}" width="600" style="display:block; width:100%; height:auto;" /></td></tr>
 
-          <!-- Orange strip -->
           <tr>
             <td align="center" style="background:${ORANGE}; color:#ffffff; font-weight:700; font-size:14px; padding:10px 12px; letter-spacing:0.3px;">
               ${escapeHtml(subBanner)}
             </td>
           </tr>
 
-          <!-- Headline + Location + Outline CTA -->
           <tr>
             <td align="center" style="padding:18px 24px 0;">
               <div style="font-size:24px; color:#002f6c; font-weight:800;">${escapeHtml(headline)}</div>
@@ -394,7 +470,6 @@ function buildHtml(opts:{
             </td>
           </tr>
 
-          <!-- Intro -->
           <tr>
             <td style="padding:16px 24px 6px;">
               <p style="margin:0; font-size:14px; color:${GRAY}; line-height:1.6;">${escapeHtml(intro)}</p>
@@ -403,10 +478,8 @@ function buildHtml(opts:{
 
           ${price ? `<tr><td align="center" style="padding:8px 24px 14px; font-size:18px; color:${ORANGE}; font-weight:800;">${escapeHtml(price)}</td></tr>` : ""}
 
-          <!-- Two-up gallery -->
           ${galleryTwoUp}
 
-          <!-- Navy SPECIFICATIONS block -->
           <tr>
             <td>
               <table role="presentation" width="100%" bgcolor="${NAVY}" style="background:${NAVY};">
@@ -429,7 +502,6 @@ function buildHtml(opts:{
             </td>
           </tr>
 
-          <!-- Key features -->
           <tr>
             <td style="padding:0 24px;">
               <div style="color:${NAVY}; font-weight:800; letter-spacing:0.3px; font-size:16px; border-bottom:1px solid #e2e8f0; padding:10px 0;">
@@ -441,14 +513,12 @@ function buildHtml(opts:{
             </td>
           </tr>
 
-          <!-- Contacts -->
           ${contactCard(primary)}
-          ${coBrokerCards}
+          ${coBrokers.map(a=>contactCard(a)).join(`<tr><td style="height:12px; line-height:12px; font-size:0">&nbsp;</td></tr>`)}
 
           <tr><td style="height:16px; line-height:16px; font-size:0">&nbsp;</td></tr>
         </table>
 
-        <!-- Footer -->
         <div style="font-size:11px; color:#cbd5e1; margin-top:12px; text-align:center;">
           © ${new Date().getFullYear()} Denison Yachting — ${escapeHtml(primary.email)} — Sent via YotCRM
         </div>
@@ -459,33 +529,103 @@ function buildHtml(opts:{
 </html>`;
 }
 
-/* single contact card */
-function contactCard(a: Agent): string {
-  return `
-  <tr>
-    <td style="padding:0 24px;">
-      <table role="presentation" width="100%" style="border-top:1px solid #e2e8f0; padding-top:16px;">
-        <tr>
-          <td width="110" valign="top" style="padding-right:16px;">
-            <div style="width:100px; height:100px; border-radius:50%; overflow:hidden; background:#e2e8f0;">
-              <img src="${escapeAttr(a.photo)}" width="100" height="100" style="display:block; width:100px; height:100px; object-fit:cover;" />
-            </div>
-          </td>
-          <td valign="top" style="font-size:14px; color:${TEXT};">
-            <div style="font-weight:800;">${escapeHtml(a.name)}</div>
-            <div style="font-size:12px; color:#64748b;">${escapeHtml(a.title)}</div>
+/** Newsletter email (keeps Denison layout, drops gallery/specs/price; adds bullets section) */
+function buildNewsletterHtml(opts:{
+  subject:string; preheader:string; bannerUrl:string; heroUrl:string; subBanner:string;
+  headline:string; location:string; ctaText:string; ctaHref:string;
+  intro:string; newsItems:string; primary:Agent; coBrokers:Agent[];
+}):string{
+  const { subject, preheader, bannerUrl, heroUrl, subBanner, headline, location,
+          ctaText, ctaHref, intro, newsItems, primary, coBrokers } = opts;
 
-            <div style="margin-top:10px; font-size:12px; color:${ORANGE}; font-weight:800;">EMAIL</div>
-            <div><a href="mailto:${escapeAttr(a.email)}" style="color:${NAVY}; text-decoration:none;">${escapeHtml(a.email)}</a></div>
+  const bullets = newsItems.split("\n").map(s=>s.trim()).filter(Boolean).map(s=>{
+    // If user wrote "Title — link", make linked bullet
+    const m = s.split("—");
+    if (m.length >= 2) {
+      const title = escapeHtml(m[0].trim());
+      const href = escapeAttr(m.slice(1).join("—").trim());
+      const isUrl = /^https?:\/\//i.test(href);
+      return `<li>${isUrl ? `<a href="${href}" style="color:${NAVY}; text-decoration:none;">${title}</a>` : title}</li>`;
+    }
+    return `<li>${escapeHtml(s)}</li>`;
+  }).join("");
 
-            <div style="margin-top:10px; font-size:12px; color:${ORANGE}; font-weight:800;">CELL</div>
-            <div>${escapeHtml(a.cell)}</div>
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<title>${escapeHtml(subject)}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style>
+  img { border:0; line-height:0; outline:none; text-decoration:none; }
+  table { border-collapse:collapse; }
+  .preheader { display:none !important; visibility:hidden; opacity:0; color:transparent; height:0; width:0; overflow:hidden; mso-hide:all; }
+  @media (max-width:620px){ .container{ width:100% !important; } .pad{ padding-left:16px !important; padding-right:16px !important; } }
+</style>
+</head>
+<body style="margin:0; background:${NAVY};">
+  <div class="preheader">${escapeHtml(preheader)}</div>
 
-            <div style="margin-top:10px; font-size:12px; color:${ORANGE}; font-weight:800;">OFFICE</div>
-            <div>${escapeHtml(a.office)}</div>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>`;
+  <table role="presentation" width="100%" bgcolor="${NAVY}" style="background:${NAVY};">
+    <tr>
+      <td align="center" class="pad" style="padding:0;">
+        <table role="presentation" width="100%" style="background:${NAVY};">
+          <tr><td align="center" style="padding:12px 0;">
+            <img src="${escapeAttr(bannerUrl)}" width="240" style="display:block; width:240px; height:auto;" />
+          </td></tr>
+        </table>
+
+        <table role="presentation" width="600" class="container" style="width:600px; background:#ffffff;">
+          <tr><td><img src="${escapeAttr(heroUrl)}" width="600" style="display:block; width:100%; height:auto;" /></td></tr>
+
+          <tr>
+            <td align="center" style="background:${ORANGE}; color:#ffffff; font-weight:700; font-size:14px; padding:10px 12px; letter-spacing:0.3px;">
+              ${escapeHtml(subBanner)}
+            </td>
+          </tr>
+
+          <tr>
+            <td align="center" style="padding:18px 24px 0;">
+              <div style="font-size:24px; color:#002f6c; font-weight:800;">${escapeHtml(headline)}</div>
+              <div style="font-size:12px; color:#002f6c; margin-top:6px;">📍 ${escapeHtml(location)}</div>
+              <div style="margin-top:12px;">
+                <a href="${escapeAttr(ctaHref)}"
+                   style="font-size:13px; color:${ORANGE}; border:2px solid ${ORANGE}; padding:10px 16px; border-radius:6px; text-decoration:none; display:inline-block; font-weight:700; letter-spacing:0.5px; text-transform:uppercase;">
+                  ${escapeHtml(ctaText)}
+                </a>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:16px 24px 6px;">
+              <p style="margin:0; font-size:14px; color:${GRAY}; line-height:1.6;">${escapeHtml(intro)}</p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:0 24px 18px;">
+              <div style="color:${NAVY}; font-weight:800; letter-spacing:0.3px; font-size:16px; border-bottom:1px solid #e2e8f0; padding:10px 0;">
+                NEWS & EVENTS
+              </div>
+              <ul style="padding-left:18px; margin:10px 0 0; color:${TEXT}; font-size:14px; line-height:1.6;">
+                ${bullets}
+              </ul>
+            </td>
+          </tr>
+
+          ${contactCard(primary)}
+          ${coBrokers.map(a=>contactCard(a)).join(`<tr><td style="height:12px; line-height:12px; font-size:0">&nbsp;</td></tr>`)}
+
+          <tr><td style="height:16px; line-height:16px; font-size:0">&nbsp;</td></tr>
+        </table>
+
+        <div style="font-size:11px; color:#cbd5e1; margin-top:12px; text-align:center;">
+          © ${new Date().getFullYear()} Denison Yachting — ${escapeHtml(primary.email)} — Sent via YotCRM
+        </div>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 }
