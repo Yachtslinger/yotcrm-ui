@@ -1,288 +1,266 @@
-// src/app/api/scrape/route.ts
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 
-type Mode = "auto" | "vessel";
+export const runtime = "nodejs";
 
-const UA =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
+/** JSON shape this route returns on success */
+type SpecKey = "LENGTH" | "BEAM" | "DRAFT" | "STATEROOMS" | "ENGINES" | "CAT" | "HORSE POWER";
 
-const clean = (s?: string | null) =>
-  (s ?? "").replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim();
-
-const num = (s?: string | null) => {
-  if (!s) return undefined;
-  const m = s.replace(/,/g, "").match(/(\d+(\.\d+)?)/);
-  return m ? Number(m[1]) : undefined;
+type ScrapeSuccess = {
+  ok: true;
+  source: string;
+  domain: string;
+  headline: string | null;
+  preheader: string | null;
+  price: string | null;
+  location: string | null;
+  hero: string | null;
+  gallery: string[];
+  specs: Partial<Record<SpecKey, string>>;
+  rawText: string; // for debugging / fallback parsing on the client
 };
 
-async function fetchHtml(url: string) {
-  const res = await fetch(url, {
-    headers: {
-      "user-agent": UA,
-      accept: "text/html,application/xhtml+xml",
-      "accept-language": "en-US,en;q=0.9",
-      referer: "https://www.google.com/",
-    },
-    cache: "no-store",
-    redirect: "follow",
-  });
-  if (!res.ok) throw new Error(`Fetch failed ${res.status}: ${res.statusText}`);
-  return await res.text();
+/** JSON shape on failure */
+type ScrapeError = { ok: false; error: string };
+
+type ScrapeResponse = ScrapeSuccess | ScrapeError;
+
+/* -------------------------- helpers -------------------------- */
+
+function clean(s: string | null | undefined): string {
+  return (s || "").replace(/\s+/g, " ").trim();
 }
 
-function titleCase(s: string) {
-  return s
-    .toLowerCase()
-    .split(/[\s-]+/)
-    .filter(Boolean)
-    .map((w) => w[0]?.toUpperCase() + w.slice(1))
-    .join(" ");
-}
-
-function collectImages($: cheerio.CheerioAPI, limit = 24) {
-  const set = new Set<string>();
-  const og = $('meta[property="og:image"]').attr("content");
-  if (og && /^https?:\/\//i.test(og)) set.add(og);
-
-  $("img").each((_, el) => {
-    const src = ($(el).attr("src") || "").trim();
-    const low = src.toLowerCase();
-    if (!/^https?:\/\//i.test(src)) return;
-    if (/\.svg$/i.test(src) || /^data:/i.test(src)) return;
-    // filter obvious noise
-    if (
-      low.includes("flag-") ||
-      low.includes("language-flag") ||
-      low.includes("icon") ||
-      low.includes("arrow") ||
-      low.includes("favicon") ||
-      low.includes("profile-headshot") ||
-      low.includes("logo")
-    ) {
-      return;
-    }
-    // prefer BoatsGroup and main uploads
-    if (low.includes("images.boatsgroup.com") || low.includes("/wp-content/uploads/")) {
-      set.add(src);
-    }
-  });
-
-  // fallback: if nothing, accept any non-svg imgs
-  if (set.size === 0) {
-    $("img").each((_, el) => {
-      const src = ($(el).attr("src") || "").trim();
-      if (/^https?:\/\//i.test(src) && !/\.svg$/i.test(src)) set.add(src);
-    });
-  }
-
-  return Array.from(set).slice(0, limit);
-}
-
-function parseModelFromTitle($: cheerio.CheerioAPI) {
-  const t =
-    clean($("h1").first().text()) ||
-    clean($(".listing-title").first().text()) ||
-    clean($('meta[property="og:title"]').attr("content")) ||
-    clean($("title").first().text());
-
-  // Strip “Yacht for Sale …”
-  return clean(t.replace(/yacht\s+for\s+sale.*$/i, ""));
-}
-
-function parseBuilderFromSlug(url: string) {
+function isHttpUrl(u: string): boolean {
   try {
-    const u = new URL(url);
-    const slug = u.pathname.split("/").filter(Boolean).pop() || ""; // e.g. ducale-120-120-ocean-king-I
-    const toks = slug.split("-").filter(Boolean);
-    // Denison slugs often: <model>-<loa>-<builder words>-<maybe letter or hull id>
-    // Heuristic: find last index of “ocean” then include following token “king” => “Ocean King”
-    const idxOcean = toks.lastIndexOf("ocean");
-    if (idxOcean >= 0 && toks[idxOcean + 1] === "king") {
-      return "Ocean King";
-    }
-    // Otherwise: take last 2 tokens unless the last is a single letter/roman digit
-    const last = toks[toks.length - 1] || "";
-    const isTailToken = last.length <= 2 && /^[ivx]+$/i.test(last); // roman-ish
-    const start = Math.max(0, toks.length - (isTailToken ? 3 : 2));
-    const cand = toks.slice(start).join(" ");
-    return titleCase(cand);
+    const x = new URL(u);
+    return x.protocol === "http:" || x.protocol === "https:";
   } catch {
-    return "";
+    return false;
   }
 }
 
-function findColonValue($: cheerio.CheerioAPI, re: RegExp) {
-  // scan all text nodes that look like "Label: value" and return the value part
-  let found = "";
-  $("li, td, th, p, div, span").each((_, el) => {
-    const txt = clean($(el).text());
-    const low = txt.toLowerCase();
-    if (re.test(low) && txt.includes(":")) {
-      const after = clean(txt.split(":").slice(1).join(":"));
-      if (after) {
-        found = after;
-        return false;
-      }
+/** Try to coerce odd user input into a valid absolute http(s) URL */
+function normalizeInputUrl(raw: string): string | null {
+  let u = clean(raw);
+  if (!u) return null;
+  // Encode if it has odd characters
+  if (!isHttpUrl(u)) {
+    try {
+      u = encodeURI(u);
+    } catch {
+      return null;
+    }
+  }
+  if (!isHttpUrl(u)) return null;
+  return u;
+}
+
+/** Safely absolutize an <img src> with respect to base URL */
+function absolutize(src: string | null | undefined, baseUrl: string): string | null {
+  try {
+    const s = clean(src);
+    if (!s) return null;
+    if (/^(data:|javascript:|about:|mailto:)/i.test(s)) return null;
+    if (/^https?:\/\//i.test(s)) return s;
+    if (/^\/\//.test(s)) {
+      const b = new URL(baseUrl);
+      return `${b.protocol}${s}`;
+    }
+    return new URL(s, baseUrl).toString();
+  } catch {
+    return null;
+  }
+}
+
+/** Extract first non-empty sentences as a preheader-like string */
+function firstSentence(text: string): string | null {
+  const t = clean(text);
+  if (!t) return null;
+  const m = t.match(/(.+?[.!?])(\s|$)/);
+  return clean(m?.[1] || t.slice(0, 160));
+}
+
+/** Price finder like $1,234,567 or USD variants */
+function findPrice(text: string): string | null {
+  const m = text.match(/\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\bUSD\s?\d[\d,\.]*/i);
+  return m ? clean(m[0]) : null;
+}
+
+/** Location finder: "Fort Lauderdale, FL" or "Location: ..." */
+function findLocation(text: string): string | null {
+  const m =
+    text.match(/Location[:\s-]*([A-Za-z\s]+,\s*[A-Za-z\.]+)/i) ||
+    text.match(/\b([A-Z][a-z]+(?:\s[A-Za-z]+){0,2},\s?[A-Z]{2,})\b/);
+  return m ? clean(m[1] || m[0]) : null;
+}
+
+const SPEC_KEY_MATCHERS: Array<{ key: SpecKey; regex: RegExp }> = [
+  { key: "LENGTH", regex: /^LENGTH\b/i },
+  { key: "BEAM", regex: /^BEAM\b/i },
+  { key: "DRAFT", regex: /^DRAFT\b/i },
+  { key: "STATEROOMS", regex: /^STATEROOMS?\b/i },
+  { key: "ENGINES", regex: /^ENGINES?\b/i },
+  { key: "CAT", regex: /^CAT(?:EGORY)?\b/i },
+  { key: "HORSE POWER", regex: /\bHORSE\s*POWER\b|\bHORSEPOWER\b|^POWER\b|\bHP\b/i },
+];
+
+function detectSpecKey(label: string): SpecKey | null {
+  const normalized = clean(label).toUpperCase();
+  if (!normalized) return null;
+  for (const matcher of SPEC_KEY_MATCHERS) {
+    if (matcher.regex.test(normalized)) return matcher.key;
+  }
+  return null;
+}
+
+/** Pull common specs (case-insensitive) from dt/dd, li, table, or inline "Label: Value" */
+function extractSpecs($: cheerio.CheerioAPI): Partial<Record<SpecKey, string>> {
+  const specMap: Partial<Record<SpecKey, string>> = {};
+
+  const assignSpec = (label: string, value: string) => {
+    const key = detectSpecKey(label);
+    if (!key || !value) return;
+    specMap[key] = clean(value);
+  };
+
+  // 1) dt/dd or th/td style
+  $("dt, th").each((_, el) => {
+    const kRaw = clean($(el).text());
+    const vRaw = clean($(el).next("dd, td").text());
+    if (!kRaw || !vRaw) return;
+    assignSpec(kRaw, vRaw);
+  });
+
+  // 2) li text: "Length: 120'"
+  $("li").each((_, el) => {
+    const t = clean($(el).text());
+    const m = t.match(/^([^:]+)\s*[:\-–]\s*(.+)$/);
+    if (m) {
+      assignSpec(m[1], m[2]);
     }
   });
-  return found;
+
+  // 3) table rows: "Length" in first cell
+  $("tr").each((_, tr) => {
+    const first = clean($(tr).find("th,td").first().text());
+    const second = clean($(tr).find("th,td").eq(1).text());
+    if (!first || !second) return;
+    assignSpec(first, second);
+  });
+
+  return specMap;
 }
 
-function nextValueOfLabel($: cheerio.CheerioAPI, re: RegExp) {
-  // table/list fallback: find a label cell/item and take its next sibling item
-  const pools = $("table, ul, ol").find("td,th,li");
-  for (let i = 0; i < pools.length; i++) {
-    const el = pools[i];
-    const txt = clean($(el).text()).toLowerCase();
-    if (re.test(txt)) {
-      const td = $(el);
-      let candidate = "";
-      if (el.tagName === "td" || el.tagName === "th") {
-        candidate = clean(td.next().text());
-      } else {
-        candidate = clean(td.next("li").text());
-      }
-      if (candidate) return candidate;
-    }
+/** Collect image candidates with preference for common gallery containers */
+function collectImages($: cheerio.CheerioAPI, baseUrl: string): string[] {
+  const out = new Set<string>();
+
+  // Prefer gallery-like containers
+  const selectors = [
+    ".gallery img[src]",
+    ".carousel img[src]",
+    ".wp-block-gallery img[src]",
+    ".wp-block-image img[src]",
+    "figure img[src]",
+    "img[src]",
+  ];
+
+  selectors.forEach((sel) => {
+    $(sel).each((_, img) => {
+      const abs = absolutize($(img).attr("src") || "", baseUrl);
+      if (!abs) return;
+      // Filter out tiny icons/logos
+      if (/\b(icon|logo|avatar|badge|spinner)\b/i.test(abs)) return;
+      out.add(abs);
+    });
+  });
+
+  return Array.from(out);
+}
+
+/* ---------------------- Denison-specific scrape ---------------------- */
+
+async function scrapeDenison(url: string): Promise<ScrapeSuccess> {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`Fetch failed (${res.status})`);
   }
-  return "";
-}
+  const html = await res.text();
+  const $ = cheerio.load(html);
 
-function parseSpeedKn(raw: string) {
-  const v = clean(raw);
-  const m = v.match(/(\d+(?:\.\d+)?)\s*(kts?|knots?)/i);
-  return m ? Number(m[1]) : num(v);
-}
+  // Headline
+  const headline =
+    clean($('meta[property="og:title"]').attr("content")) ||
+    clean($("h1").first().text()) ||
+    clean($("title").first().text()) ||
+    null;
 
-function parseRangeNm(raw: string) {
-  const v = clean(raw);
-  const m = v.match(/(\d+(?:,\d{3})*(?:\.\d+)?)\s*(nm|nautical miles?)/i);
-  return m ? Number(m[1].replace(/,/g, "")) : num(v);
-}
+  // Preheader
+  const preheader =
+    clean($('meta[name="description"]').attr("content")) ||
+    clean($('meta[property="og:description"]').attr("content")) ||
+    firstSentence($("p").first().text()) ||
+    null;
 
-/** robust Denison vessel parse */
-function parseDenisonVessel($: cheerio.CheerioAPI, url: string) {
-  const modelFromTitle = parseModelFromTitle($);
-  const builderFromSlug = parseBuilderFromSlug(url);
+  const rawText = clean($("body").text());
 
-  // year & LOA from title, if present
-  const year = num(modelFromTitle.match(/\b(19|20)\d{2}\b/)?.[0] || "");
-  const loaFt =
-    num(modelFromTitle.match(/(\d{2,3})\s*['′]/)?.[1] || "") ||
-    num(nextValueOfLabel($, /\b(length|loa)\b/));
+  // Price & location
+  const price = findPrice(rawText);
+  const location = findLocation(rawText);
 
-  // prefer colon forms “Hull Material: …”
-  const hullMat =
-    findColonValue($, /\bhull\s*material\b/) ||
-    findColonValue($, /\bconstruction\b/) ||
-    nextValueOfLabel($, /\bhull\s*material|construction\b/);
+  // Images
+  const gallery = collectImages($, url);
+  const hero =
+    clean($('meta[property="og:image"]').attr("content")) && isHttpUrl(String($('meta[property="og:image"]').attr("content")))
+      ? String($('meta[property="og:image"]').attr("content"))
+      : gallery[0] || null;
 
-  const guestsRaw =
-    findColonValue($, /\bguests?\b/) || nextValueOfLabel($, /\bguests?\b/);
-  const cabinsRaw =
-    findColonValue($, /\bcabins?\b/) || nextValueOfLabel($, /\bcabins?\b/);
-
-  const speedRaw =
-    findColonValue($, /(max|top)\s*speed|cruising\s*speed|\bspeed\b/) ||
-    nextValueOfLabel($, /(max|top)\s*speed|cruising\s*speed|\bspeed\b/);
-
-  const rangeRaw =
-    findColonValue($, /\b(range|cruising\s*range)\b/) ||
-    nextValueOfLabel($, /\b(range|cruising\s*range)\b/);
-
-  let location =
-    findColonValue($, /\blocation\b/) ||
-    clean($(".listing-location").first().text());
-  if (/^engines?:/i.test(location)) location = ""; // drop bad pick
-
-  const priceRaw =
-    findColonValue($, /\b(price|asking)\b/) ||
-    nextValueOfLabel($, /\b(price|asking)\b/);
-
-  const photos = collectImages($);
+  // Specs
+  const specs = extractSpecs($);
 
   return {
-    name: modelFromTitle || "",
-    builder: builderFromSlug || (modelFromTitle.includes("Ocean King") ? "Ocean King" : ""),
-    model: modelFromTitle || "",
-    year: year || undefined,
-    loaFt: loaFt || undefined,
-    material: hullMat || undefined,
-    guests: num(guestsRaw),
-    cabins: num(cabinsRaw),
-    speedKn: parseSpeedKn(speedRaw),
-    rangeNm: parseRangeNm(rangeRaw),
-    priceUSD: num(priceRaw),
-    location: location || undefined,
-    status: "Active",
-    listingUrl: url,
-    photos,
-    notes: "",
+    ok: true,
+    source: url,
+    domain: new URL(url).hostname,
+    headline,
+    preheader,
+    price: price || null,
+    location: location || null,
+    hero,
+    gallery,
+    specs,
+    rawText,
   };
 }
 
-export async function POST(req: Request) {
+/* ------------------------------ route ------------------------------ */
+
+export async function POST(req: NextRequest): Promise<NextResponse<ScrapeResponse>> {
   try {
-    const body = await req.json().catch(() => ({}));
-    const url = String(body?.url || "");
-    const mode = (body?.mode || "auto") as Mode;
-
-    if (!/^https?:\/\//i.test(url)) {
-      return NextResponse.json({ error: "Missing or invalid url" }, { status: 400 });
+    const ct = req.headers.get("content-type") || "";
+    if (!ct.includes("application/json")) {
+      return NextResponse.json({ ok: false, error: "Use JSON body: { url: string }" }, { status: 400 });
     }
 
-    const html = await fetchHtml(url);
-    const $ = cheerio.load(html);
-
-    if (mode === "vessel") {
-      if (url.includes("denisonyachtsales.com")) {
-        const data = parseDenisonVessel($, url);
-        return NextResponse.json({ ok: true, ...data });
-      }
-      // generic fallback
-      const title = clean($("h1").first().text()) || clean($('meta[property="og:title"]').attr("content"));
-      const photos = collectImages($);
-      return NextResponse.json({
-        ok: true,
-        name: title || "",
-        builder: "",
-        model: "",
-        listingUrl: url,
-        photos,
-        status: "Active",
-      });
+    const body = await req.json();
+    const normalized = normalizeInputUrl(String(body?.url || ""));
+    if (!normalized) {
+      return NextResponse.json({ ok: false, error: "Invalid URL" }, { status: 400 });
     }
 
-    // generic page scrape (campaign builder)
-    const title =
-      clean($("h1").first().text()) ||
-      clean($(".listing-title").first().text()) ||
-      clean($('meta[property="og:title"]').attr("content")) ||
-      clean($("title").first().text());
-    const desc =
-      clean($('meta[property="og:description"]').attr("content")) ||
-      clean($(".intro, .description, .content p, article p").first().text());
-    const heroUrl = $('meta[property="og:image"]').attr("content") || "";
-    const gallery = collectImages($, 10);
+    const host = new URL(normalized).hostname.toLowerCase();
+    const allowed = ["denisonyachting.com", "www.denisonyachting.com", "denisonyachtsales.com", "www.denisonyachtsales.com"];
+    if (!allowed.some((h) => host.endsWith(h))) {
+      return NextResponse.json(
+        { ok: false, error: `Unsupported domain: ${host}. Only Denison Yachting URLs are allowed.` },
+        { status: 400 }
+      );
+    }
 
-    return NextResponse.json({
-      ok: true,
-      subject: title,
-      preheader: desc?.slice(0, 140) || "",
-      heroUrl,
-      galleryUrls: gallery,
-      listingUrl: url,
-    });
-  } catch (e: any) {
-    return NextResponse.json({ error: String(e?.message || e) }, { status: 500 });
+    const result = await scrapeDenison(normalized);
+    return NextResponse.json(result);
+  } catch (err: any) {
+    return NextResponse.json({ ok: false, error: err?.message || "Unexpected error" }, { status: 500 });
   }
-}
-
-export async function GET() {
-  return NextResponse.json({ ok: false, detail: "Use POST" }, { status: 405 });
 }
