@@ -1,529 +1,500 @@
-// src/app/campaigns/page.tsx
 "use client";
 
 import * as React from "react";
+import PageShell from "../components/PageShell";
 
-/**
- * Denison-styled Campaign Builder (clean rebuild)
- * - Container width: 675px (matches your design)
- * - Full-width navy header bar inside the container
- * - Centered Denison header image from /public/email/denison-header-675.png
- * - Square broker photos (100x100)
- * - Simple form to edit fields; Copy/Download HTML
- */
-
-type Spec = { label: string; value: string };
-type Agent = { name: string; title: string; email: string; cell: string; office: string; photo: string };
-
-const NAVY = "#0b2a55";
-const ORANGE = "#e57b2e";
-const TEXT = "#0f172a";
-const GRAY = "#4b5563";
-const LABEL = "#cbd5e1";
-const CONTAINER = 675;
-
-// LOCAL banner (place your PNG at /public/email/denison-header-675.png)
-const BANNER_LOCAL = "/email/denison-header-675.png";
-
-/* --------------------------- Utilities --------------------------- */
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-function escapeAttr(s: string): string {
-  return s.replace(/"/g, "&quot;");
-}
-function nowStamp(): string {
-  const d = new Date();
-  const two = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;
-}
-
-/* --------------------- Default agents (square photos) ------------------ */
-const DEFAULT_ME: Agent = {
-  name: "Will Noftsinger",
-  title: "Yacht Broker, Denison Yachting",
-  email: "WN@DenisonYachting.com",
-  cell: "850.461.3342",
-  office: "954.763.3971",
-  photo: "https://cdn.denisonyachtsales.com/wp-content/uploads/2019/11/Denison-Member-Website-Profile-Headshot-46-Will-Noftsinger.webp",
-};
-const PETER: Agent = {
-  name: "Peter Quintal",
-  title: "Listing Agent, Denison Yachting",
-  email: "peter@denisonyachting.com",
-  cell: "+1 (954) 817-5662",
-  office: "954.763.3971",
-  photo: "https://cdn.denisonyachtsales.com/wp-content/uploads/2019/11/Denison-Member-Website-Profile-Headshot-46-Will-Noftsinger.webp".replace(
-    "Will-Noftsinger",
-    "Peter-Quintal"
-  ),
-};
-const PAOLO: Agent = {
-  name: "Paolo Ameglio",
-  title: "Listing Agent, Denison Yachting",
-  email: "pga@denisonyachting.com",
-  cell: "(786) 251-2588",
-  office: "954.763.3971",
-  photo: "https://cdn.denisonyachtsales.com/wp-content/uploads/2019/11/Denison-Member-Website-Profile-Headshot-46-Will-Noftsinger.webp".replace(
-    "Will-Noftsinger",
-    "Paolo-Ameglio"
-  ),
+type PdfFile = {
+  name: string;
+  size: number;
+  downloadUrl: string;
 };
 
-export default function CampaignsPage(): React.ReactElement {
-  /* Core fields */
-  const [bannerUrl] = React.useState<string>(BANNER_LOCAL); // hard-locked to local asset
-  const [subject, setSubject] = React.useState("35m (115') AvA Yachts 2022 — Back in Monaco");
-  const [preheader, setPreheader] = React.useState("Full photo set, specs, and private showings.");
-  const [headline, setHeadline] = React.useState("35m (115') AvA Yachts 2022");
-  const [location, setLocation] = React.useState("MONACO");
-  const [subBanner, setSubBanner] = React.useState("Back in Monaco After a Successful Charter Season");
-  const [ctaText, setCtaText] = React.useState("HIGHLIGHT VIDEO");
-  const [ctaHref, setCtaHref] = React.useState("https://www.denisonyachtsales.com/yachts-for-sale/ducale-120-120-ocean-king-I");
-  const [price, setPrice] = React.useState("€10,450,000");
-  const [heroUrl, setHeroUrl] = React.useState(
-    "https://images.boatsgroup.com/resize/1/54/57/2027-ocean-king-ducale-120-power-9685457-20250217074103462-1_XLARGE.jpg?w=1500&h=900&format=webp"
-  );
-  const [intro, setIntro] = React.useState(
-    "M/Y INFINITY NINE is the hull #2 of the Kando 110 model, extended to 35m. Delivered in 2022 by AvA Yachts with a steel hull and aluminium superstructure, her incredible range is 6000 miles. Interior features great volumes and 12 guests in 6 luxury cabins."
-  );
+type Listing = {
+  name: string;
+  metadata: Record<string, unknown>;
+  pdfs: PdfFile[];
+  created: number;
+};
 
-  /* Optional gallery & specs & features */
-  const [galleryText, setGalleryText] = React.useState(
-    [
-      "https://images.boatsgroup.com/resize/1/54/57/2027-ocean-king-ducale-120-power-9685457-20250217074109803-1_XLARGE.jpg?w=900&h=600&format=webp",
-      "https://images.boatsgroup.com/resize/1/54/57/2027-ocean-king-ducale-120-power-9685457-20250217074114935-1_XLARGE.jpg?w=900&h=600&format=webp",
-    ].join("\n")
-  );
-  const gallery = React.useMemo(
-    () => galleryText.split("\n").map(s => s.trim()).filter(Boolean).slice(0, 2),
-    [galleryText]
-  );
+type GenerateResult = {
+  ok: boolean;
+  listing?: string;
+  metadata?: Record<string, unknown>;
+  pdfs?: PdfFile[];
+  error?: string;
+};
 
-  const [specs, setSpecs] = React.useState<Spec[]>([
-    { label: "LENGTH", value: "35m (115')" },
-    { label: "BEAM", value: "25' 7''" },
-    { label: "DRAFT", value: "7' 10''" },
-    { label: "STATEROOMS", value: "6 Staterooms" },
-    { label: "ENGINES", value: "Volvo Penta" },
-    { label: "POWER", value: "650 hp" },
-  ]);
+type ActionTarget = {
+  url: string;
+  name: string;
+  title: string;
+  listing: string; // listing dir name for delete
+};
 
-  const [featuresText, setFeaturesText] = React.useState(
-    [
-      "Amazing explorer with 333 GT and unmatched 6000-mile range",
-      "6 guest cabins, including 2 full-beam masters",
-      "Bureau Veritas classification “Unrestricted”",
-      "Powered by 2x Volvo Penta D16C-DMH 650HP",
-      "Loaded with many options and toys",
-    ].join("\n")
-  );
+export default function VesselsPage(): React.ReactElement {
+  const [url, setUrl] = React.useState("");
+  const [broker, setBroker] = React.useState<"will" | "paolo" | "both">("will");
+  const [logo, setLogo] = React.useState<"slinger" | "denison">("slinger");
+  const [generating, setGenerating] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [result, setResult] = React.useState<GenerateResult | null>(null);
+  const [listings, setListings] = React.useState<Listing[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [action, setAction] = React.useState<ActionTarget | null>(null);
+  const [deleting, setDeleting] = React.useState(false);
+  const [confirmDelete, setConfirmDelete] = React.useState<{ listing: string; title: string } | null>(null);
+  const [viewingPdf, setViewingPdf] = React.useState<{ url: string; name: string; title: string } | null>(null);
 
-  /* Agents */
-  const [me, setMe] = React.useState<Agent>(DEFAULT_ME);
-  const [usePeter, setUsePeter] = React.useState(false);
-  const [usePaolo, setUsePaolo] = React.useState(false);
-  const coBrokers = React.useMemo<Agent[]>(
-    () => [usePeter ? PETER : null, usePaolo ? PAOLO : null].filter(Boolean) as Agent[],
-    [usePeter, usePaolo]
-  );
+  React.useEffect(() => {
+    refreshListings();
+  }, []);
 
-  /* Build HTML */
-  const html = React.useMemo(
-    () =>
-      buildListingHtml({
-        subject,
-        preheader,
-        bannerUrl,
-        heroUrl,
-        subBanner,
-        headline,
-        location,
-        ctaText,
-        ctaHref,
-        price,
-        intro,
-        gallery,
-        specs,
-        featuresText,
-        primary: me,
-        coBrokers,
-      }),
-    [
-      subject, preheader, bannerUrl, heroUrl, subBanner, headline, location, ctaText, ctaHref,
-      price, intro, galleryText, specs, featuresText, me, coBrokers
-    ]
-  );
-
-  /* Actions */
-  function copyHtml() {
-    navigator.clipboard.writeText(html).then(
-      () => alert("HTML copied"),
-      () => alert("Copy failed (permissions)")
-    );
-  }
-  function downloadHtml() {
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "campaign.html";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+  function refreshListings() {
+    fetch("/api/pdf")
+      .then(r => r.json())
+      .then(data => { if (data.ok) setListings(data.listings || []); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }
 
-  /* UI */
+  async function handleGenerate() {
+    if (!url.trim()) return;
+    setGenerating(true);
+    setError("");
+    setResult(null);
+    try {
+      const res = await fetch("/api/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: url.trim(), broker, logo }),
+      });
+      const data: GenerateResult = await res.json();
+      if (data.ok) {
+        setResult(data);
+        setUrl("");
+        refreshListings();
+      } else {
+        setError(data.error || "Generation failed");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Network error");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  function formatSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function formatDate(ms: number): string {
+    return new Date(ms).toLocaleDateString("en-US", {
+      month: "short", day: "numeric", year: "numeric",
+    });
+  }
+
+  function getDisplayName(listing: Listing): string {
+    const m = listing.metadata;
+    if (m.headline) return String(m.headline);
+    return listing.name.replace(/-/g, " ").replace(/^\d{4}\s+/, "");
+  }
+
+  function openPdf(pdfUrl: string, name: string, title: string) {
+    // Show full-screen iframe overlay with Done button
+    setViewingPdf({ url: pdfUrl, name, title });
+  }
+
+  async function sharePdf(pdfUrl: string, name: string, title?: string) {
+    try {
+      const res = await fetch(pdfUrl);
+      const blob = await res.blob();
+      const file = new File([blob], name, { type: "application/pdf" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file] });
+        return;
+      }
+      if (navigator.share) {
+        await navigator.share({ title: title || name, url: window.location.origin + pdfUrl });
+        return;
+      }
+      await navigator.clipboard.writeText(window.location.origin + pdfUrl);
+    } catch { /* cancelled */ }
+  }
+
+  async function deletePdf(listingName: string, pdfName?: string) {
+    setDeleting(true);
+    try {
+      const res = await fetch("/api/pdf", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ listing: listingName, pdf: pdfName }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        refreshListings();
+        setAction(null);
+        setConfirmDelete(null);
+      }
+    } catch { /* ignore */ }
+    finally { setDeleting(false); }
+  }
+
+  async function deleteListing(listingName: string) {
+    setDeleting(true);
+    try {
+      const res = await fetch("/api/pdf", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ listing: listingName }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        refreshListings();
+        setConfirmDelete(null);
+      }
+    } catch { /* ignore */ }
+    finally { setDeleting(false); }
+  }
+
+  function brokerLabel(pdfName: string): string {
+    if (pdfName.includes("-both")) return "Both";
+    if (pdfName.includes("-paolo")) return "Paolo";
+    return "Will";
+  }
+
   return (
-    <main style={{ minHeight: "100dvh", background: "#f8fafc", padding: 24, display: "grid", gap: 16 }}>
-      {/* Config panel */}
-      <section
-        style={{
-          background: "#fff",
-          border: "1px solid #e2e8f0",
-          borderRadius: 12,
-          padding: 12,
-          maxWidth: 980,
-          margin: "0 auto",
-          display: "grid",
-          gap: 12,
-        }}
-      >
-        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Campaign Builder (Clean)</h2>
+    <PageShell
+      title="PDF Generator"
+      subtitle="Generate branded listing PDFs from YachtWorld URLs"
+    >
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <Field label="Subject" value={subject} onChange={setSubject} />
-          <Field label="Preheader" value={preheader} onChange={setPreheader} />
-          <Field label="Headline" value={headline} onChange={setHeadline} />
-          <Field label="Location" value={location} onChange={setLocation} />
-          <Field label="Orange Sub-Banner" value={subBanner} onChange={setSubBanner} />
-          <Field label="CTA Text" value={ctaText} onChange={setCtaText} />
-          <Field label="CTA Link" value={ctaHref} onChange={setCtaHref} />
-          <Field label="Price (optional)" value={price} onChange={setPrice} />
+      {/* Generator Card */}
+      <div className="card-elevated p-5 mb-6">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-8 h-8 rounded-xl bg-[var(--brass-500)] text-white grid place-items-center text-sm">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>
+          </div>
+          <div className="card-section-title">Generate New PDF</div>
         </div>
 
-        <Field label="Hero URL" value={heroUrl} onChange={setHeroUrl} />
-        <TextArea label="Intro paragraph" rows={5} value={intro} onChange={setIntro} />
-        <TextArea label="Gallery (up to 2, one per line)" rows={3} value={galleryText} onChange={setGalleryText} />
-
-        <h3 style={h3()}>Specs (2 rows × 3 cols)</h3>
-        <div style={{ display: "grid", gap: 8 }}>
-          {specs.map((s, i) => (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8 }}>
-              <input
-                value={s.label}
-                onChange={(e) => setSpecs(prev => prev.map((x, k) => k === i ? { ...x, label: e.target.value } : x))}
-                placeholder="LABEL (UPPERCASE)"
-                style={input()}
-              />
-              <input
-                value={s.value}
-                onChange={(e) => setSpecs(prev => prev.map((x, k) => k === i ? { ...x, value: e.target.value } : x))}
-                placeholder="Value"
-                style={input()}
-              />
-              <button onClick={() => setSpecs(prev => prev.filter((_, k) => k !== i))} style={btn("outline")}>Del</button>
-            </div>
-          ))}
-          <button onClick={() => setSpecs(prev => [...prev, { label: "", value: "" }])} style={btn("outline")}>Add spec</button>
+        <div className="mb-3">
+          <label className="form-label">YachtWorld Listing URL</label>
+          <input
+            value={url}
+            onChange={e => setUrl(e.target.value)}
+            placeholder="https://www.yachtworld.com/yacht/..."
+            className="form-input"
+            disabled={generating}
+          />
         </div>
 
-        <TextArea label="Key features (one per line)" rows={6} value={featuresText} onChange={setFeaturesText} />
-
-        <h3 style={h3()}>Agents</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
-          <Field label="Your Name" value={me.name} onChange={(v) => setMe({ ...me, name: v })} />
-          <Field label="Your Title" value={me.title} onChange={(v) => setMe({ ...me, title: v })} />
-          <Field label="Your Email" value={me.email} onChange={(v) => setMe({ ...me, email: v })} />
-          <Field label="Your Cell" value={me.cell} onChange={(v) => setMe({ ...me, cell: v })} />
-          <Field label="Your Office" value={me.office} onChange={(v) => setMe({ ...me, office: v })} />
-          <Field label="Your Photo URL" value={me.photo} onChange={(v) => setMe({ ...me, photo: v })} />
+        <div className="mb-4">
+          <label className="form-label">Broker Signature</label>
+          <div className="flex gap-2">
+            {([
+              { value: "will", label: "Will", sub: "Noftsinger" },
+              { value: "paolo", label: "Paolo", sub: "Ameglio" },
+              { value: "both", label: "Both", sub: "Side by side" },
+            ] as const).map(b => (
+              <button
+                key={b.value}
+                onClick={() => setBroker(b.value)}
+                disabled={generating}
+                className={`flex-1 px-3 py-2 rounded-xl border text-left transition-all ${
+                  broker === b.value
+                    ? "bg-[var(--navy-800)] dark:bg-[var(--brass-500)] text-white dark:text-[var(--navy-900)] border-transparent"
+                    : "bg-[var(--card)] text-[var(--navy-600)] dark:text-[var(--navy-300)] border-[var(--border)] hover:border-[var(--navy-300)]"
+                }`}
+              >
+                <div className="text-sm font-semibold">{b.label}</div>
+                <div className="text-xs opacity-60">{b.sub}</div>
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12, alignItems: "center" }}>
-          <label style={{ fontSize: 14, color: TEXT }}>
-            <input type="checkbox" checked={usePeter} onChange={(e) => setUsePeter(e.target.checked)} style={{ marginRight: 8 }} />
-            Include: Peter Quintal
-          </label>
-          <label style={{ fontSize: 14, color: TEXT }}>
-            <input type="checkbox" checked={usePaolo} onChange={(e) => setUsePaolo(e.target.checked)} style={{ marginRight: 8 }} />
-            Include: Paolo Ameglio
-          </label>
+        <div className="mb-4">
+          <label className="form-label">Logo Branding</label>
+          <div className="flex gap-2">
+            {([
+              { value: "slinger", label: "Yachtslinger", sub: "Slinger logo" },
+              { value: "denison", label: "Denison", sub: "Denison logo" },
+            ] as const).map(l => (
+              <button
+                key={l.value}
+                onClick={() => setLogo(l.value)}
+                disabled={generating}
+                className={`flex-1 px-3 py-2 rounded-xl border text-left transition-all ${
+                  logo === l.value
+                    ? "bg-[var(--navy-800)] dark:bg-[var(--brass-500)] text-white dark:text-[var(--navy-900)] border-transparent"
+                    : "bg-[var(--card)] text-[var(--navy-600)] dark:text-[var(--navy-300)] border-[var(--border)] hover:border-[var(--navy-300)]"
+                }`}
+              >
+                <div className="text-sm font-semibold">{l.label}</div>
+                <div className="text-xs opacity-60">{l.sub}</div>
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={copyHtml} style={btn("solid")}>Copy HTML</button>
-          <button onClick={downloadHtml} style={btn("outline")}>Download HTML</button>
+        <button
+          onClick={handleGenerate}
+          disabled={generating || !url.trim()}
+          className="w-full py-3 rounded-xl font-semibold text-white text-sm disabled:opacity-50 bg-orange-500 hover:bg-orange-600 active:scale-[0.98] transition-all"
+        >
+          {generating ? (
+            <span className="flex items-center justify-center gap-2">
+              <span className="animate-spin">⏳</span> Generating... (30-60s)
+            </span>
+          ) : "Generate Branded PDF"}
+        </button>
+
+        {error && (
+          <div className="mt-3 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-400">
+            ❌ {error}
+          </div>
+        )}
+
+        {result?.ok && result.pdfs && (
+          <div className="mt-3 p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+            <div className="text-sm font-semibold text-green-800 dark:text-green-400 mb-2">✅ PDF Generated!</div>
+            {result.pdfs.map(pdf => (
+              <button
+                key={pdf.name}
+                onClick={() => setAction({ url: pdf.downloadUrl, name: pdf.name, title: result.listing || pdf.name, listing: result.listing || "" })}
+                className="w-full flex items-center justify-between p-3 rounded-lg bg-white dark:bg-neutral-800 border border-green-200 dark:border-green-800 text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">📄</span>
+                  <div>
+                    <div className="text-sm font-medium dark:text-white">{pdf.name}</div>
+                    <div className="text-xs text-gray-400">{formatSize(pdf.size)}</div>
+                  </div>
+                </div>
+                <span className="text-xs text-green-600 dark:text-green-400 font-medium">Tap to open ›</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* PDF Library */}
+      <div className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-2xl p-5 shadow-sm">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-8 h-8 rounded-xl bg-blue-500 text-white grid place-items-center text-sm">📚</div>
+          <div>
+            <div className="font-bold text-sm dark:text-white">PDF Library</div>
+            <div className="text-xs text-gray-400">{listings.length} listing{listings.length !== 1 ? "s" : ""}</div>
+          </div>
         </div>
-      </section>
 
-      {/* Preview */}
-      <section
-        style={{
-          background: "#fff",
-          border: "1px solid #e2e8f0",
-          borderRadius: 12,
-          padding: 12,
-          maxWidth: 980,
-          margin: "0 auto",
-        }}
-      >
-        <h3 style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700 }}>Preview</h3>
-        <iframe
-          title="email-preview"
-          srcDoc={html}
-          style={{ width: "100%", height: "90vh", border: "1px solid #e2e8f0", borderRadius: 8 }}
-        />
-        <div style={{ fontSize: 12, color: "#64748b", marginTop: 8 }}>Generated {nowStamp()}</div>
-      </section>
-    </main>
-  );
-}
-
-/* -------------------- Small UI bits (builder panel) -------------------- */
-function input(extra?: Partial<React.CSSProperties>): React.CSSProperties {
-  return { width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 14, ...extra };
-}
-function btn(kind: "solid" | "outline"): React.CSSProperties {
-  if (kind === "solid") return { padding: "8px 12px", borderRadius: 8, border: `1px solid ${ORANGE}`, background: ORANGE, color: "#fff", cursor: "pointer", fontSize: 13 };
-  return { padding: "8px 12px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", color: "#0f172a", cursor: "pointer", fontSize: 13 };
-}
-function h3(): React.CSSProperties { return { margin: "12px 0 8px", fontSize: 14, fontWeight: 700 }; }
-function Field({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }): React.ReactElement {
-  return (
-    <label style={{ fontSize: 12, color: "#64748b" }}>
-      {label}
-      <input value={value} onChange={(e) => onChange(e.target.value)} style={input()} />
-    </label>
-  );
-}
-function TextArea({ label, value, onChange, rows = 4 }: { label: string; value: string; onChange: (v: string) => void; rows?: number }): React.ReactElement {
-  return (
-    <label style={{ fontSize: 12, color: "#64748b" }}>
-      {label}
-      <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={rows} style={{ ...input(), resize: "vertical" as const }} />
-    </label>
-  );
-}
-
-/* -------------------------- EMAIL GENERATOR --------------------------- */
-function buildListingHtml(opts: {
-  subject: string; preheader: string; bannerUrl: string; heroUrl: string; subBanner: string;
-  headline: string; location: string; ctaText: string; ctaHref: string; price?: string;
-  intro: string; gallery: string[]; specs: Spec[]; featuresText: string; primary: Agent; coBrokers: Agent[];
-}): string {
-  const {
-    subject, preheader, bannerUrl, heroUrl, subBanner, headline, location,
-    ctaText, ctaHref, price, intro, gallery, specs, featuresText, primary, coBrokers
-  } = opts;
-
-  const r1 = specs.slice(0, 3);
-  const r2 = specs.slice(3, 6);
-
-  const specRow = (row: Spec[]) => `
-    <tr>
-      ${row
-        .map(
-          (s) => `
-        <td width="33.33%" style="padding:10px 0; text-align:left;">
-          <div style="color:${LABEL}; font-size:12px; letter-spacing:0.6px; text-transform:uppercase;">${escapeHtml(s.label)}</div>
-          <div style="color:#ffffff; font-size:14px; font-weight:700;">${escapeHtml(s.value)}</div>
-        </td>`
-        )
-        .join("")}
-    </tr>`;
-
-  const featuresLis = featuresText
-    .split("\n")
-    .map((t) => t.trim())
-    .filter(Boolean)
-    .map((t) => `<li>${escapeHtml(t)}</li>`)
-    .join("");
-
-  const galleryTwoUp =
-    gallery.length > 0
-      ? `
-    <tr>
-      <td style="padding:0 24px 20px;">
-        <table role="presentation" width="100%">
-          <tr>
-            ${gallery
-              .slice(0, 2)
-              .map(
-                (src) => `
-              <td width="50%" style="padding:4px;">
-                <img src="${escapeAttr(src)}" width="100%" style="display:block; width:100%; height:auto; border-radius:6px;" />
-              </td>`
-              )
-              .join("")}
-          </tr>
-        </table>
-      </td>
-    </tr>`
-      : "";
-
-  const coBrokerCards =
-    coBrokers.length > 0
-      ? coBrokers
-          .map((a) => contactCard(a))
-          .join(`<tr><td style="height:12px; line-height:12px; font-size:0">&nbsp;</td></tr>`)
-      : "";
-
-  return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8" />
-<title>${escapeHtml(subject)}</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<style>
-  img { border:0; line-height:0; outline:none; text-decoration:none; }
-  table { border-collapse:collapse; }
-  .preheader { display:none !important; visibility:hidden; opacity:0; color:transparent; height:0; width:0; overflow:hidden; mso-hide:all; }
-</style>
-</head>
-<body style="margin:0; background:${NAVY};">
-  <div class="preheader">${escapeHtml(preheader)}</div>
-
-  <!-- Full-width navy background -->
-  <table role="presentation" width="100%" bgcolor="${NAVY}" style="background:${NAVY}; margin:0; padding:0;">
-    <tr>
-      <td align="center" style="padding:0; margin:0;">
-        <!-- Fixed container at 675px -->
-        <table role="presentation" width="${CONTAINER}" style="width:${CONTAINER}px; margin:0; padding:0;">
-          <!-- HEADER BAR (navy) with orange rule and centered logo -->
-          <tr>
-            <td align="center" style="background:${NAVY}; border-top:3px solid ${ORANGE}; padding:14px 0;">
-              <img src="${escapeAttr(bannerUrl)}"
-                   width="260"
-                   style="display:block; width:260px; max-width:${CONTAINER}px; height:auto;" />
-            </td>
-          </tr>
-
-          <!-- HERO IMAGE (stretches to container width) -->
-          <tr>
-            <td>
-              <img src="${escapeAttr(heroUrl)}" width="${CONTAINER}" style="display:block; width:${CONTAINER}px; max-width:100%; height:auto;" />
-            </td>
-          </tr>
-
-          <!-- ORANGE STRIP -->
-          <tr>
-            <td align="center" style="background:${ORANGE}; color:#ffffff; font-weight:700; font-size:14px; padding:10px 12px; letter-spacing:0.3px;">
-              ${escapeHtml(subBanner)}
-            </td>
-          </tr>
-
-          <!-- HEADLINE / LOCATION / CTA -->
-          <tr>
-            <td align="center" style="padding:18px 24px 0;">
-              <div style="font-size:24px; color:#002f6c; font-weight:800;">${escapeHtml(headline)}</div>
-              <div style="font-size:12px; color:#002f6c; margin-top:6px;">📍 ${escapeHtml(location)}</div>
-              <div style="margin-top:12px;">
-                <a href="${escapeAttr(ctaHref)}"
-                   style="font-size:13px; color:${ORANGE}; border:2px solid ${ORANGE}; padding:10px 16px; border-radius:6px; text-decoration:none; display:inline-block; font-weight:700; letter-spacing:0.5px;">
-                  ${escapeHtml(ctaText)}
-                </a>
-              </div>
-            </td>
-          </tr>
-
-          <!-- INTRO -->
-          <tr>
-            <td style="padding:16px 24px 6px;">
-              <p style="margin:0; font-size:14px; color:${GRAY}; line-height:1.6;">
-                ${escapeHtml(intro)}
-              </p>
-            </td>
-          </tr>
-
-          ${price ? `<tr><td align="center" style="padding:8px 24px 14px; font-size:18px; color:${ORANGE}; font-weight:800;">${escapeHtml(price)}</td></tr>` : ""}
-
-          <!-- GALLERY -->
-          ${galleryTwoUp}
-
-          <!-- SPECS -->
-          <tr>
-            <td>
-              <table role="presentation" width="100%" bgcolor="${NAVY}" style="background:${NAVY};">
-                <tr><td style="height:12px; line-height:12px; font-size:0">&nbsp;</td></tr>
-                <tr>
-                  <td style="padding:0 24px;">
-                    <div style="color:#ffffff; font-weight:800; letter-spacing:0.3px; font-size:16px; border-bottom:1px solid ${ORANGE}; padding-bottom:8px;">
-                      SPECIFICATIONS
+        {loading ? (
+          <div className="text-center py-8 text-gray-400 text-sm">Loading...</div>
+        ) : listings.length === 0 ? (
+          <div className="text-center py-8">
+            <div className="text-3xl mb-2">🚢</div>
+            <div className="text-sm text-gray-500 dark:text-gray-400">No PDFs generated yet</div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {listings.map(listing => (
+              <div key={listing.name} className="border border-gray-100 dark:border-neutral-800 rounded-xl p-3">
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold dark:text-white truncate">{getDisplayName(listing)}</div>
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      {formatDate(listing.created)} · {listing.pdfs.length} PDF{listing.pdfs.length !== 1 ? "s" : ""}
                     </div>
-                  </td>
-                </tr>
-                <tr><td style="height:6px; line-height:6px; font-size:0">&nbsp;</td></tr>
-                <tr>
-                  <td style="padding:0 24px 8px;">
-                    <table role="presentation" width="100%">
-                      ${specRow(r1)}
-                      ${specRow(r2)}
-                    </table>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
+                  </div>
+                  {/* Delete listing button */}
+                  <button
+                    onClick={() => setConfirmDelete({ listing: listing.name, title: getDisplayName(listing) })}
+                    className="shrink-0 w-8 h-8 rounded-lg text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 grid place-items-center transition-colors"
+                    title="Delete listing"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                  </button>
+                </div>
 
-          <!-- FEATURES -->
-          <tr>
-            <td style="padding:0 24px;">
-              <div style="color:${NAVY}; font-weight:800; letter-spacing:0.3px; font-size:16px; border-bottom:1px solid #e2e8f0; padding:10px 0;">
-                KEY FEATURES
+                <div className="flex flex-wrap gap-2">
+                  {listing.pdfs.map(pdf => (
+                    <button
+                      key={pdf.name}
+                      onClick={() => setAction({ url: pdf.downloadUrl, name: pdf.name, title: getDisplayName(listing), listing: listing.name })}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-gray-100 dark:bg-neutral-800 hover:bg-gray-200 dark:hover:bg-neutral-700 transition-colors text-xs font-medium dark:text-white"
+                    >
+                      📄 {brokerLabel(pdf.name)}
+                      <span className="text-gray-400 ml-1">{formatSize(pdf.size)}</span>
+                      <span className="text-blue-400 ml-1">›</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-              <ul style="padding-left:18px; margin:10px 0 16px; color:${TEXT}; font-size:14px; line-height:1.6;">
-                ${featuresLis}
-              </ul>
-            </td>
-          </tr>
+            ))}
+          </div>
+        )}
+      </div>
 
-          <!-- CONTACTS -->
-          ${contactCard(primary)}
-          ${coBrokerCards}
-
-          <tr><td style="height:16px; line-height:16px; font-size:0">&nbsp;</td></tr>
-        </table>
-
-        <!-- FOOTER -->
-        <div style="font-size:11px; color:#cbd5e1; margin:12px auto; width:${CONTAINER}px; text-align:center;">
-          © ${new Date().getFullYear()} Denison Yachting — ${escapeHtml(primary.email)} — Sent via YotCRM
-        </div>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`;
-}
-
-/* ------------------- Broker contact (square photo) ------------------- */
-function contactCard(a: Agent): string {
-  return `
-  <tr>
-    <td style="padding:0 24px;">
-      <table role="presentation" width="100%" style="border-top:1px solid #e2e8f0; padding-top:16px;">
-        <tr>
-          <td width="110" valign="top" style="padding-right:16px;">
-            <div style="width:100px; height:100px; overflow:hidden; background:#e2e8f0;">
-              <img src="${escapeAttr(a.photo)}" width="100" height="100" style="display:block; width:100px; height:100px; object-fit:cover;" />
+      {/* ═══ Action Sheet ═══ */}
+      {action && (
+        <div className="fixed inset-0 z-[9999] flex items-end justify-center" onClick={() => setAction(null)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div
+            className="relative w-full max-w-lg bg-white dark:bg-neutral-900 rounded-t-2xl shadow-2xl animate-[slideUp_0.2s_ease-out]"
+            style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex justify-center pt-3 pb-2">
+              <div className="w-10 h-1 rounded-full bg-gray-300 dark:bg-neutral-700" />
             </div>
-          </td>
-          <td valign="top" style="font-size:14px; color:${TEXT};">
-            <div style="font-weight:800;">${escapeHtml(a.name)}</div>
-            <div style="font-size:12px; color:#64748b;">${escapeHtml(a.title)}</div>
 
-            <div style="margin-top:10px; font-size:12px; color:${ORANGE}; font-weight:800;">EMAIL</div>
-            <div><a href="mailto:${escapeAttr(a.email)}" style="color:${NAVY}; text-decoration:none;">${escapeHtml(a.email)}</a></div>
+            <div className="flex items-center gap-3 px-5 pb-4">
+              <div className="w-11 h-14 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900 flex items-center justify-center shrink-0">
+                <span className="text-xl">📄</span>
+              </div>
+              <div className="min-w-0">
+                <p className="text-[15px] font-semibold dark:text-white truncate">{action.title}</p>
+                <p className="text-[12px] text-gray-400">{brokerLabel(action.name)} · {action.name}</p>
+              </div>
+            </div>
 
-            <div style="margin-top:10px; font-size:12px; color:${ORANGE}; font-weight:800;">CELL</div>
-            <div>${escapeHtml(a.cell)}</div>
+            <div className="px-5 space-y-2 pb-3">
+              {/* Open in full-screen viewer */}
+              <button
+                onClick={() => { const a = action; setAction(null); openPdf(a.url, a.name, a.title); }}
+                className="flex items-center gap-3 w-full px-4 py-3.5 rounded-2xl bg-blue-500 text-white font-semibold text-[15px] active:scale-[0.98] transition-all"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
+                </svg>
+                View PDF
+              </button>
 
-            <div style="margin-top:10px; font-size:12px; color:${ORANGE}; font-weight:800;">OFFICE</div>
-            <div>${escapeHtml(a.office)}</div>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>`;
+              {/* Share */}
+              <button
+                onClick={() => { const a = action; setAction(null); sharePdf(a.url, a.name, a.title); }}
+                className="flex items-center gap-3 w-full px-4 py-3.5 rounded-2xl bg-gray-100 dark:bg-neutral-800 text-gray-800 dark:text-white font-semibold text-[15px] active:scale-[0.98] transition-all"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" /><polyline points="16 6 12 2 8 6" /><line x1="12" y1="2" x2="12" y2="15" />
+                </svg>
+                Share PDF
+              </button>
+
+              {/* Delete this PDF */}
+              <button
+                onClick={() => { deletePdf(action.listing, action.name); }}
+                disabled={deleting}
+                className="flex items-center gap-3 w-full px-4 py-3.5 rounded-2xl text-red-500 font-semibold text-[15px] active:scale-[0.98] transition-all"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                </svg>
+                {deleting ? "Deleting..." : "Delete PDF"}
+              </button>
+
+              <button
+                onClick={() => setAction(null)}
+                className="w-full py-3 rounded-2xl text-blue-500 font-semibold text-[15px] active:bg-gray-100 dark:active:bg-neutral-800 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Confirm Delete Listing Dialog ═══ */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center" onClick={() => setConfirmDelete(null)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative bg-white dark:bg-neutral-900 rounded-2xl p-6 mx-6 max-w-sm w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="text-center mb-4">
+              <div className="text-3xl mb-2">🗑️</div>
+              <h3 className="text-lg font-bold dark:text-white">Delete Listing?</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                This will permanently delete all PDFs for<br/>
+                <strong className="dark:text-white">{confirmDelete.title}</strong>
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmDelete(null)}
+                className="flex-1 py-3 rounded-xl font-semibold text-sm bg-gray-100 dark:bg-neutral-800 text-gray-700 dark:text-gray-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => deleteListing(confirmDelete.listing)}
+                disabled={deleting}
+                className="flex-1 py-3 rounded-xl font-semibold text-sm bg-red-500 text-white active:scale-[0.98] transition-all disabled:opacity-50"
+              >
+                {deleting ? "Deleting..." : "Delete All"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Full-Screen PDF Viewer ═══ */}
+      {viewingPdf && (
+        <div className="fixed inset-0 z-[10000] bg-white dark:bg-black flex flex-col">
+          {/* Toolbar */}
+          <div
+            className="flex items-center justify-between px-4 bg-gray-50 dark:bg-neutral-900 border-b border-gray-200 dark:border-neutral-800 shrink-0"
+            style={{ paddingTop: "max(12px, env(safe-area-inset-top))", minHeight: "56px" }}
+          >
+            <button
+              onClick={() => setViewingPdf(null)}
+              className="text-blue-500 font-semibold text-[17px] px-1 py-1 active:opacity-60"
+            >
+              Done
+            </button>
+            <div className="flex-1 text-center mx-3 min-w-0">
+              <p className="text-[13px] font-semibold dark:text-white truncate">{viewingPdf.title}</p>
+              <p className="text-[11px] text-gray-400 truncate">{viewingPdf.name}</p>
+            </div>
+            <button
+              onClick={async () => {
+                try {
+                  const res = await fetch(viewingPdf.url);
+                  const blob = await res.blob();
+                  const file = new File([blob], viewingPdf.name, { type: "application/pdf" });
+                  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    await navigator.share({ files: [file] });
+                  } else if (navigator.share) {
+                    await navigator.share({ title: viewingPdf.name, url: window.location.origin + viewingPdf.url });
+                  }
+                } catch { /* cancelled */ }
+              }}
+              className="text-blue-500 p-1 active:opacity-60"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" /><polyline points="16 6 12 2 8 6" /><line x1="12" y1="2" x2="12" y2="15" />
+              </svg>
+            </button>
+          </div>
+
+          {/* PDF rendered via PDF.js — all pages scrollable */}
+          <iframe
+            src={`/pdf-viewer.html?url=${encodeURIComponent(viewingPdf.url)}`}
+            className="flex-1 w-full border-0"
+            title={viewingPdf.name}
+            style={{ WebkitOverflowScrolling: "touch" }}
+          />
+        </div>
+      )}
+
+      <style jsx>{`
+        @keyframes slideUp {
+          from { transform: translateY(100%); }
+          to { transform: translateY(0); }
+        }
+      `}</style>
+    </PageShell>
+  );
 }

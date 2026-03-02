@@ -1,16 +1,26 @@
-import { z } from "zod";
+import { z, Infer } from "../../vendor/zod";
 
 export const TemplateIdSchema = z.enum(["listing", "announcement", "event"]);
-export type TemplateId = z.infer<typeof TemplateIdSchema>;
+export type TemplateId = Infer<typeof TemplateIdSchema>;
 
 export const MediaAssetSchema = z.object({
-  src: z.string().url(),
-  width: z.number().int().positive(),
-  height: z.number().int().positive(),
+  src: z.string().default(""),
+  width: z.number().int().positive().default(1200),
+  height: z.number().int().positive().default(675),
   alt: z.string().default(""),
-  tags: z.array(z.enum(["exterior", "interior", "hero", "profile", "detail", "misc"])).default([]),
+  tags: z.array(z.string()).default([]),
 });
-export type MediaAsset = z.infer<typeof MediaAssetSchema>;
+export type MediaAsset = Infer<typeof MediaAssetSchema>;
+
+export const BrokerCardSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  title: z.string().default(""),
+  phone: z.string().default(""),
+  email: z.string().email(),
+  headshotSrc: z.string().optional(),
+});
+export type BrokerCard = Infer<typeof BrokerCardSchema>;
 
 export const NormalizedSpecsSchema = z.object({
   length: z.string().default(""),
@@ -23,70 +33,60 @@ export const NormalizedSpecsSchema = z.object({
   model: z.string().default(""),
   location: z.string().default(""),
   price: z.string().default(""),
-  raw: z.string().default(""),
 });
-export type NormalizedSpecs = z.infer<typeof NormalizedSpecsSchema>;
-
-export const BrokerCardSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  title: z.string(),
-  phone: z.string(),
-  email: z.string().email(),
-  headshotSrc: z.string().url().optional(),
-});
-export type BrokerCard = z.infer<typeof BrokerCardSchema>;
-
-const CtaSchema = z.object({
-  label: z.string(),
-  href: z.string().url(),
-});
+export type NormalizedSpecs = Infer<typeof NormalizedSpecsSchema>;
 
 const FooterSchema = z.object({
   disclaimer: z.string().default("You are receiving this email because you requested updates."),
-  links: z.array(z.object({ label: z.string(), href: z.string().url() })).default([]),
 });
 
-const UtmSchema = z.object({
-  source: z.string().default("campaign"),
-  medium: z.string().default("email"),
+const UTMSchema = z.object({
+  source: z.string().default("email"),
+  medium: z.string().default("campaign"),
   campaign: z.string().default(""),
   content: z.string().default(""),
 });
 
+const CtaSchema = z.object({
+  label: z.string().default("Book a Tour"),
+  href: z.string().default("https://denisonyachting.com"),
+});
+
 export const CampaignDataSchema = z.object({
   templateId: TemplateIdSchema,
-  title: z.string(),
+  title: z.string().default(""),
   subtitle: z.string().default(""),
   hero: MediaAssetSchema,
   gallery: z.array(MediaAssetSchema).default([]),
   specs: NormalizedSpecsSchema,
-  brokers: z.array(BrokerCardSchema).max(3),
+  brokers: z.array(BrokerCardSchema).max(3).default([]),
   cta: CtaSchema,
-  features: z.array(z.string()).default([]),
   footer: FooterSchema,
-  utm: UtmSchema,
+  features: z.array(z.string()).default([]),
+  utm: UTMSchema,
+  bannerUrl: z.string().default("https://www.denisonyachtsales.com/wp-content/uploads/2023/08/Rectangle-557.png"),
 });
-export type CampaignData = z.infer<typeof CampaignDataSchema>;
+export type CampaignData = Infer<typeof CampaignDataSchema>;
 
 export function createBlankCampaignData(templateId: TemplateId): CampaignData {
   return CampaignDataSchema.parse({
     templateId,
     title: "",
     subtitle: "",
-    hero: {
-      src: "https://via.placeholder.com/1200x675?text=Hero",
+    hero: MediaAssetSchema.parse({
+      src: "https://via.placeholder.com/1200x675/0B1A2B/FFFFFF?text=Hero",
       width: 1200,
       height: 675,
       alt: "",
       tags: ["hero"],
-    },
+    }),
     gallery: [],
     specs: {},
     brokers: [],
-    cta: { label: "Book a Tour", href: "https://denisonyachting.com" },
-    features: [],
+    cta: {},
     footer: {},
+    features: [],
     utm: {},
+    bannerUrl: undefined,
   });
 }

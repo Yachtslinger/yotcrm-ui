@@ -1,0 +1,634 @@
+#!/usr/bin/env node
+/**
+ * SLINGER / Denison Yachting — Branded PDF Generator v7
+ * 
+ * v7 Changes:
+ * - Logo ONLY on page 1 cover (not every page)
+ * - Description flows across multiple pages naturally
+ * - Slinger/Denison logo on last page footer only
+ * - Clean page headers (no logo) for content pages
+ * - Full description content with section formatting
+ * 
+ * Usage: node generateListingPDF.js <listing-dir> [--broker=will|paolo|both] [--logo=slinger|denison]
+ */
+
+const puppeteer = require('puppeteer');
+const fs = require('fs');
+const path = require('path');
+
+// --- ASSETS ---
+const ASSETS = path.join(__dirname, '..', 'assets');
+function b64(file) {
+  const p = path.join(ASSETS, file);
+  if (!fs.existsSync(p)) return '';
+  const ext = path.extname(p).toLowerCase();
+  const mime = ext === '.png' ? 'image/png' : ext === '.svg' ? 'image/svg+xml' : 'image/jpeg';
+  return `data:${mime};base64,${fs.readFileSync(p).toString('base64')}`;
+}
+function imgB64(filepath) {
+  if (!filepath || !fs.existsSync(filepath)) return '';
+  const ext = path.extname(filepath).toLowerCase();
+  const mime = ext === '.png' ? 'image/png' : 'image/jpeg';
+  return `data:${mime};base64,${fs.readFileSync(filepath).toString('base64')}`;
+}
+
+const LOGO = { slinger: b64('slinger-logo.png'), denison: b64('denison-logo.jpg') };
+
+// --- BROKER PROFILES ---
+const BROKERS = {
+  will: {
+    name: 'William (Will) Noftsinger III',
+    company: 'Denison Yachting',
+    address: '1535 SE 17th Street #119, Fort Lauderdale, Florida, United States',
+    phone: '+1 (850) 461-3342',
+    fax: '954-763-3940',
+    email: 'wn@denisonyachting.com',
+    photo: b64('will-photo.jpeg'),
+  },
+  paolo: {
+    name: 'Paolo Ameglio',
+    company: 'Denison Yachting',
+    address: '1535 SE 17th Street #119, Fort Lauderdale, Florida, United States',
+    phone: '+1 (786) 952-6701',
+    fax: '954-763-3940',
+    email: 'pa@denisonyachting.com',
+    photo: b64('paolo-photo.png'),
+  },
+};
+
+// --- GARBAGE VALUE FILTER ---
+const GARBAGE_VALUES = new Set(['boats', 'tank:', 'tank', 'n/a', 'na', 'none', '-', '--', 'overall:', 'unknown']);
+function isGarbage(val) {
+  if (!val || typeof val !== 'string') return true;
+  const v = val.trim().toLowerCase();
+  return GARBAGE_VALUES.has(v) || v.length === 0;
+}
+function cleanVal(val) {
+  if (!val || typeof val !== 'string') return '';
+  let v = val.trim();
+  v = v.replace(/^tank:\s*/i, '').trim();
+  if (isGarbage(v)) return '';
+  // Additional garbage detection: if value looks like a sentence fragment from description
+  if (v.length > 80 && v.includes(' and ') && v.includes(' the ')) return '';
+  return v;
+}
+
+// --- SPEC LOOKUP with flexible key matching ---
+function spec(specs, ...keys) {
+  if (!specs) return '';
+  for (const k of keys) {
+    if (specs[k] !== undefined && specs[k] !== null && specs[k] !== '') {
+      const v = cleanVal(String(specs[k]));
+      if (v) return v;
+    }
+  }
+  const normalize = s => s.toLowerCase().replace(/[:\s]+/g, '').replace(/[_-]/g, '');
+  for (const k of keys) {
+    const nk = normalize(k);
+    const found = Object.entries(specs).find(([sk]) => normalize(sk) === nk);
+    if (found) { const v = cleanVal(String(found[1])); if (v) return v; }
+  }
+  for (const k of keys) {
+    const lk = k.toLowerCase();
+    const found = Object.entries(specs).find(([sk]) => {
+      const slk = sk.toLowerCase();
+      return slk.includes(lk) || lk.includes(slk);
+    });
+    if (found) { const v = cleanVal(String(found[1])); if (v) return v; }
+  }
+  return '';
+}
+
+function filterImages(images, listingUrl) {
+  let listingId = null;
+  if (listingUrl) {
+    const m = listingUrl.match(/(\d{5,})(?:\/)?(?:\?.*)?$/);
+    if (m) listingId = m[1];
+  }
+  if (!listingId) {
+    const idCounts = {};
+    images.forEach(img => {
+      if (img.url && img.url.includes('boatsgroup.com')) {
+        const m = img.url.match(/(\d{7,})/);
+        if (m) idCounts[m[1]] = (idCounts[m[1]] || 0) + 1;
+      }
+    });
+    const sorted = Object.entries(idCounts).sort((a, b) => b[1] - a[1]);
+    if (sorted.length > 0 && sorted[0][1] >= 3) listingId = sorted[0][0];
+  }
+  return images.filter(img => {
+    if (!img.localPath || !fs.existsSync(img.localPath)) return false;
+    const sz = fs.statSync(img.localPath).size;
+    if (sz < 10000) return false;
+    if (img.url && img.url.includes('servedby')) return false;
+    if (listingId && img.url && img.url.includes('boatsgroup.com') && !img.url.includes(listingId)) return false;
+    return true;
+  });
+}
+
+function brokerFooterHTML(mode) {
+  const brokers = mode === 'both' ? [BROKERS.will, BROKERS.paolo] :
+                  mode === 'paolo' ? [BROKERS.paolo] : [BROKERS.will];
+  const cards = brokers.map(b => `
+    <div class="broker-card">
+      <div class="broker-photo">
+        ${b.photo ? `<img src="${b.photo}" />` : `<div style="width:100%;height:100%;background:#ccc"></div>`}
+      </div>
+      <div class="broker-info">
+        <h3>${b.name} | <span class="co">${b.company}</span></h3>
+        <p>${b.address}<br/>Tel: <span class="ph">${b.phone}</span>&nbsp;&nbsp;Fax: ${b.fax}<br/>${b.email}</p>
+      </div>
+    </div>
+  `).join('');
+  return `
+    <div class="broker-footer">
+      <div class="broker-cards ${mode === 'both' ? 'two-brokers' : ''}">${cards}</div>
+      <div class="broker-denison">${LOGO.denison ? `<img src="${LOGO.denison}" />` : ''}</div>
+    </div>`;
+}
+
+// --- SMART DESCRIPTION FORMATTING ---
+function formatDescription(rawText) {
+  if (!rawText || rawText.length < 50) return '';
+  const lines = rawText.split('\n');
+  let html = '';
+  let inList = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) {
+      if (inList) { html += '</ul>'; inList = false; }
+      continue;
+    }
+    const isAllCaps = line === line.toUpperCase() && line.length > 3 && line.length < 80 && /[A-Z]/.test(line);
+    const nextLine = i + 1 < lines.length ? lines[i + 1]?.trim() : '';
+    const isFollowedByContent = nextLine && nextLine.length > 0;
+    if (isAllCaps && isFollowedByContent) {
+      if (inList) { html += '</ul>'; inList = false; }
+      const titleCased = line.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+      html += `<h3>${titleCased}</h3>`;
+      continue;
+    }
+    // Also detect "Title Case:" headers (e.g. "Key Features:")
+    const headerMatch = line.match(/^([A-Z][A-Za-z\s&/]+):?\s*$/);
+    if (headerMatch && line.length < 60 && isFollowedByContent) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<h3>${headerMatch[1]}</h3>`;
+      continue;
+    }
+    const bulletMatch = line.match(/^[-•*]\s+(.+)/) || line.match(/^\(\d+\)\s+(.+)/) || line.match(/^\d+[.)]\s+(.+)/);
+    if (bulletMatch) {
+      if (!inList) { html += '<ul>'; inList = true; }
+      html += `<li>${bulletMatch[1]}</li>`;
+      continue;
+    }
+    if (inList) { html += '</ul>'; inList = false; }
+    html += `<p>${line}</p>`;
+  }
+  if (inList) html += '</ul>';
+  return html;
+}
+
+function fullDescription(data) {
+  const s = data.specs || {};
+  if (data.description && data.description.trim().length > 50) {
+    const formatted = formatDescription(data.description);
+    if (formatted) return formatted;
+    return `<p>${data.description.replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br/>')}</p>`;
+  }
+  // Fallback auto-generated description
+  const n = data.boatName || spec(s, 'Name') || 'This vessel';
+  const yr = data.title?.match(/(\d{4})/)?.[1] || '';
+  const beam = spec(s, 'Beam') || '';
+  const hrs = spec(s, 'Engine Hours') || '';
+  const cs = spec(s, 'Cruising Speed') || '';
+  const ms = spec(s, 'Max Speed') || '';
+  const rng = spec(s, 'Range') || '';
+  const gc = spec(s, 'Guest Cabins') || '';
+  const hull = spec(s, 'Hull Material', 'Hull', 'Hull Construction') || '';
+  let d = `<p><strong>${n}</strong> is a ${yr}`;
+  if (beam) d += ` with a beam of ${beam}`;
+  d += `.</p>`;
+  if (hrs || cs || ms || rng) {
+    d += `<h3>Performance</h3><p>`;
+    if (hrs) d += `(${hrs} hours) `;
+    if (cs) d += `Cruising speed: ${cs}. `;
+    if (ms) d += `Max speed: ${ms}. `;
+    if (rng) d += `Range: ${rng}. `;
+    d += `</p>`;
+  }
+  if (gc) d += `<h3>Accommodation</h3><p>${gc} guest cabin${gc !== '1' ? 's' : ''}.</p>`;
+  if (hull) d += `<h3>Build</h3><p>${hull} hull.</p>`;
+  return d;
+}
+
+// --- CONDITIONAL ROW HELPERS ---
+function row(label, value) {
+  if (!value) return '';
+  return `<tr><td>${label}</td><td>${value}</td></tr>`;
+}
+function srow(label, value) {
+  return `<td class="sl">${label}</td><td class="sv"><strong>${value || ''}</strong></td>`;
+}
+function specCard(title, rows) {
+  const filtered = rows.filter(r => r);
+  if (filtered.length === 0) return '';
+  return `<div class="spec-card"><h3>${title}</h3><table class="detail-table">${filtered.join('')}</table></div>`;
+}
+
+// --- ENGINE DATA EXTRACTION ---
+function extractEngineData(data) {
+  const s = data.specs || {};
+  let engineName = spec(s, 'Main Engines (2)', 'Main Engines', 'Main Engine', 'Engine Make', 'Engine Brand', 'Engines');
+  if (engineName && (engineName.toLowerCase() === 'boats' || engineName.length < 3)) engineName = '';
+  const engineType = spec(s, 'Engine Type', 'Drive Type', 'Propulsion') || 'Inboard';
+  const fuelType = spec(s, 'Fuel Type', 'Engine Fuel') || 'Diesel';
+  let hours1 = spec(s, 'Engine 1 Hours', 'Port Engine Hours', 'Engine Hours');
+  let hours2 = spec(s, 'Engine 2 Hours', 'Stbd Engine Hours', 'Starboard Engine Hours');
+  if (!hours2) hours2 = hours1;
+  let power = spec(s, 'Power', 'Engine Power', 'HP', 'Horsepower', 'Total Power');
+  if (power && (power.toLowerCase() === 'boats' || power.length < 2)) power = '';
+  // Filter garbled power values (audio equipment, etc.)
+  if (power && (power.toLowerCase().includes('amplifier') || power.toLowerCase().includes('musiccast'))) power = '';
+  let eng1Title = 'Engine (Engine 1)';
+  let eng2Title = 'Engine (Engine 2)';
+  if (engineName) {
+    eng1Title = `${engineName} (Port)`;
+    eng2Title = `${engineName} (Stbd)`;
+  }
+  return { eng1Title, eng2Title, engineType, fuelType, hours1, hours2, power, engineName };
+}
+
+function buildHTML(data, listingDir, brokerMode, logoMode) {
+  const { title, price, location, specs, images } = data;
+  const s = specs || {};
+  const m = title.match(/(\d+)\s*(?:ft|')?\s*(\d{4})\s+(.+)/i) || title.match(/(\d{4})\s+(.+?)(?:\s*\|\s*(\d+)ft)?$/);
+  let year = '', makeModel = '', length = '';
+  if (m && m[1] && m[1].length === 4) { year = m[1]; makeModel = m[2] || title; length = m[3] ? `${m[3]} ft` : ''; }
+  else if (m) { length = m[1] ? `${m[1]} ft` : ''; year = m[2] || ''; makeModel = m[3] || title; }
+  else { makeModel = title; }
+  if (!length) { const lm = spec(s, 'Length Overall', 'LOA'); if (lm) length = lm; }
+
+  const boatName = data.boatName || spec(s, 'Name') || '';
+  const selectedLogo = logoMode === 'denison' ? LOGO.denison : LOGO.slinger;
+  const allImages = filterImages(images || [], data.sourceUrl || data.url || '');
+  const heroB64 = allImages[0] ? imgB64(allImages[0].localPath) : '';
+  const description = fullDescription(data);
+  const engines = extractEngineData(data);
+
+  // --- Expanded spec lookups (with parsed fallbacks from scraper v3) ---
+  const make = spec(s, 'Shipyard', 'Make', 'Builder', 'Manufacturer') || data.parsedMake || '';
+  const model = spec(s, 'Model') || data.parsedModel || '';
+  const draft = spec(s, 'Max Draft', 'Draft (Full Load)', 'Draft', 'Maximum Draft') || '';
+  const displacement = spec(s, 'Displacement (Full Load)', 'Displacement', 'Displacement (approx)') || '';
+  const grossTonnage = spec(s, 'Gross Tonnage', 'Tonnage') || '';
+  const fuelCap = spec(s, 'Fuel Capacity', 'Fuel Tank', 'Fuel Tanks', 'Fuel') || '';
+  const freshWater = spec(s, 'Fresh Water', 'Water', 'Water Capacity', 'Fresh Water Tank') || '';
+  const holding = spec(s, 'Holding', 'Holding Tank', 'Black Water', 'Sewage') || '';
+  const greyWater = spec(s, 'Grey Water') || '';
+  const dirtyOil = spec(s, 'Dirty Oil') || '';
+  const bilge = spec(s, 'Bilge') || '';
+  const generator = spec(s, 'Generators (2)', 'Generator', 'Generators', 'Main Generator') || '';
+  const stabilizers = spec(s, 'Stabilizers', 'Stabilizer') || '';
+  const bowThruster = spec(s, 'Bow Thruster', 'Bow Thrusters') || '';
+  const steering = spec(s, 'Steering System', 'Steering') || '';
+  const ac = spec(s, 'Air Conditioning', 'A/C', 'AC', 'HVAC') || '';
+  const flag = spec(s, 'Flag', 'Registry', 'Flag Of Registry') || '';
+  const hullShape = spec(s, 'Hull Shape', 'Hull Type') || 'Monohull';
+  const hullMaterial = spec(s, 'Hull Material', 'Hull', 'Hull Construction') || '';
+  const watermaker = spec(s, 'Watermakers', 'Watermaker', 'Water Maker') || '';
+  const windlass = spec(s, 'Windlasses (2)', 'Windlasses', 'Windlass', 'Anchor Windlass') || '';
+  const classification = spec(s, 'Classification', 'Class Society') || '';
+  const gearboxes = spec(s, 'Gearboxes (2)', 'Gearboxes', 'Gearbox', 'Transmission') || '';
+  const fuelSeparator = spec(s, 'Fuel Separator') || '';
+  const blackWaterTreatment = spec(s, 'Black Water Treatment Plant', 'Sewage Treatment') || '';
+
+  const css = `
+@page { size: A4; margin: 0; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #333; font-size: 9pt; line-height: 1.4; }
+.page { width: 210mm; min-height: 297mm; padding: 0; page-break-after: always; position: relative; padding-bottom: 10mm; }
+.page:last-child { page-break-after: avoid; }
+
+/* COVER */
+.cover-page { padding: 8mm 12mm 10mm; }
+.cover-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4mm; }
+.cover-title h1 { font-size: 14pt; color: #1a3a5c; font-weight: 400; line-height: 1.2; max-width: 340px; }
+.cover-title .price { font-size: 12pt; color: #1a3a5c; font-weight: 700; margin-top: 1mm; }
+.cover-title .location { font-size: 8.5pt; color: #888; margin-top: 0.5mm; }
+.logo-area { width: 120px; flex-shrink: 0; }
+.logo-area img { width: 120px; height: auto; }
+.hero-image { width: 100%; height: 115mm; overflow: hidden; border-radius: 3px; margin-bottom: 3mm; }
+.hero-image img { width: 100%; height: 100%; object-fit: cover; }
+
+/* SPECS TABLE (cover page) */
+.specs-box { border: 1px solid #d0d5dd; border-radius: 4px; padding: 2.5mm 3.5mm; margin-bottom: 3mm; }
+.specs-box h2 { font-size: 10pt; color: #1a3a5c; font-weight: 700; margin-bottom: 1.5mm; }
+.specs-table { width: 100%; border-collapse: collapse; }
+.specs-table td { padding: 0.8mm 1.2mm; vertical-align: top; font-size: 7.5pt; }
+.sl { color: #777; width: 11%; white-space: nowrap; }
+.sv { color: #1a3a5c; width: 22%; }
+.sv strong { font-weight: 600; }
+`;
+  const css2 = `
+/* BROKER FOOTER — appears on first + last page */
+.broker-footer { display: flex; align-items: center; border-top: 1.5px solid #d0d5dd; padding-top: 2.5mm; margin-top: auto; }
+.broker-cards { display: flex; gap: 4mm; flex: 1; }
+.broker-card { display: flex; align-items: center; gap: 2.5mm; }
+.two-brokers .broker-card { flex: 1; }
+.broker-photo { width: 14mm; height: 14mm; border-radius: 50%; overflow: hidden; flex-shrink: 0; }
+.broker-photo img { width: 100%; height: 100%; object-fit: cover; }
+.broker-info h3 { font-size: 8pt; color: #1a3a5c; font-weight: 700; }
+.broker-info .co { font-weight: 400; color: #666; }
+.broker-info p { font-size: 6.5pt; color: #555; margin-top: 0.3mm; line-height: 1.35; }
+.broker-info .ph { color: #1a3a5c; font-weight: 600; }
+.broker-denison { margin-left: auto; width: 60px; flex-shrink: 0; }
+.broker-denison img { width: 60px; height: auto; }
+.page-num { position: absolute; bottom: 6mm; right: 10mm; font-size: 7pt; color: #bbb; }
+
+/* DETAIL PAGES — clean header, no logo */
+.detail-page { padding: 8mm 12mm 12mm; }
+.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4mm; padding-bottom: 2mm; border-bottom: 2px solid #1a3a5c; margin-top: 2mm; }
+.page-header h2 { font-size: 11pt; color: #1a3a5c; font-weight: 400; }
+`;
+  const css3 = `
+/* DESCRIPTION CONTENT - flows naturally across pages */
+.desc-content { }
+.desc-content p { font-size: 8pt; line-height: 1.55; color: #333; margin-bottom: 2mm; text-align: justify; }
+.desc-content h3 { font-size: 9pt; color: #1a3a5c; font-weight: 700; margin-top: 3mm; margin-bottom: 1mm; border-left: 3px solid #1a3a5c; padding-left: 2mm; }
+.desc-content ul { margin-left: 5mm; margin-bottom: 2mm; }
+.desc-content ul li { font-size: 7.5pt; line-height: 1.5; color: #333; margin-bottom: 0.5mm; }
+.disclaimer { font-size: 5.5pt; color: #aaa; margin-top: 2mm; padding-top: 1.5mm; border-top: 1px solid #e8e8e8; line-height: 1.3; }
+
+/* Engine cards */
+.engine-grid { display: flex; gap: 3mm; margin-bottom: 3mm; }
+.engine-card { flex: 1; background: #f7f9fb; border: 1px solid #e0e4ea; border-radius: 3px; padding: 2.5mm; }
+.engine-card h3 { font-size: 8pt; color: #1a3a5c; font-weight: 700; margin-bottom: 1mm; border-bottom: 1px solid #e0e4ea; padding-bottom: 0.8mm; }
+.specs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5mm; margin-bottom: 3mm; }
+.spec-card { background: #f7f9fb; border: 1px solid #e0e4ea; border-radius: 3px; padding: 2mm; }
+.spec-card h3 { font-size: 8pt; color: #1a3a5c; font-weight: 700; margin-bottom: 1mm; border-bottom: 1px solid #e0e4ea; padding-bottom: 0.8mm; }
+.detail-table { width: 100%; border-collapse: collapse; }
+.detail-table td { padding: 0.6mm 1.2mm; font-size: 7pt; border-bottom: 1px solid #eef0f3; }
+.detail-table td:first-child { color: #777; width: 48%; }
+.detail-table td:last-child { color: #1a3a5c; font-weight: 500; }
+
+/* GALLERY — tight 6 per page */
+.photo-page { padding: 5mm 5mm 10mm; }
+.gallery-row { display: flex; gap: 2mm; height: 88mm; margin-bottom: 2mm; }
+.gallery-cell { flex: 1; overflow: hidden; border-radius: 2px; height: 100%; }
+.gallery-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gallery-cell.empty { visibility: hidden; }
+
+/* LAST PAGE BROKER + LOGO SECTION */
+.last-page-footer { position: absolute; bottom: 12mm; left: 12mm; right: 12mm; }
+.last-page-logo { text-align: center; padding: 5mm 0 3mm; }
+.last-page-logo img { width: 140px; height: auto; opacity: 0.8; }
+`;
+
+  const displayTitle = `${length} ${year} ${makeModel}`.trim();
+  const fullTitle = boatName ? `${displayTitle}, ${boatName}` : displayTitle;
+
+  // === PAGE 1: COVER (logo in header + broker footer) ===
+  const page1 = `
+<div class="page cover-page">
+  <div class="cover-header">
+    <div class="cover-title">
+      <h1>${fullTitle}</h1>
+      <div class="price">${price}</div>
+      <div class="location">${location}</div>
+    </div>
+    <div class="logo-area">${selectedLogo ? `<img src="${selectedLogo}" />` : ''}</div>
+  </div>
+  <div class="hero-image">${heroB64 ? `<img src="${heroB64}" />` : ''}</div>
+  <div class="specs-box">
+    <h2>Boat Details</h2>
+    <table class="specs-table">
+      <tr><td class="sl">Make:</td><td class="sv"><strong>${make}</strong></td>
+          <td class="sl">Class:</td><td class="sv"><strong>${spec(s, 'Class', 'Type') || 'Motor Yacht'}</strong></td>
+          <td class="sl">Crew Cabins:</td><td class="sv"><strong>${spec(s, 'Crew Cabins')}</strong></td></tr>
+      <tr><td class="sl">Model:</td><td class="sv"><strong>${model}</strong></td>
+          <td class="sl">Hull Material:</td><td class="sv"><strong>${hullMaterial}</strong></td>
+          <td class="sl">Fuel Type:</td><td class="sv"><strong>${engines.fuelType}</strong></td></tr>
+      <tr><td class="sl">Year:</td><td class="sv"><strong>${year}</strong></td>
+          <td class="sl">Beam:</td><td class="sv"><strong>${spec(s, 'Beam')}</strong></td>
+          <td class="sl">Max Speed:</td><td class="sv"><strong>${spec(s, 'Max Speed')}</strong></td></tr>
+      <tr><td class="sl">Price:</td><td class="sv"><strong>${price.split('(')[0].trim()}</strong></td>
+          <td class="sl">Name:</td><td class="sv"><strong>${boatName}</strong></td>
+          <td class="sl">Max Draft:</td><td class="sv"><strong>${draft}</strong></td></tr>
+      <tr><td class="sl">Condition:</td><td class="sv"><strong>${spec(s, 'Condition') || 'Used'}</strong></td>
+          <td class="sl">Guest Cabins:</td><td class="sv"><strong>${spec(s, 'Guest Cabins')}</strong></td>
+          <td class="sl">Guest Heads:</td><td class="sv"><strong>${spec(s, 'Guest Heads')}</strong></td></tr>
+    </table>
+  </div>
+  ${brokerFooterHTML(brokerMode)}
+  <div class="page-num">1</div>
+</div>`;
+
+  // === DESCRIPTION PAGES (NO logo — content flows across pages naturally) ===
+  // Instead of wrapping in a fixed .page div, we let the content flow
+  // and Puppeteer's PDF renderer handles page breaks automatically.
+  const descPages = `
+<div class="detail-page" style="padding: 8mm 12mm 12mm; page-break-after: always;">
+  <div class="page-header">
+    <h2>${displayTitle}</h2>
+  </div>
+  <div class="desc-content">${description}</div>
+  <div class="disclaimer">The Company offers the details of this vessel in good faith but cannot guarantee or warrant the accuracy of this information nor warrant the condition of the vessel. A buyer should instruct his agents, or his surveyors, to investigate such details as the buyer desires validated. This vessel is offered subject to prior sale, price change, or withdrawal without notice.</div>
+</div>`;
+
+  // === SPECS PAGE (NO logo — clean header only) ===
+  const specsPage = `
+<div class="page detail-page">
+  <div class="page-header">
+    <h2>Information &amp; Features</h2>
+  </div>
+  <div class="engine-grid">
+    <div class="engine-card">
+      <h3>${engines.eng1Title}</h3>
+      <table class="detail-table">
+        ${row('Engine Type:', engines.engineType)}
+        ${row('Fuel Type:', engines.fuelType)}
+        ${row('Engine Hours:', engines.hours1)}
+        ${row('Power:', engines.power)}
+      </table>
+    </div>
+    <div class="engine-card">
+      <h3>${engines.eng2Title}</h3>
+      <table class="detail-table">
+        ${row('Engine Type:', engines.engineType)}
+        ${row('Fuel Type:', engines.fuelType)}
+        ${row('Engine Hours:', engines.hours2)}
+        ${row('Power:', engines.power)}
+      </table>
+    </div>
+  </div>
+  <div class="specs-grid">
+    ${specCard('Dimensions', [
+      row('LOA:', spec(s, 'Length Overall', 'LOA') || length),
+      row('LWL:', spec(s, 'Length at Waterline', 'LWL')),
+      row('Beam:', spec(s, 'Beam')),
+      row('Max Draft:', draft),
+    ])}
+    ${specCard('Weights', [
+      row('Displacement:', displacement),
+      row('Gross Tonnage:', grossTonnage),
+    ])}
+    ${specCard('Speed &amp; Range', [
+      row('Cruising Speed:', spec(s, 'Cruising Speed')),
+      row('Max Speed:', spec(s, 'Max Speed')),
+      row('Range:', spec(s, 'Range')),
+    ])}
+    ${specCard('Tanks', [
+      row('Fuel:', fuelCap),
+      row('Fresh Water:', freshWater),
+      row('Holding:', holding),
+      row('Grey Water:', greyWater),
+      row('Dirty Oil:', dirtyOil),
+      row('Bilge:', bilge),
+    ])}
+    ${specCard('Accommodations', [
+      row('Guest Cabins:', spec(s, 'Guest Cabins')),
+      row('Crew Cabins:', spec(s, 'Crew Cabins')),
+      row('Guest Heads:', spec(s, 'Guest Heads')),
+      row('Crew Heads:', spec(s, 'Crew Heads')),
+    ])}
+    ${specCard('Electrical &amp; Mechanical', [
+      row('Generator:', generator),
+      row('Watermaker:', watermaker),
+      row('Fuel Separator:', fuelSeparator),
+      row('Sewage Treatment:', blackWaterTreatment),
+    ])}
+    ${specCard('Construction', [
+      row('Hull Shape:', hullShape),
+      row('Hull Material:', hullMaterial),
+      row('Flag:', flag),
+      row('Builder:', make),
+      row('Classification:', classification),
+    ])}
+    ${specCard('Systems', [
+      row('Stabilizers:', stabilizers),
+      row('Bow Thruster:', bowThruster),
+      row('Steering:', steering),
+      row('A/C:', ac),
+      row('Gearboxes:', gearboxes),
+      row('Windlass:', windlass),
+    ])}
+  </div>
+</div>`;
+
+  // === PHOTO GALLERY (6 per page, NO logo on gallery pages, broker footer on LAST page only) ===
+  let galleryPages = [];
+  const galleryImages = allImages.slice(1);
+  let pageNum = 4; // approximate starting page number
+
+  for (let i = 0; i < galleryImages.length; i += 6) {
+    const pg = galleryImages.slice(i, i + 6);
+    if (pg.length < 2) continue;
+    const rows = [];
+    for (let j = 0; j < 6; j += 2) {
+      const img1 = pg[j];
+      const img2 = pg[j + 1];
+      let cells = '';
+      if (img1) cells += `<div class="gallery-cell"><img src="${imgB64(img1.localPath)}" /></div>`;
+      else cells += `<div class="gallery-cell empty"></div>`;
+      if (img2) cells += `<div class="gallery-cell"><img src="${imgB64(img2.localPath)}" /></div>`;
+      else cells += `<div class="gallery-cell empty"></div>`;
+      if (img1 || img2) rows.push(`<div class="gallery-row">${cells}</div>`);
+    }
+    galleryPages.push({ rows: rows.join(''), pageNum });
+    pageNum++;
+  }
+
+  // Build gallery HTML — last gallery page gets broker footer + centered logo
+  let galleryHTML = '';
+  for (let i = 0; i < galleryPages.length; i++) {
+    const gp = galleryPages[i];
+    const isLast = (i === galleryPages.length - 1);
+    const lastFooter = isLast ? `
+      <div class="last-page-footer">
+        <div class="last-page-logo">${selectedLogo ? `<img src="${selectedLogo}" />` : ''}</div>
+        ${brokerFooterHTML(brokerMode)}
+      </div>` : '';
+    galleryHTML += `<div class="page photo-page">${gp.rows}${lastFooter}<div class="page-num">${gp.pageNum}</div></div>`;
+  }
+
+  // If no gallery pages, add a closing page with broker footer
+  if (galleryPages.length === 0) {
+    galleryHTML = `<div class="page detail-page">
+      <div class="last-page-footer">
+        <div class="last-page-logo">${selectedLogo ? `<img src="${selectedLogo}" />` : ''}</div>
+        ${brokerFooterHTML(brokerMode)}
+      </div>
+      <div class="page-num">${pageNum}</div>
+    </div>`;
+  }
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${css}${css2}${css3}</style></head><body>
+${page1}${descPages}${specsPage}${galleryHTML}
+</body></html>`;
+}
+
+async function generatePDF(listingDir, brokerMode, logoMode) {
+  console.log(`📄 Generating PDF for: ${listingDir}`);
+  console.log(`👤 Broker: ${brokerMode} | 🏷️ Logo: ${logoMode}`);
+  
+  const jsonPath = path.join(listingDir, 'listing.json');
+  if (!fs.existsSync(jsonPath)) throw new Error(`No listing.json in ${listingDir}`);
+  const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+  
+  const html = buildHTML(data, listingDir, brokerMode, logoMode);
+  fs.writeFileSync(path.join(listingDir, 'listing.html'), html);
+  console.log(`📝 HTML saved`);
+  
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+  });
+  
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 60000 });
+    const suffix = brokerMode !== 'will' ? `-${brokerMode}` : '';
+    const pdfName = path.basename(listingDir) + suffix + '.pdf';
+    const pdfPath = path.join(listingDir, pdfName);
+    await page.pdf({
+      path: pdfPath,
+      format: 'A4',
+      printBackground: true,
+      preferCSSPageSize: true,
+      margin: { top: 0, right: 0, bottom: 0, left: 0 },
+    });
+    const sz = fs.statSync(pdfPath).size;
+    console.log(`\n✅ PDF Generated: ${pdfPath}`);
+    console.log(`📊 Size: ${(sz / 1024 / 1024).toFixed(1)} MB`);
+    return pdfPath;
+  } finally {
+    await browser.close();
+  }
+}
+
+// --- CLI ---
+const args = process.argv.slice(2);
+const listingDir = args.find(a => !a.startsWith('--'));
+const brokerArg = args.find(a => a.startsWith('--broker='));
+const brokerMode = brokerArg ? brokerArg.split('=')[1] : 'will';
+const logoArg = args.find(a => a.startsWith('--logo='));
+const logoMode = logoArg ? logoArg.split('=')[1] : 'slinger';
+
+if (!listingDir) {
+  console.log('Usage: node generateListingPDF.js <listing-dir> [--broker=will|paolo|both] [--logo=slinger|denison]');
+  process.exit(1);
+}
+if (!['will', 'paolo', 'both'].includes(brokerMode)) {
+  console.error('Invalid broker. Use: will, paolo, or both');
+  process.exit(1);
+}
+if (!['slinger', 'denison'].includes(logoMode)) {
+  console.error('Invalid logo. Use: slinger or denison');
+  process.exit(1);
+}
+
+generatePDF(path.resolve(listingDir), brokerMode, logoMode).catch(err => {
+  console.error('❌ Failed:', err.message);
+  process.exit(1);
+});

@@ -1,0 +1,67 @@
+export type Boat = {
+  id: number;
+  make: string;
+  model: string;
+  year: string;
+  length: string;
+  price: string;
+  location: string;
+  listing_url: string;
+  source_email: string;
+  added_at: string;
+};
+
+export type Contact = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  tags: string[];
+  status?: string;
+  notes: string;
+  source?: string;
+  createdAt?: number | string;
+  boats?: Boat[];
+  // Flat fields for backward compat (first boat)
+  boat_make?: string;
+  boat_model?: string;
+  boat_year?: string;
+  boat_length?: string;
+  boat_price?: string;
+  boat_location?: string;
+  listing_url?: string;
+  intel_score?: number | null;
+  intel_band?: string | null;
+  occupation?: string;
+  employer?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  linkedin_url?: string;
+  facebook_url?: string;
+  instagram_url?: string;
+  twitter_url?: string;
+  net_worth_range?: string;
+  net_worth_confidence?: string;
+  board_positions?: string;
+  yacht_clubs?: string;
+  nonprofit_roles?: string;
+  total_donations?: string;
+  property_summary?: string;
+  wikipedia_url?: string;
+  website_url?: string;
+  media_mentions?: number;
+  // Deep background fields
+  estimated_net_worth?: string;
+  net_worth_breakdown?: string;
+  date_of_birth?: string;
+  age?: string;
+  spouse_name?: string;
+  spouse_employer?: string;
+  primary_address?: string;
+  secondary_addresses?: string;
+  identity_confidence?: number;
+  identity_verifications?: string;
+  manual_corrections?: string;
+};

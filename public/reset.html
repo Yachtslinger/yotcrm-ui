@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head><meta name="viewport" content="width=device-width,initial-scale=1"><title>YotCRM Reset</title></head>
+<body style="font-family:system-ui;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f9fafb">
+<div style="text-align:center;padding:20px">
+<h1 style="font-size:24px;color:#1a2b4a">🔄 Resetting YotCRM...</h1>
+<p id="status" style="color:#666;margin:20px 0">Clearing cache and service worker...</p>
+<script>
+async function nuke() {
+  const s = document.getElementById('status');
+  try {
+    // Unregister all service workers
+    const regs = await navigator.serviceWorker.getRegistrations();
+    for (const r of regs) { await r.unregister(); }
+    s.textContent = 'Service workers cleared (' + regs.length + ')...';
+
+    // Delete all caches
+    const keys = await caches.keys();
+    for (const k of keys) { await caches.delete(k); }
+    s.textContent = 'Caches cleared (' + keys.length + '). Redirecting...';
+
+    // Redirect to login
+    setTimeout(() => { window.location.href = '/login'; }, 1500);
+  } catch(e) {
+    s.textContent = 'Error: ' + e.message + '. Try: Settings > Safari > Clear History and Website Data';
+  }
+}
+nuke();
+</script>
+</div>
+</body>
+</html>

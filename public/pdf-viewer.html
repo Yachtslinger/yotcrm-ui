@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=3, user-scalable=yes">
+<title>PDF Viewer</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #525659; }
+#container {
+  width: 100%; height: 100%; overflow-y: auto; overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 8px 0;
+}
+.page-canvas {
+  display: block;
+  max-width: 100%;
+  margin-bottom: 8px;
+  background: white;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+#loading {
+  color: #fff; font-family: -apple-system, sans-serif; font-size: 15px;
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  text-align: center;
+}
+#loading .spinner {
+  width: 28px; height: 28px; border: 3px solid rgba(255,255,255,0.3);
+  border-top-color: #fff; border-radius: 50%;
+  animation: spin 0.8s linear infinite; margin: 0 auto 10px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#error { color: #ff6b6b; font-family: -apple-system, sans-serif; font-size: 14px;
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  text-align: center; padding: 20px; display: none; }
+</style>
+</head>
+<body>
+<div id="loading"><div class="spinner"></div>Loading PDF...</div>
+<div id="error"></div>
+<div id="container"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const params = new URLSearchParams(window.location.search);
+const pdfUrl = params.get('url');
+const container = document.getElementById('container');
+const loadingEl = document.getElementById('loading');
+const errorEl = document.getElementById('error');
+
+if (!pdfUrl) {
+  loadingEl.style.display = 'none';
+  errorEl.style.display = 'block';
+  errorEl.textContent = 'No PDF URL provided';
+} else {
+  renderPdf(pdfUrl);
+}
+
+async function renderPdf(url) {
+  try {
+    // Resolve relative URLs
+    const fullUrl = url.startsWith('/') ? window.location.origin + url : url;
+    const pdf = await pdfjsLib.getDocument(fullUrl).promise;
+    loadingEl.style.display = 'none';
+
+    // Determine scale: fit width to screen
+    const screenWidth = window.innerWidth;
+    const dpr = window.devicePixelRatio || 1;
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 1 });
+      
+      // Scale to fit screen width with 16px padding
+      const desiredWidth = screenWidth - 16;
+      const scale = desiredWidth / viewport.width;
+      const scaledViewport = page.getViewport({ scale: scale * dpr });
+
+      const canvas = document.createElement('canvas');
+      canvas.className = 'page-canvas';
+      canvas.width = scaledViewport.width;
+      canvas.height = scaledViewport.height;
+      canvas.style.width = desiredWidth + 'px';
+      canvas.style.height = (desiredWidth * viewport.height / viewport.width) + 'px';
+      container.appendChild(canvas);
+
+      const ctx = canvas.getContext('2d');
+      await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+    }
+  } catch (err) {
+    loadingEl.style.display = 'none';
+    errorEl.style.display = 'block';
+    errorEl.textContent = 'Failed to load PDF: ' + err.message;
+    console.error('PDF render error:', err);
+  }
+}
+</script>
+</body>
+</html>

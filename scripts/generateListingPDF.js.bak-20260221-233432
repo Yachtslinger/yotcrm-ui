@@ -1,0 +1,529 @@
+#!/usr/bin/env node
+/**
+ * SLINGER / Denison Yachting — Branded PDF Generator v3
+ * 
+ * Usage: node generateListingPDF.js <listing-dir> [--broker=will|paolo|both]
+ * 
+ * --broker=will   (default) Will Noftsinger only
+ * --broker=paolo  Paolo Ameglio only
+ * --broker=both   Both brokers side by side
+ */
+
+const puppeteer = require('puppeteer');
+const fs = require('fs');
+const path = require('path');
+
+// --- ASSETS ---
+const ASSETS = path.join(__dirname, '..', 'assets');
+function b64(file) {
+  const p = path.join(ASSETS, file);
+  if (!fs.existsSync(p)) return '';
+  const ext = path.extname(p).toLowerCase();
+  const mime = ext === '.png' ? 'image/png' : 'image/jpeg';
+  return `data:${mime};base64,${fs.readFileSync(p).toString('base64')}`;
+}
+function imgB64(filepath) {
+  if (!filepath || !fs.existsSync(filepath)) return '';
+  const ext = path.extname(filepath).toLowerCase();
+  const mime = ext === '.png' ? 'image/png' : 'image/jpeg';
+  return `data:${mime};base64,${fs.readFileSync(filepath).toString('base64')}`;
+}
+
+const LOGO = { slinger: b64('slinger-logo.png'), denison: b64('denison-logo.jpg') };
+
+// --- BROKER PROFILES ---
+const BROKERS = {
+  will: {
+    name: 'William (Will) Noftsinger III',
+    company: 'Denison Yachting',
+    address: '1535 SE 17th Street #119, Fort Lauderdale, Florida, United States',
+    phone: '+1 (850) 461-3342',
+    fax: '954-763-3940',
+    email: 'wn@denisonyachting.com',
+    photo: b64('will-photo.jpeg'),
+  },
+  paolo: {
+    name: 'Paolo Ameglio',
+    company: 'Denison Yachting',
+    address: '1535 SE 17th Street #119, Fort Lauderdale, Florida, United States',
+    phone: '+1 (786) 952-6701',
+    fax: '954-763-3940',
+    email: 'pa@denisonyachting.com',
+    photo: b64('paolo-photo.png'),
+  },
+};
+
+function spec(specs, ...keys) {
+  for (const k of keys) {
+    if (specs[k]) return specs[k];
+    const f = Object.entries(specs).find(([sk]) => sk.toLowerCase() === k.toLowerCase());
+    if (f) return f[1];
+  }
+  return '';
+}
+
+function filterImages(images, listingUrl) {
+  // Extract listing ID from the source URL if available
+  let listingId = null;
+  if (listingUrl) {
+    const m = listingUrl.match(/(\d{5,})(?:\/)?(?:\?.*)?$/);
+    if (m) listingId = m[1];
+  }
+  
+  // If no source URL, find the dominant ID from image URLs (majority vote)
+  if (!listingId) {
+    const idCounts = {};
+    images.forEach(img => {
+      if (img.url && img.url.includes('boatsgroup.com')) {
+        const m = img.url.match(/(\d{7,})/);
+        if (m) idCounts[m[1]] = (idCounts[m[1]] || 0) + 1;
+      }
+    });
+    const sorted = Object.entries(idCounts).sort((a, b) => b[1] - a[1]);
+    if (sorted.length > 0 && sorted[0][1] >= 3) listingId = sorted[0][0];
+  }
+  
+  return images.filter(img => {
+    if (!img.localPath || !fs.existsSync(img.localPath)) return false;
+    const sz = fs.statSync(img.localPath).size;
+    if (sz < 10000) return false;
+    if (img.url && img.url.includes('servedby')) return false;
+    // If we know the listing ID, only keep images that match it
+    if (listingId && img.url && img.url.includes('boatsgroup.com') && !img.url.includes(listingId)) return false;
+    return true;
+  });
+}
+
+
+function brokerFooterHTML(mode) {
+  const brokers = mode === 'both' ? [BROKERS.will, BROKERS.paolo] :
+                  mode === 'paolo' ? [BROKERS.paolo] : [BROKERS.will];
+  
+  const cards = brokers.map(b => `
+    <div class="broker-card">
+      <div class="broker-photo">
+        ${b.photo ? `<img src="${b.photo}" />` : `<div style="width:100%;height:100%;background:#ccc"></div>`}
+      </div>
+      <div class="broker-info">
+        <h3>${b.name} | <span class="co">${b.company}</span></h3>
+        <p>${b.address}<br/>Tel: <span class="ph">${b.phone}</span>&nbsp;&nbsp;Fax: ${b.fax}<br/>${b.email}</p>
+      </div>
+    </div>
+  `).join('');
+  
+  return `
+    <div class="broker-footer">
+      <div class="broker-cards ${mode === 'both' ? 'two-brokers' : ''}">${cards}</div>
+      <div class="broker-denison">${LOGO.denison ? `<img src="${LOGO.denison}" />` : ''}</div>
+    </div>`;
+}
+
+
+function fullDescription(data) {
+  const s = data.specs;
+
+  // If the scraper got a real description, use it
+  if (data.description && data.description.length > 200) {
+    return `<p>${data.description.replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br/>')}</p>`;
+  }
+
+  // Otherwise build a generic overview from specs
+  const n = data.boatName || spec(s, 'Name') || 'This vessel';
+  const yr = data.title.match(/^(\d{4})/)?.[1] || '';
+  const make = spec(s, 'Shipyard', 'Make', 'Builder') || '';
+  const model = spec(s, 'Model') || '';
+  const hull = spec(s, 'Hull Material', 'Hull') || '';
+  const loa = spec(s, 'Length Overall', 'LOA') || '';
+  const beam = spec(s, 'Beam') || '';
+  const eng = spec(s, 'Main Engines (2)', 'Engines', 'Engine') || '';
+  const hrs = spec(s, 'Engine Hours') || '';
+  const cs = spec(s, 'Cruising Speed') || '';
+  const ms = spec(s, 'Max Speed') || '';
+  const rng = spec(s, 'Range') || '';
+  const gc = spec(s, 'Guest Cabins') || '';
+  const cc = spec(s, 'Crew Cabins') || '';
+  const stab = spec(s, 'Stabilizers') || '';
+  const cls = spec(s, 'Class', 'Type') || '';
+
+  let d = '';
+
+  // Overview
+  const nameStr = [yr, make, model].filter(Boolean).join(' ');
+  d += `<p><strong>${n}</strong> is a ${nameStr || 'yacht'}`;
+  if (loa) d += `, measuring ${loa}`;
+  if (beam) d += ` with a beam of ${beam}`;
+  d += `.`;
+  if (cls) d += ` She is classified as a ${cls}.`;
+  d += `</p>`;
+
+  // Power & performance
+  if (eng || cs || ms || rng) {
+    d += `<h3>Performance</h3><p>`;
+    if (eng) d += `Powered by ${eng}`;
+    if (hrs) d += ` (${hrs} hours)`;
+    if (eng) d += `. `;
+    if (cs) d += `Cruising speed: ${cs}. `;
+    if (ms) d += `Max speed: ${ms}. `;
+    if (rng) d += `Range: ${rng}. `;
+    if (stab) d += `Stabilizers: ${stab}. `;
+    d += `</p>`;
+  }
+
+  // Accommodation
+  if (gc || cc) {
+    d += `<h3>Accommodation</h3><p>`;
+    if (gc) d += `${gc} guest cabin${gc !== '1' ? 's' : ''}`;
+    if (cc) d += ` and ${cc} crew cabin${cc !== '1' ? 's' : ''}`;
+    d += `.`;
+    const gh = spec(s, 'Guest Heads') || '';
+    const ch = spec(s, 'Crew Heads') || '';
+    if (gh) d += ` ${gh} guest head${gh !== '1' ? 's' : ''}.`;
+    if (ch) d += ` ${ch} crew head${ch !== '1' ? 's' : ''}.`;
+    d += `</p>`;
+  }
+
+  // Build & hull
+  if (hull || make) {
+    d += `<h3>Build</h3><p>`;
+    if (make) d += `Built by ${make}. `;
+    if (hull) d += `${hull} hull. `;
+    const sup = spec(s, 'Superstructure') || '';
+    if (sup) d += `${sup} superstructure. `;
+    const flag = spec(s, 'Flag') || '';
+    if (flag) d += `Flag: ${flag}. `;
+    const gt = spec(s, 'Gross Tonnage') || '';
+    if (gt) d += `Gross tonnage: ${gt}.`;
+    d += `</p>`;
+  }
+
+  return d;
+}
+
+
+
+function buildHTML(data, listingDir, brokerMode) {
+  const { title, price, location, specs, images } = data;
+  const m = title.match(/(\d{4})\s+(.+?)(?:\s*\|\s*(\d+)ft)?$/);
+  const year = m?.[1] || '';
+  const makeModel = m?.[2] || title;
+  const length = m?.[3] ? `${m[3]} ft` : '';
+  const boatName = data.boatName || spec(specs, 'Name') || '';
+  
+  const allImages = filterImages(images, data.sourceUrl || data.url || '');
+  const heroB64 = allImages[0] ? imgB64(allImages[0].localPath) : '';
+  const description = fullDescription(data);
+  
+  const make = spec(specs, 'Shipyard', 'Make', 'Builder') || '';
+  const model = spec(specs, 'Model') || '';
+  const draft = spec(specs, 'Max Draft', 'Draft (Full Load)', 'Draft') || '';
+  const displacement = spec(specs, 'Displacement (Full Load)', 'Displacement') || '';
+  const fuelCap = spec(specs, 'Fuel') || '';
+  const freshWater = spec(specs, 'Fresh Water') || '';
+  const holding = spec(specs, 'Holding', 'Black Water') || '';
+  const generator = spec(specs, 'Generators (2)', 'Generator', 'Electrical Equipment') || '';
+  
+  // Engine data from scrape
+  const engine1Name = spec(specs, 'Main Engines (2)', 'Engine', 'Engines') || '';
+  const engine1Hours = spec(specs, 'Engine Hours') || '';
+  const engine1Power = spec(specs, 'Power') || '';
+  const engine1Fuel = spec(specs, 'Fuel Type') || 'Diesel';
+
+
+  const css = `
+@page { size: A4; margin: 0; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #333; font-size: 9pt; line-height: 1.4; }
+.page { width: 210mm; min-height: 297mm; padding: 0; page-break-after: always; position: relative; padding-bottom: 12mm; }
+.page:last-child { page-break-after: avoid; }
+
+/* COVER */
+.cover-page { padding: 10mm 14mm 14mm; }
+.cover-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 5mm; }
+.cover-title h1 { font-size: 15pt; color: #1a3a5c; font-weight: 400; line-height: 1.2; }
+.cover-title .price { font-size: 13pt; color: #1a3a5c; font-weight: 700; margin-top: 1.5mm; }
+.cover-title .location { font-size: 9pt; color: #888; margin-top: 1mm; }
+.logo-area { width: 130px; flex-shrink: 0; }
+.logo-area img { width: 130px; height: auto; }
+.hero-image { width: 100%; height: 120mm; overflow: hidden; border-radius: 3px; margin-bottom: 4mm; }
+.hero-image img { width: 100%; height: 100%; object-fit: cover; }
+
+/* SPECS TABLE */
+.specs-box { border: 1px solid #d0d5dd; border-radius: 4px; padding: 3mm 4mm; margin-bottom: 4mm; }
+.specs-box h2 { font-size: 11pt; color: #1a3a5c; font-weight: 700; margin-bottom: 2mm; }
+.specs-table { width: 100%; border-collapse: collapse; }
+.specs-table td { padding: 1mm 1.5mm; vertical-align: top; font-size: 7.5pt; }
+.sl { color: #777; width: 11%; white-space: nowrap; }
+.sv { color: #1a3a5c; width: 22%; }
+.sv strong { font-weight: 600; }
+
+/* BROKER FOOTER */
+.broker-footer { display: flex; align-items: center; border-top: 1.5px solid #d0d5dd; padding-top: 3mm; }
+.broker-cards { display: flex; gap: 4mm; flex: 1; }
+.broker-card { display: flex; align-items: center; gap: 3mm; }
+.two-brokers .broker-card { flex: 1; }
+.broker-photo { width: 15mm; height: 15mm; border-radius: 50%; overflow: hidden; flex-shrink: 0; }
+.broker-photo img { width: 100%; height: 100%; object-fit: cover; }
+.broker-info h3 { font-size: 8.5pt; color: #1a3a5c; font-weight: 700; }
+.broker-info .co { font-weight: 400; color: #666; }
+.broker-info p { font-size: 7pt; color: #555; margin-top: 0.5mm; line-height: 1.4; }
+.broker-info .ph { color: #1a3a5c; font-weight: 600; }
+.broker-denison { margin-left: auto; width: 70px; flex-shrink: 0; }
+.broker-denison img { width: 70px; height: auto; }
+.page-num { position: absolute; bottom: 8mm; right: 10mm; font-size: 7pt; color: #bbb; }
+`;
+
+
+  const css2 = `
+/* DETAIL PAGES */
+.detail-page { padding: 10mm 14mm 15mm; }
+.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5mm; padding-bottom: 2.5mm; border-bottom: 2px solid #1a3a5c; }
+.page-header h2 { font-size: 12pt; color: #1a3a5c; font-weight: 400; }
+.page-header .mini-logo { width: 100px; }
+.page-header .mini-logo img { width: 100px; height: auto; }
+
+.desc-content p { font-size: 8pt; line-height: 1.6; color: #333; margin-bottom: 2.5mm; text-align: justify; }
+.desc-content h3 { font-size: 9.5pt; color: #1a3a5c; font-weight: 700; margin-top: 3.5mm; margin-bottom: 1.5mm; border-left: 3px solid #1a3a5c; padding-left: 2mm; }
+.desc-content ul { margin-left: 5mm; margin-bottom: 2.5mm; }
+.desc-content ul li { font-size: 7.5pt; line-height: 1.5; color: #333; margin-bottom: 0.8mm; }
+
+/* Sea trial table */
+.trial-table { width: 100%; border-collapse: collapse; margin: 2mm 0 3mm; font-size: 7.5pt; }
+.trial-table th { background: #1a3a5c; color: #fff; padding: 1.5mm 2mm; text-align: left; font-weight: 600; font-size: 7pt; }
+.trial-table td { padding: 1mm 2mm; border-bottom: 1px solid #eee; }
+.trial-table tr:nth-child(even) td { background: #f8f9fb; }
+
+/* Vessel summary table */
+.vessel-table { width: 100%; border-collapse: collapse; margin: 2mm 0; font-size: 7.5pt; }
+.vessel-table td { padding: 1.2mm 2mm; border-bottom: 1px solid #eee; }
+.vessel-table td:nth-child(odd) { color: #777; width: 15%; }
+.vessel-table td:nth-child(even) { color: #1a3a5c; font-weight: 500; width: 35%; }
+
+/* Engine cards */
+.engine-grid { display: flex; gap: 4mm; margin-bottom: 4mm; }
+.engine-card { flex: 1; background: #f7f9fb; border: 1px solid #e0e4ea; border-radius: 3px; padding: 3mm; }
+.engine-card h3 { font-size: 8.5pt; color: #1a3a5c; font-weight: 700; margin-bottom: 1.5mm; border-bottom: 1px solid #e0e4ea; padding-bottom: 1mm; }
+.specs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; margin-bottom: 4mm; }
+.spec-card { background: #f7f9fb; border: 1px solid #e0e4ea; border-radius: 3px; padding: 2.5mm; }
+.spec-card h3 { font-size: 8.5pt; color: #1a3a5c; font-weight: 700; margin-bottom: 1.5mm; border-bottom: 1px solid #e0e4ea; padding-bottom: 1mm; }
+.detail-table { width: 100%; border-collapse: collapse; }
+.detail-table td { padding: 0.8mm 1.5mm; font-size: 7.5pt; border-bottom: 1px solid #eef0f3; }
+.detail-table td:first-child { color: #777; width: 50%; }
+.detail-table td:last-child { color: #1a3a5c; font-weight: 500; }
+.disclaimer { font-size: 6pt; color: #aaa; margin-top: 3mm; padding-top: 2mm; border-top: 1px solid #e8e8e8; line-height: 1.3; }
+
+/* GALLERY */
+.photo-page { padding: 8mm 8mm 8mm; display: flex; flex-direction: column; gap: 3mm; justify-content: flex-start; }
+.photo-page .page-header { margin-bottom: 2mm; padding-bottom: 0; border-bottom: none; }
+.gallery-row { display: flex; gap: 3mm; height: 85mm; flex-shrink: 0; }
+.gallery-cell { flex: 1; overflow: hidden; border-radius: 2px; height: 100%; }
+.gallery-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+`;
+
+
+  // === PAGE 1: COVER ===
+  const page1 = `
+<div class="page cover-page">
+  <div class="cover-header">
+    <div class="cover-title">
+      <h1>${length} ${year} ${makeModel}${boatName ? ', ' + boatName : ''}</h1>
+      <div class="price">${price}</div>
+      <div class="location">${location}</div>
+    </div>
+    <div class="logo-area">${LOGO.denison ? `<img src="${LOGO.denison}" />` : (LOGO.slinger ? `<img src="${LOGO.slinger}" />` : '')}</div>
+  </div>
+  <div class="hero-image">${heroB64 ? `<img src="${heroB64}" />` : ''}</div>
+  <div class="specs-box">
+    <h2>Boat Details</h2>
+    <table class="specs-table">
+      <tr><td class="sl">Make:</td><td class="sv"><strong>${make}</strong></td>
+          <td class="sl">Class:</td><td class="sv"><strong>${spec(specs, 'Class', 'Type') || 'Motor Yacht'}</strong></td>
+          <td class="sl">Crew Cabins:</td><td class="sv"><strong>${spec(specs, 'Crew Cabins')}</strong></td></tr>
+      <tr><td class="sl">Model:</td><td class="sv"><strong>${model}</strong></td>
+          <td class="sl">Hull Material:</td><td class="sv"><strong>${spec(specs, 'Hull Material', 'Hull')}</strong></td>
+          <td class="sl">Fuel Type:</td><td class="sv"><strong>${spec(specs, 'Fuel Type') || 'Diesel'}</strong></td></tr>
+      <tr><td class="sl">Year:</td><td class="sv"><strong>${year}</strong></td>
+          <td class="sl">Beam:</td><td class="sv"><strong>${spec(specs, 'Beam')}</strong></td>
+          <td class="sl">Max Speed:</td><td class="sv"><strong>${spec(specs, 'Max Speed')}</strong></td></tr>
+      <tr><td class="sl">Price:</td><td class="sv"><strong>${price.split('(')[0].trim()}</strong></td>
+          <td class="sl">Name:</td><td class="sv"><strong>${boatName}</strong></td>
+          <td class="sl">Max Draft:</td><td class="sv"><strong>${draft}</strong></td></tr>
+      <tr><td class="sl">Condition:</td><td class="sv"><strong>${spec(specs, 'Condition') || 'Used'}</strong></td>
+          <td class="sl">Guest Cabins:</td><td class="sv"><strong>${spec(specs, 'Guest Cabins')}</strong></td>
+          <td class="sl">Guest Heads:</td><td class="sv"><strong>${spec(specs, 'Guest Heads')}</strong></td></tr>
+    </table>
+  </div>
+  ${brokerFooterHTML(brokerMode)}
+  <div class="page-num">1</div>
+</div>`;
+
+
+  // === DESCRIPTION PAGES (flows across pages naturally) ===
+  const descPages = `
+<div class="page detail-page">
+  <div class="page-header">
+    <h2>${length} ${year} ${makeModel}${boatName ? ', <em>' + boatName + '</em>' : ''}</h2>
+    <div class="mini-logo">${LOGO.denison ? `<img src="${LOGO.denison}" />` : (LOGO.slinger ? `<img src="${LOGO.slinger}" />` : '')}</div>
+  </div>
+  <div class="desc-content">${description}</div>
+  <div class="disclaimer">The Company offers the details of this vessel in good faith but cannot guarantee or warrant the accuracy of this information nor warrant the condition of the vessel. A buyer should instruct his agents, or his surveyors, to investigate such details as the buyer desires validated. This vessel is offered subject to prior sale, price change, or withdrawal without notice.</div>
+</div>`;
+
+
+  // === SPECS PAGE ===
+  const specsPage = `
+<div class="page detail-page">
+  <div class="page-header">
+    <h2>Information &amp; Features</h2>
+    <div class="mini-logo">${LOGO.denison ? `<img src="${LOGO.denison}" />` : (LOGO.slinger ? `<img src="${LOGO.slinger}" />` : '')}</div>
+  </div>
+  <div class="engine-grid">
+    <div class="engine-card">
+      <h3>${engine1Name || 'Engine'} (Engine 1)</h3>
+      <table class="detail-table">
+        <tr><td>Engine Type:</td><td>Inboard</td></tr>
+        <tr><td>Fuel Type:</td><td>${engine1Fuel}</td></tr>
+        <tr><td>Engine Hours:</td><td>${engine1Hours}</td></tr>
+        ${engine1Power && engine1Power !== 'boats' ? `<tr><td>Power:</td><td>${engine1Power}</td></tr>` : ''}
+      </table>
+    </div>
+    <div class="engine-card">
+      <h3>${engine1Name || 'Engine'} (Engine 2)</h3>
+      <table class="detail-table">
+        <tr><td>Engine Type:</td><td>Inboard</td></tr>
+        <tr><td>Fuel Type:</td><td>${engine1Fuel}</td></tr>
+        <tr><td>Engine Hours:</td><td>${engine1Hours}</td></tr>
+        ${engine1Power && engine1Power !== 'boats' ? `<tr><td>Power:</td><td>${engine1Power}</td></tr>` : ''}
+      </table>
+    </div>
+  </div>
+  <div class="specs-grid">
+    <div class="spec-card"><h3>Dimensions</h3><table class="detail-table">
+      <tr><td>LOA:</td><td>${spec(specs, 'Length Overall', 'LOA') || length}</td></tr>
+      <tr><td>Beam:</td><td>${spec(specs, 'Beam')}</td></tr>
+      <tr><td>Max Draft:</td><td>${draft}</td></tr>
+    </table></div>
+    <div class="spec-card"><h3>Weights</h3><table class="detail-table">
+      <tr><td>Displacement:</td><td>${displacement}</td></tr>
+      <tr><td>Gross Tonnage:</td><td>${spec(specs, 'Gross Tonnage')}</td></tr>
+    </table></div>
+    <div class="spec-card"><h3>Speed &amp; Range</h3><table class="detail-table">
+      <tr><td>Cruising Speed:</td><td>${spec(specs, 'Cruising Speed')}</td></tr>
+      <tr><td>Max Speed:</td><td>${spec(specs, 'Max Speed')}</td></tr>
+      <tr><td>Range:</td><td>${spec(specs, 'Range')}</td></tr>
+    </table></div>
+    <div class="spec-card"><h3>Tanks</h3><table class="detail-table">
+      <tr><td>Fuel:</td><td>${fuelCap}</td></tr>
+      <tr><td>Fresh Water:</td><td>${freshWater}</td></tr>
+      <tr><td>Holding:</td><td>${holding}</td></tr>
+    </table></div>
+    <div class="spec-card"><h3>Accommodations</h3><table class="detail-table">
+      <tr><td>Guest Cabins:</td><td>${spec(specs, 'Guest Cabins')}</td></tr>
+      <tr><td>Crew Cabins:</td><td>${spec(specs, 'Crew Cabins')}</td></tr>
+      <tr><td>Guest Heads:</td><td>${spec(specs, 'Guest Heads')}</td></tr>
+      <tr><td>Crew Heads:</td><td>${spec(specs, 'Crew Heads')}</td></tr>
+    </table></div>
+    <div class="spec-card"><h3>Electrical Equipment</h3><table class="detail-table">
+      <tr><td>Generator:</td><td>${generator}</td></tr>
+      ${spec(specs, 'Emergency Generator') ? `<tr><td>Emergency:</td><td>${spec(specs, 'Emergency Generator')}</td></tr>` : ''}
+    </table></div>
+    <div class="spec-card"><h3>Construction</h3><table class="detail-table">
+      <tr><td>Hull Shape:</td><td>${spec(specs, 'Hull Shape') || 'Monohull'}</td></tr>
+      <tr><td>Hull Material:</td><td>${spec(specs, 'Hull Material', 'Hull')}</td></tr>
+      <tr><td>Flag:</td><td>${spec(specs, 'Flag')}</td></tr>
+      <tr><td>Builder:</td><td>${make}</td></tr>
+    </table></div>
+    <div class="spec-card"><h3>Systems</h3><table class="detail-table">
+      <tr><td>Stabilizers:</td><td>${spec(specs, 'Stabilizers')}</td></tr>
+      <tr><td>Bow Thruster:</td><td>${spec(specs, 'Bow Thruster')}</td></tr>
+      <tr><td>Steering:</td><td>${spec(specs, 'Steering System')}</td></tr>
+      <tr><td>A/C:</td><td>${spec(specs, 'Air Conditioning')}</td></tr>
+    </table></div>
+  </div>
+</div>`;
+
+
+  // === PHOTO GALLERY ===
+  let galleryHTML = '';
+  const galleryImages = allImages.slice(1); // skip hero only
+  for (let i = 0; i < galleryImages.length; i += 6) {
+    const pg = galleryImages.slice(i, i + 6);
+    if (pg.length < 2) continue;
+    const rows = [];
+    for (let j = 0; j < pg.length; j += 2) {
+      const pair = pg.slice(j, j + 2);
+      const cells = pair.map(img => `<div class="gallery-cell"><img src="${imgB64(img.localPath)}" /></div>`).join('');
+      const padded = pair.length < 2 ? cells + '<div class="gallery-cell"></div>' : cells;
+      rows.push(`<div class="gallery-row">${padded}</div>`);
+    }
+    galleryHTML += `<div class="page photo-page"><div class="page-header"><h2></h2><div class="mini-logo">${LOGO.denison ? `<img src="${LOGO.denison}" />` : ''}</div></div>${rows.join('')}<div class="page-num">${i / 6 + 4}</div></div>`;
+  }
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${css}${css2}</style></head><body>
+${page1}${descPages}${specsPage}${galleryHTML}
+</body></html>`;
+}
+
+
+async function generatePDF(listingDir, brokerMode) {
+  console.log(`📄 Generating PDF for: ${listingDir}`);
+  console.log(`👤 Broker: ${brokerMode}`);
+  
+  const jsonPath = path.join(listingDir, 'listing.json');
+  if (!fs.existsSync(jsonPath)) throw new Error(`No listing.json in ${listingDir}`);
+  const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+  
+  const html = buildHTML(data, listingDir, brokerMode);
+  fs.writeFileSync(path.join(listingDir, 'listing.html'), html);
+  console.log(`📝 HTML saved`);
+  
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+  });
+  
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 60000 });
+    
+    const suffix = brokerMode !== 'will' ? `-${brokerMode}` : '';
+    const pdfName = path.basename(listingDir) + suffix + '.pdf';
+    const pdfPath = path.join(listingDir, pdfName);
+    
+    await page.pdf({
+      path: pdfPath,
+      format: 'A4',
+      printBackground: true,
+      preferCSSPageSize: true,
+      margin: { top: 0, right: 0, bottom: 0, left: 0 },
+    });
+    
+    const sz = fs.statSync(pdfPath).size;
+    console.log(`\n✅ PDF Generated: ${pdfPath}`);
+    console.log(`📊 Size: ${(sz / 1024 / 1024).toFixed(1)} MB`);
+    return pdfPath;
+  } finally {
+    await browser.close();
+  }
+}
+
+// --- CLI ---
+const args = process.argv.slice(2);
+const listingDir = args.find(a => !a.startsWith('--'));
+const brokerArg = args.find(a => a.startsWith('--broker='));
+const brokerMode = brokerArg ? brokerArg.split('=')[1] : 'will';
+
+if (!listingDir) {
+  console.log('Usage: node generateListingPDF.js <listing-dir> [--broker=will|paolo|both]');
+  process.exit(1);
+}
+
+if (!['will', 'paolo', 'both'].includes(brokerMode)) {
+  console.error('Invalid broker. Use: will, paolo, or both');
+  process.exit(1);
+}
+
+generatePDF(path.resolve(listingDir), brokerMode).catch(err => {
+  console.error('❌ Failed:', err.message);
+  process.exit(1);
+});

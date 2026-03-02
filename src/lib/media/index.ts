@@ -1,4 +1,4 @@
-import { MediaAsset } from "@/lib/campaign/schema";
+import { MediaAsset } from "../campaign/schema";
 
 type MediaRules = {
   disallowPatterns?: RegExp[];

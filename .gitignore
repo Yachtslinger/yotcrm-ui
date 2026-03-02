@@ -1,6 +1,7 @@
-node_modules
-.next
-out
-.env
-.env.local
-.DS_Store
+node_modules/
+.next/
+.env*
+.tmp-tests/
+*.log
+*.db-shm
+*.db-wal

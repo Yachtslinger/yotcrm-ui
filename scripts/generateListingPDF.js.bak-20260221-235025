@@ -1,0 +1,592 @@
+#!/usr/bin/env node
+/**
+ * SLINGER / Denison Yachting — Branded PDF Generator v4
+ * 
+ * Usage: node generateListingPDF.js <listing-dir> [--broker=will|paolo|both] [--logo=slinger|denison]
+ * 
+ * --broker=will   (default) Will Noftsinger only
+ * --broker=paolo  Paolo Ameglio only
+ * --broker=both   Both brokers side by side
+ * --logo=slinger  (default) Yachtslinger logo on cover + last page
+ * --logo=denison  Denison logo on cover + last page
+ */
+
+const puppeteer = require('puppeteer');
+const fs = require('fs');
+const path = require('path');
+
+// --- ASSETS ---
+const ASSETS = path.join(__dirname, '..', 'assets');
+function b64(file) {
+  const p = path.join(ASSETS, file);
+  if (!fs.existsSync(p)) return '';
+  const ext = path.extname(p).toLowerCase();
+  const mime = ext === '.png' ? 'image/png' : 'image/jpeg';
+  return `data:${mime};base64,${fs.readFileSync(p).toString('base64')}`;
+}
+function imgB64(filepath) {
+  if (!filepath || !fs.existsSync(filepath)) return '';
+  const ext = path.extname(filepath).toLowerCase();
+  const mime = ext === '.png' ? 'image/png' : 'image/jpeg';
+  return `data:${mime};base64,${fs.readFileSync(filepath).toString('base64')}`;
+}
+
+const LOGO = { slinger: b64('slinger-logo.png'), denison: b64('denison-logo.jpg') };
+
+// --- BROKER PROFILES ---
+const BROKERS = {
+  will: {
+    name: 'William (Will) Noftsinger III',
+    company: 'Denison Yachting',
+    address: '1535 SE 17th Street #119, Fort Lauderdale, Florida, United States',
+    phone: '+1 (850) 461-3342',
+    fax: '954-763-3940',
+    email: 'wn@denisonyachting.com',
+    photo: b64('will-photo.jpeg'),
+  },
+  paolo: {
+    name: 'Paolo Ameglio',
+    company: 'Denison Yachting',
+    address: '1535 SE 17th Street #119, Fort Lauderdale, Florida, United States',
+    phone: '+1 (786) 952-6701',
+    fax: '954-763-3940',
+    email: 'pa@denisonyachting.com',
+    photo: b64('paolo-photo.png'),
+  },
+};
+
+// --- SPEC LOOKUP with flexible key matching ---
+function spec(specs, ...keys) {
+  if (!specs) return '';
+  for (const k of keys) {
+    if (specs[k] !== undefined && specs[k] !== null && specs[k] !== '') return String(specs[k]);
+  }
+  // Case-insensitive + stripped colon/whitespace search
+  const normalize = s => s.toLowerCase().replace(/[:\s]+/g, '').replace(/[_-]/g, '');
+  for (const k of keys) {
+    const nk = normalize(k);
+    const found = Object.entries(specs).find(([sk]) => normalize(sk) === nk);
+    if (found && found[1] !== undefined && found[1] !== null && found[1] !== '') return String(found[1]);
+  }
+  // Partial match as last resort
+  for (const k of keys) {
+    const lk = k.toLowerCase();
+    const found = Object.entries(specs).find(([sk]) => sk.toLowerCase().includes(lk) || lk.includes(sk.toLowerCase()));
+    if (found && found[1] !== undefined && found[1] !== null && found[1] !== '') return String(found[1]);
+  }
+  return '';
+}
+
+function filterImages(images, listingUrl) {
+  let listingId = null;
+  if (listingUrl) {
+    const m = listingUrl.match(/(\d{5,})(?:\/)?(?:\?.*)?$/);
+    if (m) listingId = m[1];
+  }
+  if (!listingId) {
+    const idCounts = {};
+    images.forEach(img => {
+      if (img.url && img.url.includes('boatsgroup.com')) {
+        const m = img.url.match(/(\d{7,})/);
+        if (m) idCounts[m[1]] = (idCounts[m[1]] || 0) + 1;
+      }
+    });
+    const sorted = Object.entries(idCounts).sort((a, b) => b[1] - a[1]);
+    if (sorted.length > 0 && sorted[0][1] >= 3) listingId = sorted[0][0];
+  }
+  return images.filter(img => {
+    if (!img.localPath || !fs.existsSync(img.localPath)) return false;
+    const sz = fs.statSync(img.localPath).size;
+    if (sz < 10000) return false;
+    if (img.url && img.url.includes('servedby')) return false;
+    if (listingId && img.url && img.url.includes('boatsgroup.com') && !img.url.includes(listingId)) return false;
+    return true;
+  });
+}
+
+function brokerFooterHTML(mode) {
+  const brokers = mode === 'both' ? [BROKERS.will, BROKERS.paolo] :
+                  mode === 'paolo' ? [BROKERS.paolo] : [BROKERS.will];
+  const cards = brokers.map(b => `
+    <div class="broker-card">
+      <div class="broker-photo">
+        ${b.photo ? `<img src="${b.photo}" />` : `<div style="width:100%;height:100%;background:#ccc"></div>`}
+      </div>
+      <div class="broker-info">
+        <h3>${b.name} | <span class="co">${b.company}</span></h3>
+        <p>${b.address}<br/>Tel: <span class="ph">${b.phone}</span>&nbsp;&nbsp;Fax: ${b.fax}<br/>${b.email}</p>
+      </div>
+    </div>
+  `).join('');
+  return `
+    <div class="broker-footer">
+      <div class="broker-cards ${mode === 'both' ? 'two-brokers' : ''}">${cards}</div>
+      <div class="broker-denison">${LOGO.denison ? `<img src="${LOGO.denison}" />` : ''}</div>
+    </div>`;
+}
+
+// --- SMART DESCRIPTION FORMATTING ---
+function formatDescription(rawText) {
+  if (!rawText || rawText.length < 50) return '';
+  
+  const lines = rawText.split('\n');
+  let html = '';
+  let inList = false;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) {
+      if (inList) { html += '</ul>'; inList = false; }
+      continue;
+    }
+    
+    // Detect section headers: ALL CAPS lines, or short lines that look like headers
+    const isAllCaps = line === line.toUpperCase() && line.length > 3 && line.length < 80 && /[A-Z]/.test(line);
+    const isHeaderLike = line.length < 60 && !line.endsWith('.') && !line.startsWith('-') && !line.startsWith('•') && !line.startsWith('*') && !line.match(/^\d+\./);
+    const nextLine = i + 1 < lines.length ? lines[i + 1]?.trim() : '';
+    const isFollowedByContent = nextLine && nextLine.length > 0;
+    
+    if (isAllCaps && isFollowedByContent) {
+      if (inList) { html += '</ul>'; inList = false; }
+      // Title-case the header
+      const titleCased = line.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+      html += `<h3>${titleCased}</h3>`;
+      continue;
+    }
+    
+    // Detect bullet points
+    const bulletMatch = line.match(/^[-•*]\s+(.+)/) || line.match(/^\(\d+\)\s+(.+)/) || line.match(/^\d+[.)]\s+(.+)/);
+    if (bulletMatch) {
+      if (!inList) { html += '<ul>'; inList = true; }
+      html += `<li>${bulletMatch[1]}</li>`;
+      continue;
+    }
+    
+    // Regular paragraph text
+    if (inList) { html += '</ul>'; inList = false; }
+    html += `<p>${line}</p>`;
+  }
+  if (inList) html += '</ul>';
+  
+  return html;
+}
+
+function fullDescription(data) {
+  const s = data.specs || {};
+
+  // If the scraper got a real description (more than ~50 chars), use it with smart formatting
+  if (data.description && data.description.length > 50) {
+    const formatted = formatDescription(data.description);
+    if (formatted) return formatted;
+    // Fallback: simple paragraph rendering
+    return `<p>${data.description.replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br/>')}</p>`;
+  }
+
+  // Otherwise build a generic overview from specs
+  const n = data.boatName || spec(s, 'Name') || 'This vessel';
+  const yr = data.title?.match(/(\d{4})/)?.[1] || '';
+  const make = spec(s, 'Shipyard', 'Make', 'Builder') || '';
+  const hull = spec(s, 'Hull Material', 'Hull') || '';
+  const beam = spec(s, 'Beam') || '';
+  const hrs = spec(s, 'Engine Hours') || '';
+  const cs = spec(s, 'Cruising Speed') || '';
+  const ms = spec(s, 'Max Speed') || '';
+  const rng = spec(s, 'Range') || '';
+  const gc = spec(s, 'Guest Cabins') || '';
+  const cc = spec(s, 'Crew Cabins') || '';
+  const cls = spec(s, 'Class', 'Type') || '';
+
+  let d = `<p><strong>${n}</strong> is a ${yr}`;
+  if (beam) d += ` with a beam of ${beam}`;
+  d += `.</p>`;
+
+  if (hrs || cs || ms || rng) {
+    d += `<h3>Performance</h3><p>`;
+    if (hrs) d += `(${hrs} hours)`;
+    if (cs) d += `Cruising speed: ${cs}. `;
+    if (ms) d += `Max speed: ${ms}. `;
+    if (rng) d += `Range: ${rng}. `;
+    d += `</p>`;
+  }
+  if (gc || cc) {
+    d += `<h3>Accommodation</h3><p>`;
+    if (gc) d += `${gc} guest cabin${gc !== '1' ? 's' : ''}`;
+    if (cc) d += ` and ${cc} crew cabin${cc !== '1' ? 's' : ''}`;
+    d += `.</p>`;
+  }
+  if (hull) {
+    d += `<h3>Build</h3><p>${hull} hull.</p>`;
+  }
+  return d;
+}
+
+function buildHTML(data, listingDir, brokerMode, logoMode) {
+  const { title, price, location, specs, images } = data;
+  const s = specs || {};
+  const m = title.match(/(\d+)\s*(?:ft|')?\s*(\d{4})\s+(.+)/i) || title.match(/(\d{4})\s+(.+?)(?:\s*\|\s*(\d+)ft)?$/);
+  let year = '', makeModel = '', length = '';
+  if (m && m[1] && m[1].length === 4) { year = m[1]; makeModel = m[2] || title; length = m[3] ? `${m[3]} ft` : ''; }
+  else if (m) { length = m[1] ? `${m[1]} ft` : ''; year = m[2] || ''; makeModel = m[3] || title; }
+  else { makeModel = title; }
+  if (!length) { const lm = spec(s, 'Length Overall', 'LOA'); if (lm) length = lm; }
+  
+  const boatName = data.boatName || spec(s, 'Name') || '';
+  const selectedLogo = logoMode === 'denison' ? LOGO.denison : LOGO.slinger;
+  const allImages = filterImages(images || [], data.sourceUrl || data.url || '');
+  const heroB64 = allImages[0] ? imgB64(allImages[0].localPath) : '';
+  const description = fullDescription(data);
+  
+  // Spec lookups with expanded aliases
+  const make = spec(s, 'Shipyard', 'Make', 'Builder', 'Manufacturer') || '';
+  const model = spec(s, 'Model') || '';
+  const draft = spec(s, 'Max Draft', 'Draft (Full Load)', 'Draft', 'Maximum Draft') || '';
+  const displacement = spec(s, 'Displacement (Full Load)', 'Displacement', 'Displacement (approx)') || '';
+  const grossTonnage = spec(s, 'Gross Tonnage', 'Tonnage') || '';
+  const fuelCap = spec(s, 'Fuel', 'Fuel Capacity', 'Fuel Tank', 'Fuel Tanks') || '';
+  const freshWater = spec(s, 'Fresh Water', 'Water', 'Water Capacity', 'Fresh Water Tank') || '';
+  const holding = spec(s, 'Holding', 'Holding Tank', 'Black Water', 'Sewage') || '';
+  const generator = spec(s, 'Generators (2)', 'Generator', 'Generators', 'Electrical Equipment', 'Main Generator') || '';
+  const emergGen = spec(s, 'Emergency Generator', 'Emergency Gen') || '';
+  const stabilizers = spec(s, 'Stabilizers', 'Stabilizer') || '';
+  const bowThruster = spec(s, 'Bow Thruster', 'Bow Thrusters') || '';
+  const steering = spec(s, 'Steering System', 'Steering') || '';
+  const ac = spec(s, 'Air Conditioning', 'A/C', 'AC', 'HVAC') || '';
+  const flag = spec(s, 'Flag', 'Registry') || '';
+  const hullShape = spec(s, 'Hull Shape', 'Hull Type') || 'Monohull';
+  const hullMaterial = spec(s, 'Hull Material', 'Hull', 'Hull Construction') || '';
+  
+  // Engine data - try to pull actual engine names from scraped data
+  const engine1Name = spec(s, 'Main Engines (2)', 'Main Engine', 'Engine Make', 'Engine Brand', 'Engines') || 'Engine';
+  const engine1Hours = spec(s, 'Engine Hours', 'Engine 1 Hours', 'Hours') || '';
+  const engine2Hours = spec(s, 'Engine 2 Hours') || engine1Hours;
+  const engine1Power = spec(s, 'Power', 'Engine Power', 'HP', 'Horsepower') || '';
+  const engine1Fuel = spec(s, 'Fuel Type', 'Engine Fuel') || 'Diesel';
+  const engineType = spec(s, 'Engine Type', 'Drive Type') || 'Inboard';
+
+  const css = `
+@page { size: A4; margin: 0; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #333; font-size: 9pt; line-height: 1.4; }
+.page { width: 210mm; min-height: 297mm; padding: 0; page-break-after: always; position: relative; padding-bottom: 12mm; }
+.page:last-child { page-break-after: avoid; }
+
+/* COVER */
+.cover-page { padding: 10mm 14mm 14mm; }
+.cover-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 5mm; }
+.cover-title h1 { font-size: 15pt; color: #1a3a5c; font-weight: 400; line-height: 1.2; }
+.cover-title .price { font-size: 13pt; color: #1a3a5c; font-weight: 700; margin-top: 1.5mm; }
+.cover-title .location { font-size: 9pt; color: #888; margin-top: 1mm; }
+.logo-area { width: 130px; flex-shrink: 0; }
+.logo-area img { width: 130px; height: auto; }
+.hero-image { width: 100%; height: 120mm; overflow: hidden; border-radius: 3px; margin-bottom: 4mm; }
+.hero-image img { width: 100%; height: 100%; object-fit: cover; }
+
+/* SPECS TABLE */
+.specs-box { border: 1px solid #d0d5dd; border-radius: 4px; padding: 3mm 4mm; margin-bottom: 4mm; }
+.specs-box h2 { font-size: 11pt; color: #1a3a5c; font-weight: 700; margin-bottom: 2mm; }
+.specs-table { width: 100%; border-collapse: collapse; }
+.specs-table td { padding: 1mm 1.5mm; vertical-align: top; font-size: 7.5pt; }
+.sl { color: #777; width: 11%; white-space: nowrap; }
+.sv { color: #1a3a5c; width: 22%; }
+.sv strong { font-weight: 600; }
+
+/* BROKER FOOTER */
+.broker-footer { display: flex; align-items: center; border-top: 1.5px solid #d0d5dd; padding-top: 3mm; }
+.broker-cards { display: flex; gap: 4mm; flex: 1; }
+.broker-card { display: flex; align-items: center; gap: 3mm; }
+.two-brokers .broker-card { flex: 1; }
+.broker-photo { width: 15mm; height: 15mm; border-radius: 50%; overflow: hidden; flex-shrink: 0; }
+.broker-photo img { width: 100%; height: 100%; object-fit: cover; }
+.broker-info h3 { font-size: 8.5pt; color: #1a3a5c; font-weight: 700; }
+.broker-info .co { font-weight: 400; color: #666; }
+.broker-info p { font-size: 7pt; color: #555; margin-top: 0.5mm; line-height: 1.4; }
+.broker-info .ph { color: #1a3a5c; font-weight: 600; }
+.broker-denison { margin-left: auto; width: 70px; flex-shrink: 0; }
+.broker-denison img { width: 70px; height: auto; }
+.page-num { position: absolute; bottom: 8mm; right: 10mm; font-size: 7pt; color: #bbb; }
+`;
+
+  const css2 = `
+/* DETAIL PAGES */
+.detail-page { padding: 10mm 14mm 15mm; }
+.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5mm; padding-bottom: 2.5mm; border-bottom: 2px solid #1a3a5c; }
+.page-header h2 { font-size: 12pt; color: #1a3a5c; font-weight: 400; }
+/* Middle pages: NO logo - clean header */
+
+.desc-content p { font-size: 8pt; line-height: 1.6; color: #333; margin-bottom: 2.5mm; text-align: justify; }
+.desc-content h3 { font-size: 9.5pt; color: #1a3a5c; font-weight: 700; margin-top: 3.5mm; margin-bottom: 1.5mm; border-left: 3px solid #1a3a5c; padding-left: 2mm; }
+.desc-content ul { margin-left: 5mm; margin-bottom: 2.5mm; }
+.desc-content ul li { font-size: 7.5pt; line-height: 1.5; color: #333; margin-bottom: 0.8mm; }
+.disclaimer { font-size: 6pt; color: #aaa; margin-top: 3mm; padding-top: 2mm; border-top: 1px solid #e8e8e8; line-height: 1.3; }
+
+/* Engine cards */
+.engine-grid { display: flex; gap: 4mm; margin-bottom: 4mm; }
+.engine-card { flex: 1; background: #f7f9fb; border: 1px solid #e0e4ea; border-radius: 3px; padding: 3mm; }
+.engine-card h3 { font-size: 8.5pt; color: #1a3a5c; font-weight: 700; margin-bottom: 1.5mm; border-bottom: 1px solid #e0e4ea; padding-bottom: 1mm; }
+.specs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; margin-bottom: 4mm; }
+.spec-card { background: #f7f9fb; border: 1px solid #e0e4ea; border-radius: 3px; padding: 2.5mm; }
+.spec-card h3 { font-size: 8.5pt; color: #1a3a5c; font-weight: 700; margin-bottom: 1.5mm; border-bottom: 1px solid #e0e4ea; padding-bottom: 1mm; }
+.detail-table { width: 100%; border-collapse: collapse; }
+.detail-table td { padding: 0.8mm 1.5mm; font-size: 7.5pt; border-bottom: 1px solid #eef0f3; }
+.detail-table td:first-child { color: #777; width: 50%; }
+.detail-table td:last-child { color: #1a3a5c; font-weight: 500; }
+
+/* GALLERY */
+.photo-page { padding: 6mm 6mm 6mm; display: flex; flex-direction: column; gap: 2.5mm; justify-content: flex-start; }
+.gallery-row { display: flex; gap: 2.5mm; height: 88mm; flex-shrink: 0; }
+.gallery-cell { flex: 1; overflow: hidden; border-radius: 2px; height: 100%; }
+.gallery-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gallery-cell.empty { visibility: hidden; }
+
+/* LAST PAGE LOGO */
+.last-page-logo { text-align: center; padding: 8mm 0; }
+.last-page-logo img { width: 150px; height: auto; opacity: 0.8; }
+`;
+
+  // Title construction
+  const displayTitle = `${length} ${year} ${makeModel}`.trim();
+  const fullTitle = boatName ? `${displayTitle}, ${boatName}` : displayTitle;
+
+  // === PAGE 1: COVER ===
+  const page1 = `
+<div class="page cover-page">
+  <div class="cover-header">
+    <div class="cover-title">
+      <h1>${fullTitle}</h1>
+      <div class="price">${price}</div>
+      <div class="location">${location}</div>
+    </div>
+    <div class="logo-area">${selectedLogo ? `<img src="${selectedLogo}" />` : ''}</div>
+  </div>
+  <div class="hero-image">${heroB64 ? `<img src="${heroB64}" />` : ''}</div>
+  <div class="specs-box">
+    <h2>Boat Details</h2>
+    <table class="specs-table">
+      <tr><td class="sl">Make:</td><td class="sv"><strong>${make}</strong></td>
+          <td class="sl">Class:</td><td class="sv"><strong>${spec(s, 'Class', 'Type') || 'Motor Yacht'}</strong></td>
+          <td class="sl">Crew Cabins:</td><td class="sv"><strong>${spec(s, 'Crew Cabins')}</strong></td></tr>
+      <tr><td class="sl">Model:</td><td class="sv"><strong>${model}</strong></td>
+          <td class="sl">Hull Material:</td><td class="sv"><strong>${hullMaterial}</strong></td>
+          <td class="sl">Fuel Type:</td><td class="sv"><strong>${engine1Fuel}</strong></td></tr>
+      <tr><td class="sl">Year:</td><td class="sv"><strong>${year}</strong></td>
+          <td class="sl">Beam:</td><td class="sv"><strong>${spec(s, 'Beam')}</strong></td>
+          <td class="sl">Max Speed:</td><td class="sv"><strong>${spec(s, 'Max Speed')}</strong></td></tr>
+      <tr><td class="sl">Price:</td><td class="sv"><strong>${price.split('(')[0].trim()}</strong></td>
+          <td class="sl">Name:</td><td class="sv"><strong>${boatName}</strong></td>
+          <td class="sl">Max Draft:</td><td class="sv"><strong>${draft}</strong></td></tr>
+      <tr><td class="sl">Condition:</td><td class="sv"><strong>${spec(s, 'Condition') || 'Used'}</strong></td>
+          <td class="sl">Guest Cabins:</td><td class="sv"><strong>${spec(s, 'Guest Cabins')}</strong></td>
+          <td class="sl">Guest Heads:</td><td class="sv"><strong>${spec(s, 'Guest Heads')}</strong></td></tr>
+    </table>
+  </div>
+  ${brokerFooterHTML(brokerMode)}
+  <div class="page-num">1</div>
+</div>`;
+
+  // === DESCRIPTION PAGE (flows across pages naturally via Puppeteer) ===
+  const descPages = `
+<div class="page detail-page">
+  <div class="page-header">
+    <h2>${displayTitle}</h2>
+  </div>
+  <div class="desc-content">${description}</div>
+  <div class="disclaimer">The Company offers the details of this vessel in good faith but cannot guarantee or warrant the accuracy of this information nor warrant the condition of the vessel. A buyer should instruct his agents, or his surveyors, to investigate such details as the buyer desires validated. This vessel is offered subject to prior sale, price change, or withdrawal without notice.</div>
+</div>`;
+
+  // === SPECS PAGE (no logo in header) ===
+  const specsPage = `
+<div class="page detail-page">
+  <div class="page-header">
+    <h2>Information &amp; Features</h2>
+  </div>
+  <div class="engine-grid">
+    <div class="engine-card">
+      <h3>Engine (Engine 1)</h3>
+      <table class="detail-table">
+        <tr><td>Engine Type:</td><td>${engineType}</td></tr>
+        <tr><td>Fuel Type:</td><td>${engine1Fuel}</td></tr>
+        <tr><td>Engine Hours:</td><td>${engine1Hours}</td></tr>
+        ${engine1Power && engine1Power !== 'boats' ? `<tr><td>Power:</td><td>${engine1Power}</td></tr>` : ''}
+      </table>
+    </div>
+    <div class="engine-card">
+      <h3>Engine (Engine 2)</h3>
+      <table class="detail-table">
+        <tr><td>Engine Type:</td><td>${engineType}</td></tr>
+        <tr><td>Fuel Type:</td><td>${engine1Fuel}</td></tr>
+        <tr><td>Engine Hours:</td><td>${engine2Hours}</td></tr>
+        ${engine1Power && engine1Power !== 'boats' ? `<tr><td>Power:</td><td>${engine1Power}</td></tr>` : ''}
+      </table>
+    </div>
+  </div>
+  <div class="specs-grid">
+    <div class="spec-card"><h3>Dimensions</h3><table class="detail-table">
+      <tr><td>LOA:</td><td>${spec(s, 'Length Overall', 'LOA') || length}</td></tr>
+      <tr><td>Beam:</td><td>${spec(s, 'Beam')}</td></tr>
+      <tr><td>Max Draft:</td><td>${draft}</td></tr>
+    </table></div>
+    <div class="spec-card"><h3>Weights</h3><table class="detail-table">
+      <tr><td>Displacement:</td><td>${displacement}</td></tr>
+      <tr><td>Gross Tonnage:</td><td>${grossTonnage}</td></tr>
+    </table></div>
+    <div class="spec-card"><h3>Speed &amp; Range</h3><table class="detail-table">
+      <tr><td>Cruising Speed:</td><td>${spec(s, 'Cruising Speed')}</td></tr>
+      <tr><td>Max Speed:</td><td>${spec(s, 'Max Speed')}</td></tr>
+      <tr><td>Range:</td><td>${spec(s, 'Range')}</td></tr>
+    </table></div>
+    <div class="spec-card"><h3>Tanks</h3><table class="detail-table">
+      <tr><td>Fuel:</td><td>${fuelCap}</td></tr>
+      <tr><td>Fresh Water:</td><td>${freshWater}</td></tr>
+      <tr><td>Holding:</td><td>${holding}</td></tr>
+    </table></div>
+    <div class="spec-card"><h3>Accommodations</h3><table class="detail-table">
+      <tr><td>Guest Cabins:</td><td>${spec(s, 'Guest Cabins')}</td></tr>
+      <tr><td>Crew Cabins:</td><td>${spec(s, 'Crew Cabins')}</td></tr>
+      <tr><td>Guest Heads:</td><td>${spec(s, 'Guest Heads')}</td></tr>
+      <tr><td>Crew Heads:</td><td>${spec(s, 'Crew Heads')}</td></tr>
+    </table></div>
+    <div class="spec-card"><h3>Electrical Equipment</h3><table class="detail-table">
+      <tr><td>Generator:</td><td>${generator}</td></tr>
+      ${emergGen ? `<tr><td>Emergency:</td><td>${emergGen}</td></tr>` : ''}
+    </table></div>
+    <div class="spec-card"><h3>Construction</h3><table class="detail-table">
+      <tr><td>Hull Shape:</td><td>${hullShape}</td></tr>
+      <tr><td>Hull Material:</td><td>${hullMaterial}</td></tr>
+      <tr><td>Flag:</td><td>${flag}</td></tr>
+      <tr><td>Builder:</td><td>${make}</td></tr>
+    </table></div>
+    <div class="spec-card"><h3>Systems</h3><table class="detail-table">
+      <tr><td>Stabilizers:</td><td>${stabilizers}</td></tr>
+      <tr><td>Bow Thruster:</td><td>${bowThruster}</td></tr>
+      <tr><td>Steering:</td><td>${steering}</td></tr>
+      <tr><td>A/C:</td><td>${ac}</td></tr>
+    </table></div>
+  </div>
+</div>`;
+
+  // === PHOTO GALLERY (6 per page, 3 rows x 2 cols, no logo in header) ===
+  let galleryHTML = '';
+  const galleryImages = allImages.slice(1); // skip hero
+  let pageNum = 4; // cover=1, desc=2, specs=3
+
+  for (let i = 0; i < galleryImages.length; i += 6) {
+    const pg = galleryImages.slice(i, i + 6);
+    // Skip pages with only 1 orphan image
+    if (pg.length < 2) continue;
+    
+    const rows = [];
+    for (let j = 0; j < 6; j += 2) {
+      const img1 = pg[j];
+      const img2 = pg[j + 1];
+      let cells = '';
+      if (img1) {
+        cells += `<div class="gallery-cell"><img src="${imgB64(img1.localPath)}" /></div>`;
+      } else {
+        cells += `<div class="gallery-cell empty"></div>`;
+      }
+      if (img2) {
+        cells += `<div class="gallery-cell"><img src="${imgB64(img2.localPath)}" /></div>`;
+      } else {
+        cells += `<div class="gallery-cell empty"></div>`;
+      }
+      // Only add row if at least one image exists
+      if (img1 || img2) {
+        rows.push(`<div class="gallery-row">${cells}</div>`);
+      }
+    }
+    
+    galleryHTML += `<div class="page photo-page">${rows.join('')}<div class="page-num">${pageNum}</div></div>`;
+    pageNum++;
+  }
+
+  // Add selected logo to the last gallery page (or create a closing page)
+  // We inject the logo as a footer on the final page
+  const lastPageLogo = selectedLogo ? `
+<div class="last-page-logo">
+  <img src="${selectedLogo}" />
+</div>` : '';
+
+  // If we have gallery pages, append logo to the last one
+  // Otherwise add it to the specs page
+  if (galleryHTML) {
+    // Insert logo before the last page-num div of the last gallery page
+    const lastPageNumIdx = galleryHTML.lastIndexOf('<div class="page-num">');
+    if (lastPageNumIdx > -1) {
+      galleryHTML = galleryHTML.substring(0, lastPageNumIdx) + lastPageLogo + galleryHTML.substring(lastPageNumIdx);
+    }
+  }
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${css}${css2}</style></head><body>
+${page1}${descPages}${specsPage}${galleryHTML}
+</body></html>`;
+}
+
+async function generatePDF(listingDir, brokerMode, logoMode) {
+  console.log(`📄 Generating PDF for: ${listingDir}`);
+  console.log(`👤 Broker: ${brokerMode} | 🏷️ Logo: ${logoMode}`);
+  
+  const jsonPath = path.join(listingDir, 'listing.json');
+  if (!fs.existsSync(jsonPath)) throw new Error(`No listing.json in ${listingDir}`);
+  const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+  
+  const html = buildHTML(data, listingDir, brokerMode, logoMode);
+  fs.writeFileSync(path.join(listingDir, 'listing.html'), html);
+  console.log(`📝 HTML saved`);
+  
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+  });
+  
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 60000 });
+    
+    const suffix = brokerMode !== 'will' ? `-${brokerMode}` : '';
+    const pdfName = path.basename(listingDir) + suffix + '.pdf';
+    const pdfPath = path.join(listingDir, pdfName);
+    
+    await page.pdf({
+      path: pdfPath,
+      format: 'A4',
+      printBackground: true,
+      preferCSSPageSize: true,
+      margin: { top: 0, right: 0, bottom: 0, left: 0 },
+    });
+    
+    const sz = fs.statSync(pdfPath).size;
+    console.log(`\n✅ PDF Generated: ${pdfPath}`);
+    console.log(`📊 Size: ${(sz / 1024 / 1024).toFixed(1)} MB`);
+    return pdfPath;
+  } finally {
+    await browser.close();
+  }
+}
+
+// --- CLI ---
+const args = process.argv.slice(2);
+const listingDir = args.find(a => !a.startsWith('--'));
+const brokerArg = args.find(a => a.startsWith('--broker='));
+const brokerMode = brokerArg ? brokerArg.split('=')[1] : 'will';
+const logoArg = args.find(a => a.startsWith('--logo='));
+const logoMode = logoArg ? logoArg.split('=')[1] : 'slinger';
+
+if (!listingDir) {
+  console.log('Usage: node generateListingPDF.js <listing-dir> [--broker=will|paolo|both] [--logo=slinger|denison]');
+  process.exit(1);
+}
+
+if (!['will', 'paolo', 'both'].includes(brokerMode)) {
+  console.error('Invalid broker. Use: will, paolo, or both');
+  process.exit(1);
+}
+if (!['slinger', 'denison'].includes(logoMode)) {
+  console.error('Invalid logo. Use: slinger or denison');
+  process.exit(1);
+}
+
+generatePDF(path.resolve(listingDir), brokerMode, logoMode).catch(err => {
+  console.error('❌ Failed:', err.message);
+  process.exit(1);
+});

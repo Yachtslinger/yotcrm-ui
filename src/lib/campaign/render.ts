@@ -1,172 +1,202 @@
-import { CampaignData } from "./schema";
-import { DENISON_BANNER_DATA_URL } from "@/lib/branding/banner";
+import type { CampaignData, MediaAsset, BrokerCard } from "./schema";
 
-type RenderResult = { html: string; text: string };
+const NAVY = "#0b2a55";
+const ORANGE = "#e57b2e";
+const LABEL = "#94a3b8";
+const TEXT = "#0f172a";
+const DEFAULT_BANNER = "https://www.denisonyachtsales.com/wp-content/uploads/2023/08/Rectangle-557.png";
 
-const COLORS = {
-  navy: "#0B1A2B",
-  navy600: "#13283E",
-  orange: "#F36C21",
-  slate: "#4A5A6A",
-  muted: "#B7C4D1",
-  bg: "#F5F7FB",
-};
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
-export function renderCampaignHTML(data: CampaignData): RenderResult {
-  const specsRows = buildSpecsGrid(data);
-  const gallery = buildGallery(data);
-  const brokers = buildBrokerBlock(data);
-  const features = data.features.map((line) => `<li>${escapeHtml(line)}</li>`).join("");
+function escapeAttr(value: string): string {
+  return escapeHtml(value).replace(/'/g, "&#39;");
+}
+
+function fallbackHero(data: CampaignData): string {
+  return data.hero?.src || data.gallery[0]?.src || "https://via.placeholder.com/1200x675/0B1A2B/FFFFFF?text=Denison";
+}
+
+function renderGallery(gallery: MediaAsset[]): string {
+  if (!gallery.length) return "";
+  const cells = gallery.slice(0, 4).map((asset) => {
+    return `<td width="50%" style="padding:4px;">
+      <img src="${escapeAttr(asset.src)}" alt="${escapeAttr(asset.alt || "")}" style="width:100%;border-radius:6px;display:block;height:auto;" />
+    </td>`;
+  });
+  return `<tr>
+    <td style="padding:0 20px 16px;">
+      <table role="presentation" width="100%">
+        <tr>${cells.join("")}</tr>
+      </table>
+    </td>
+  </tr>`;
+}
+
+function renderBrokers(brokers: BrokerCard[]): string {
+  if (!brokers.length) return "";
+  return brokers
+    .map(
+      (broker) => `<tr>
+        <td style="padding:12px 20px; border-top:1px solid #e2e8f0;">
+          <table role="presentation" width="100%">
+            <tr>
+              <td width="60" valign="top">
+                ${broker.headshotSrc ? `<img src="${escapeAttr(broker.headshotSrc)}" alt="${escapeAttr(broker.name)}" style="width:56px;height:56px;border-radius:50%;object-fit:cover;" />` : ""}
+              </td>
+              <td valign="top" style="font-size:13px; color:${TEXT}; line-height:1.5;">
+                <strong>${escapeHtml(broker.name)}</strong><br/>
+                ${escapeHtml(broker.title || "")}<br/>
+                ${escapeHtml(broker.email)}<br/>
+                ${escapeHtml(broker.phone)}
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>`
+    )
+    .join("");
+}
+
+function renderSpecs(specs: CampaignData["specs"]): string {
+  const entries = [
+    ["Length", specs.length],
+    ["Beam", specs.beam],
+    ["Draft", specs.draft],
+    ["Year", specs.year],
+    ["Builder", specs.builder],
+    ["Model", specs.model],
+    ["Staterooms", specs.staterooms],
+    ["Power", specs.power],
+  ].filter(([, value]) => value);
+
+  if (!entries.length) return "";
+
+  const rows: string[] = [];
+  for (let i = 0; i < entries.length; i += 2) {
+    const slice = entries.slice(i, i + 2);
+    rows.push(`<tr>
+      ${slice
+        .map(
+          ([label, value]) => `<td width="${100 / slice.length}%" style="padding:12px 0;">
+            <div style="color:${LABEL}; font-size:11px; letter-spacing:0.4px; text-transform:uppercase;">${escapeHtml(label)}</div>
+            <div style="color:#ffffff; font-size:15px; font-weight:700;">${escapeHtml(value)}</div>
+          </td>`
+        )
+        .join("")}
+    </tr>`);
+  }
+
+  return `<tr>
+    <td style="padding:0 20px 20px;">
+      <table role="presentation" width="100%" bgcolor="${NAVY}" style="background:${NAVY}; border-radius:8px; padding:0 20px;">
+        <tr><td style="height:14px; line-height:14px; font-size:0;">&nbsp;</td></tr>
+        <tr>
+          <td style="color:#ffffff; font-size:15px; font-weight:800; letter-spacing:0.3px; border-bottom:1px solid ${ORANGE}; padding-bottom:8px;">
+            Specifications
+          </td>
+        </tr>
+        ${rows.join("")}
+        <tr><td style="height:14px; line-height:14px; font-size:0;">&nbsp;</td></tr>
+      </table>
+    </td>
+  </tr>`;
+}
+
+export function renderCampaignHTML(data: CampaignData): { html: string; text: string } {
+  const banner = data.bannerUrl || DEFAULT_BANNER;
+  const hero = fallbackHero(data);
+  const gallery = renderGallery(data.gallery);
+  const specs = renderSpecs(data.specs);
+  const brokers = renderBrokers(data.brokers);
+  const priceRow = data.specs.price
+    ? `<tr><td align="center" style="padding:8px 24px 12px; font-size:18px; color:${ORANGE}; font-weight:800;">${escapeHtml(
+        data.specs.price
+      )}</td></tr>`
+    : "";
 
   const html = `<!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>${escapeHtml(data.title || "Denison Yachting")}</title>
   <style>
-    body{margin:0;padding:0;background:${COLORS.bg};font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
-    img{border:0;display:block;width:100%;height:auto;}
-    table{border-collapse:collapse;}
-    .container{width:700px;max-width:100%;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;}
+    img { border:0; line-height:0; outline:none; text-decoration:none; }
+    table { border-collapse:collapse; }
+    .preheader { display:none !important; visibility:hidden; opacity:0; height:0; width:0; overflow:hidden; mso-hide:all; }
+    @media (max-width:620px){ .container { width:100% !important; } .pad { padding-left:16px !important; padding-right:16px !important; } }
   </style>
 </head>
-<body>
-  <table role="presentation" class="container">
-    <tr><td style="background:${COLORS.navy};text-align:center;"><img src="${DENISON_BANNER_DATA_URL}" alt="Denison Banner"/></td></tr>
-    ${renderHeroSection(data)}
-    ${data.subtitle ? `<tr><td style="background:${COLORS.orange};color:#fff;font-weight:700;text-align:center;padding:12px 16px;">${escapeHtml(data.subtitle)}</td></tr>` : ""}
-    <tr><td style="padding:28px;">
-      <h1 style="margin:0 0 6px;font-size:28px;color:${COLORS.navy};">${escapeHtml(data.title)}</h1>
-      ${data.specs.location ? `<div style="color:${COLORS.slate};font-size:14px;margin-bottom:12px;">${escapeHtml(data.specs.location)}</div>` : ""}
-      ${data.specs.raw ? `<p style="font-size:16px;color:${COLORS.navy};line-height:1.5;margin:0 0 16px;">${escapeHtml(data.specs.raw)}</p>` : ""}
-      ${renderCTA(data)}
-    </td></tr>
-    ${specsRows}
-    ${gallery}
-    ${features ? `<tr><td style="padding:0 28px 28px;"><h2 style="color:${COLORS.navy};font-size:18px;">KEY FEATURES</h2><ul style="padding-left:18px;color:${COLORS.slate};">${features}</ul></td></tr>` : ""}
-    ${brokers}
-    ${renderFooter(data)}
+<body style="margin:0; background:${NAVY};">
+  <div class="preheader">${escapeHtml(data.subtitle || data.cta.label)}</div>
+  <table role="presentation" width="100%" bgcolor="${NAVY}" style="background:${NAVY};">
+    <tr>
+      <td align="center" class="pad" style="padding:0;">
+        <div style="width:100%;text-align:center;padding:16px 0;">
+          <img src="${escapeAttr(banner)}" alt="Denison Yachting" style="width:560px;max-width:100%;height:auto;display:block;margin:0 auto;" />
+        </div>
+        <table role="presentation" width="600" class="container" style="width:600px; background:#ffffff;">
+          <tr>
+            <td>
+              <img src="${escapeAttr(hero)}" alt="${escapeAttr(data.hero.alt || data.title || "")}" style="width:100%; display:block; height:auto;" />
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 24px 4px; text-align:center;">
+              <div style="font-size:24px; color:${NAVY}; font-weight:800;">${escapeHtml(data.title)}</div>
+              ${
+                data.specs.location
+                  ? `<div style="font-size:12px; color:${NAVY}; margin-top:6px;">📍 ${escapeHtml(data.specs.location)}</div>`
+                  : ""
+              }
+              <div style="margin-top:12px;">
+                <a href="${escapeAttr(data.cta.href)}" style="font-size:13px; color:${ORANGE}; border:2px solid ${ORANGE}; padding:10px 16px; border-radius:6px; text-decoration:none; display:inline-block; font-weight:700; letter-spacing:0.5px; text-transform:uppercase;">
+                  ${escapeHtml(data.cta.label)}
+                </a>
+              </div>
+            </td>
+          </tr>
+          ${
+            data.subtitle
+              ? `<tr><td style="padding:0 24px 16px; font-size:14px; color:${TEXT}; line-height:1.6;">${escapeHtml(data.subtitle)}</td></tr>`
+              : ""
+          }
+          ${priceRow}
+          ${gallery}
+          ${specs}
+          ${brokers}
+          <tr>
+            <td style="padding:16px 24px; font-size:11px; color:${LABEL}; text-align:center;">
+              ${escapeHtml(data.footer.disclaimer)}
+            </td>
+          </tr>
+        </table>
+        <div style="font-size:11px; color:#cbd5e1; margin:14px 0; text-align:center;">
+          © ${new Date().getFullYear()} Denison Yachting — ${escapeHtml(data.brokers[0]?.email || "info@denisonyachting.com")}
+        </div>
+      </td>
+    </tr>
   </table>
 </body>
 </html>`;
 
-  return { html, text: stripHtml(html) };
-}
+  const textParts: string[] = [
+    data.title,
+    data.subtitle,
+    data.specs.location && `Location: ${data.specs.location}`,
+    data.specs.length && `Length: ${data.specs.length}`,
+    data.specs.beam && `Beam: ${data.specs.beam}`,
+    data.specs.draft && `Draft: ${data.specs.draft}`,
+    data.specs.price && `Price: ${data.specs.price}`,
+    data.cta.href && `CTA: ${data.cta.label} - ${data.cta.href}`,
+  ].filter(Boolean) as string[];
 
-function buildSpecsGrid(data: CampaignData): string {
-  const rows = [
-    ["length", "beam", "draft"],
-    ["year", "staterooms", "power"],
-    ["builder", "model", "price"],
-  ];
-  const hasSpecs = rows.flat().some((key) => data.specs[key as keyof typeof data.specs]);
-  if (!hasSpecs) return "";
-  return `<tr><td style="padding:0;">
-    <table role="presentation" width="100%" style="background:${COLORS.navy600};color:#fff;">
-      ${rows
-        .map(
-          (row) =>
-            `<tr>${row
-              .map((field) => `<td style="width:33%;padding:12px;"><div style="font-size:11px;letter-spacing:.08em;color:${COLORS.muted};text-transform:uppercase;">${field.toUpperCase()}</div><div style="font-size:16px;font-weight:600;color:#fff;">${escapeHtml(
-                data.specs[field as keyof typeof data.specs] || ""
-              )}</div></td>`)
-              .join("")}</tr>`
-        )
-        .join("")}
-    </table>
-  </td></tr>`;
-}
-
-function buildGallery(data: CampaignData): string {
-  if (!data.gallery.length) return "";
-  const chunks = chunk(data.gallery, 2);
-  return `<tr><td style="padding:0 28px 28px;">
-    <table role="presentation" width="100%">
-      ${chunks
-        .map(
-          (row) =>
-            `<tr>${row
-              .map(
-                (asset) =>
-                  `<td style="width:50%;padding:6px;"><img src="${asset.src}" alt="${escapeHtml(asset.alt || "")}" style="border-radius:4px;"/></td>`
-              )
-              .join("")}${row.length === 1 ? '<td style="width:50%;padding:6px;"></td>' : ""}</tr>`
-        )
-        .join("")}
-    </table>
-  </td></tr>`;
-}
-
-function buildBrokerBlock(data: CampaignData): string {
-  if (!data.brokers.length) return "";
-  const rows = chunk(data.brokers, 2);
-  return `<tr><td style="background:${COLORS.navy};padding:24px;">
-    <table role="presentation" width="100%" style="color:#fff;">${rows
-      .map(
-        (row) => `<tr>${row
-          .map(
-            (broker) => `<td style="width:${100 / row.length}%;padding:10px;">
-              <table role="presentation"><tr>
-                ${broker.headshotSrc ? `<td style="width:80px;padding-right:12px;"><img src="${broker.headshotSrc}" width="80" height="80" style="border-radius:6px;object-fit:cover;"/></td>` : ""}
-                <td>
-                  <div style="font-weight:700;font-size:16px;">${escapeHtml(broker.name)}</div>
-                  <div style="font-size:13px;color:${COLORS.muted};margin-bottom:6px;">${escapeHtml(broker.title)}</div>
-                  <div style="font-size:13px;color:${COLORS.muted};">Email: ${escapeHtml(broker.email)}${broker.phone ? `<br/>Cell: ${escapeHtml(broker.phone)}` : ""}</div>
-                </td>
-              </tr></table>
-            </td>`
-          )
-          .join("")}${row.length === 1 ? "<td></td>" : ""}</tr>`
-      )
-      .join("")}</table>
-  </td></tr>`;
-}
-
-function renderHeroSection(data: CampaignData): string {
-  return `<tr><td><img src="${data.hero.src}" alt="${escapeHtml(data.hero.alt || "Hero Image")}"/></td></tr>`;
-}
-
-function renderCTA(data: CampaignData): string {
-  return `<table role="presentation" style="margin-top:20px;"><tr><td>
-    <a href="${withUtm(data.cta.href, data.utm)}" style="background:${COLORS.navy};color:#fff;padding:12px 28px;border-radius:4px;font-weight:600;text-decoration:none;display:inline-block;">${escapeHtml(
-    data.cta.label
-  )}</a>
-  </td></tr></table>`;
-}
-
-function renderFooter(data: CampaignData): string {
-  const links = data.footer.links
-    .map(
-      (link) =>
-        `<a href="${link.href}" style="color:${COLORS.muted};text-decoration:none;margin:0 8px;font-size:12px;">${escapeHtml(link.label)}</a>`
-    )
-    .join("");
-  return `<tr><td style="padding:18px;text-align:center;font-size:12px;color:${COLORS.slate};">
-    ${escapeHtml(data.footer.disclaimer)}
-    ${links ? `<div style="margin-top:6px;">${links}</div>` : ""}
-  </td></tr>`;
-}
-
-function withUtm(url: string, utm: CampaignData["utm"]): string {
-  const u = new URL(url);
-  if (utm.source) u.searchParams.set("utm_source", utm.source);
-  if (utm.medium) u.searchParams.set("utm_medium", utm.medium);
-  if (utm.campaign) u.searchParams.set("utm_campaign", utm.campaign);
-  if (utm.content) u.searchParams.set("utm_content", utm.content);
-  return u.toString();
-}
-
-function escapeHtml(str: string): string {
-  return str.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]!));
-}
-
-function stripHtml(html: string): string {
-  return html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function chunk<T>(items: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-  return out;
+  const text = textParts.join("\n");
+  return { html, text };
 }

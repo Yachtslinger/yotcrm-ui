@@ -2,6 +2,8 @@
 "use client";
 
 import * as React from "react";
+import YotcrmServiceToggle from "@/app/components/YotcrmServiceToggle";
+import PageShell from "../components/PageShell";
 
 /* ---------------- Types ---------------- */
 type Status = "Hot" | "Warm" | "Cold";
@@ -119,8 +121,6 @@ function makeId(prefix: "LD" | "BY" = "LD"): string {
   )}`;
   return `${prefix}-${stamp}-${Math.floor(100 + Math.random() * 900)}`;
 }
-const norm = (s: string) => s.toLowerCase();
-
 /* ---------------- Page ---------------- */
 export default function YotCRMPage(): React.ReactElement {
   /* view toggle */
@@ -172,12 +172,12 @@ export default function YotCRMPage(): React.ReactElement {
     if (!filteredLeads.find((l) => l.id === selectedLeadId)) {
       setSelectedLeadId(filteredLeads[0]?.id || "");
     }
-  }, [filteredLeads]);
+  }, [filteredLeads, selectedLeadId]);
   React.useEffect(() => {
     if (!filteredBuyers.find((b) => b.id === selectedBuyerId)) {
       setSelectedBuyerId(filteredBuyers[0]?.id || "");
     }
-  }, [filteredBuyers]);
+  }, [filteredBuyers, selectedBuyerId]);
 
   const selectedLead = React.useMemo<Lead | undefined>(
     () => filteredLeads.find((l) => l.id === selectedLeadId) || filteredLeads[0],
@@ -242,7 +242,7 @@ export default function YotCRMPage(): React.ReactElement {
       setIsEditing(false);
       setEdit(null);
     }
-  }, [selectedLead?.id, view]);
+  }, [selectedLead, view]);
 
   function startEdit(): void {
     if (!selectedLead) return;
@@ -270,16 +270,16 @@ export default function YotCRMPage(): React.ReactElement {
 
   /* ---------------- UI ---------------- */
   return (
-    <main
-      style={{
-        minHeight: "100dvh",
-        background: "#f8fafc",
-        padding: 24,
-        display: "grid",
-        gridTemplateRows: "auto 1fr",
-        gap: 16,
-      }}
-    >
+    <PageShell maxWidth="full" flush>
+      <div
+        style={{
+          minHeight: "calc(100dvh - 60px)",
+          padding: 24,
+          display: "grid",
+          gridTemplateRows: "auto auto 1fr",
+          gap: 16,
+        }}
+      >
       {/* Top Bar */}
       <header
         style={{
@@ -370,6 +370,10 @@ export default function YotCRMPage(): React.ReactElement {
           </a>
         </nav>
       </header>
+
+      <div style={{ maxWidth: 440 }}>
+        <YotcrmServiceToggle />
+      </div>
 
       {/* Body */}
       <section
@@ -844,7 +848,8 @@ export default function YotCRMPage(): React.ReactElement {
           )}
         </div>
       </section>
-    </main>
+      </div>
+    </PageShell>
   );
 }
 
