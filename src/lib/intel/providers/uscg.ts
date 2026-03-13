@@ -6,6 +6,7 @@
  */
 
 import { addSource, logAuditEvent } from "../storage";
+import { type IdentityAnchors, validateAgainstAnchors } from "../validation";
 
 export type USCGResult = {
   vessels: {
@@ -26,7 +27,8 @@ export async function searchUSCG(
   profileId: number,
   leadId: number,
   fullName: string,
-  companyName?: string
+  companyName?: string,
+  anchors?: IdentityAnchors,
 ): Promise<USCGResult> {
   const result: USCGResult = { vessels: [] };
 
@@ -49,6 +51,23 @@ export async function searchUSCG(
       seen.add(key);
       return true;
     });
+
+    // Validate against identity anchors — filter vessels owned by wrong person
+    if (anchors && (anchors.city || anchors.state)) {
+      result.vessels = result.vessels.filter(v => {
+        // Hailing port contains city/state — validate it
+        const portText = (v.hailing_port || "").toLowerCase();
+        if (!portText) return true; // No port data — keep it
+        // Check if state matches
+        if (anchors.state && portText.includes(anchors.state.toLowerCase())) return true;
+        // Check if city matches
+        if (anchors.city && portText.includes(anchors.city.toLowerCase())) return true;
+        // If port doesn't match any known location, but we have limited anchors, keep it flagged
+        // Only reject if we have strong anchor data AND it clearly mismatches
+        if (anchors.city && anchors.state) return false;
+        return true;
+      });
+    }
 
     // Store as enrichment sources
     for (const vessel of result.vessels) {

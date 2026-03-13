@@ -28,7 +28,8 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { leads = [], boats = [], todos = [], pocket_listings = [], iso_requests = [], marinas = [],
-      enrichment_profiles = [], enrichment_sources = [], score_weights = [] } = body;
+      listings = [], enrichment_profiles = [], enrichment_sources = [], score_weights = [],
+      vessel_owners = [], buyer_searches = [] } = body;
 
     const db = getDb();
     try {
@@ -63,6 +64,11 @@ export async function POST(req: Request) {
             primary_address TEXT DEFAULT '', secondary_addresses TEXT DEFAULT '[]',
             identity_confidence INTEGER DEFAULT 0, identity_verifications TEXT DEFAULT '[]',
             manual_corrections TEXT DEFAULT '[]',
+            court_records TEXT DEFAULT '',
+            professional_history TEXT DEFAULT '',
+            relatives TEXT DEFAULT '',
+            additional_properties TEXT DEFAULT '',
+            reverify_status TEXT DEFAULT '',
             created_at TEXT NOT NULL, updated_at TEXT NOT NULL
           );
           CREATE TABLE boats (
@@ -142,8 +148,9 @@ export async function POST(req: Request) {
             estimated_net_worth, net_worth_breakdown, date_of_birth, age,
             spouse_name, spouse_employer, primary_address, secondary_addresses,
             identity_confidence, identity_verifications, manual_corrections,
+            court_records, professional_history, relatives, additional_properties, reverify_status,
             created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         );
         for (const l of leads) {
           insertLead.run(l.id, l.first_name||'', l.last_name||'', l.email||null, l.phone||'',
@@ -155,6 +162,7 @@ export async function POST(req: Request) {
             l.estimated_net_worth||'', l.net_worth_breakdown||'', l.date_of_birth||'', l.age||'',
             l.spouse_name||'', l.spouse_employer||'', l.primary_address||'', l.secondary_addresses||'[]',
             l.identity_confidence||0, l.identity_verifications||'[]', l.manual_corrections||'[]',
+            l.court_records||'', l.professional_history||'', l.relatives||'', l.additional_properties||'', l.reverify_status||'',
             l.created_at||new Date().toISOString(), l.updated_at||new Date().toISOString());
         }
 
@@ -216,6 +224,30 @@ export async function POST(req: Request) {
           insertMarina.run(m.id, m.name||'', m.address||'', m.city||'', m.state||'',
             m.gate_code||'', m.dockmaster_name||'', m.dockmaster_phone||'',
             m.office_phone||'', m.notes||'', m.created_at||new Date().toISOString(), m.updated_at||new Date().toISOString());
+        }
+
+        // Insert my_listings (broker's active yacht listings)
+        if (listings.length > 0) {
+          db.exec(`CREATE TABLE IF NOT EXISTS my_listings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL DEFAULT '', make TEXT DEFAULT '', model TEXT DEFAULT '',
+            year TEXT DEFAULT '', length TEXT DEFAULT '', price TEXT DEFAULT '',
+            location TEXT DEFAULT '', status TEXT DEFAULT 'active',
+            description TEXT DEFAULT '', highlights TEXT DEFAULT '',
+            listing_urls TEXT DEFAULT '[]', pdf_urls TEXT DEFAULT '[]',
+            hero_image TEXT DEFAULT '', notes TEXT DEFAULT '', broker TEXT DEFAULT 'Will',
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+          )`);
+          db.prepare("DELETE FROM my_listings").run();
+          const insertListing = db.prepare(
+            `INSERT INTO my_listings (id, name, make, model, year, length, price, location, status, description, highlights, listing_urls, pdf_urls, hero_image, notes, broker, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          );
+          for (const l of listings) {
+            insertListing.run(l.id, l.name||'', l.make||'', l.model||'', l.year||'', l.length||'', l.price||'', l.location||'',
+              l.status||'active', l.description||'', l.highlights||'', l.listing_urls||'[]', l.pdf_urls||'[]',
+              l.hero_image||'', l.notes||'', l.broker||'Will', l.created_at||new Date().toISOString(), l.updated_at||new Date().toISOString());
+          }
         }
 
         // ── Sync enrichment data (intel scores, sources, weights) ──
@@ -318,10 +350,39 @@ export async function POST(req: Request) {
       });
 
       sync();
+
+      // ── Ensure match/market tables exist (idempotent, never wiped) ──
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS email_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT DEFAULT 'boatwizard', subject TEXT DEFAULT '', sender TEXT DEFAULT '', content_hash TEXT UNIQUE, raw_content TEXT DEFAULT '', listing_count INTEGER DEFAULT 0, match_count INTEGER DEFAULT 0, status TEXT DEFAULT 'processed', error_log TEXT DEFAULT '', created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS parsed_listings (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id INTEGER NOT NULL, make TEXT DEFAULT '', model TEXT DEFAULT '', year TEXT DEFAULT '', loa TEXT DEFAULT '', asking_price TEXT DEFAULT '', location TEXT DEFAULT '', vessel_type TEXT DEFAULT '', features TEXT DEFAULT '', listing_url TEXT DEFAULT '', broker_notes TEXT DEFAULT '', raw_text TEXT DEFAULT '', content_hash TEXT, section TEXT DEFAULT '', brokerage TEXT DEFAULT '', created_at TEXT NOT NULL, FOREIGN KEY (batch_id) REFERENCES email_batches(id) ON DELETE CASCADE);
+        CREATE TABLE IF NOT EXISTS listing_matches (id INTEGER PRIMARY KEY AUTOINCREMENT, listing_id INTEGER NOT NULL, lead_id INTEGER, iso_id INTEGER, batch_id INTEGER NOT NULL, match_score INTEGER DEFAULT 0, confidence TEXT DEFAULT 'low', reasons TEXT DEFAULT '[]', conflicts TEXT DEFAULT '[]', status TEXT DEFAULT 'new', notes TEXT DEFAULT '', contacted_at TEXT, created_at TEXT NOT NULL, FOREIGN KEY (listing_id) REFERENCES parsed_listings(id) ON DELETE CASCADE);
+        CREATE TABLE IF NOT EXISTS match_notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id INTEGER, lead_id INTEGER, type TEXT DEFAULT 'listing_match', title TEXT DEFAULT '', summary TEXT DEFAULT '', read INTEGER DEFAULT 0, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS vessel_owners (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_name TEXT DEFAULT '', owner_email TEXT DEFAULT '', owner_phone TEXT DEFAULT '', make TEXT DEFAULT '', model TEXT DEFAULT '', year TEXT DEFAULT '', length TEXT DEFAULT '', estimated_value TEXT DEFAULT '', location TEXT DEFAULT '', vessel_name TEXT DEFAULT '', how_known TEXT DEFAULT '', description TEXT DEFAULT '', status TEXT DEFAULT 'active', notes TEXT DEFAULT '', lead_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS buyer_searches (id INTEGER PRIMARY KEY AUTOINCREMENT, buyer_name TEXT DEFAULT '', buyer_email TEXT DEFAULT '', buyer_phone TEXT DEFAULT '', make TEXT DEFAULT '', model TEXT DEFAULT '', year_min TEXT DEFAULT '', year_max TEXT DEFAULT '', length_min TEXT DEFAULT '', length_max TEXT DEFAULT '', budget_min TEXT DEFAULT '', budget_max TEXT DEFAULT '', preferred_location TEXT DEFAULT '', description TEXT DEFAULT '', status TEXT DEFAULT 'active', notes TEXT DEFAULT '', lead_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS vessel_matches (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id INTEGER NOT NULL, iso_id INTEGER NOT NULL, match_score INTEGER DEFAULT 0, match_reasons TEXT DEFAULT '', status TEXT DEFAULT 'new', notes TEXT DEFAULT '', created_at TEXT NOT NULL, FOREIGN KEY (owner_id) REFERENCES vessel_owners(id) ON DELETE CASCADE, FOREIGN KEY (iso_id) REFERENCES buyer_searches(id) ON DELETE CASCADE, UNIQUE(owner_id, iso_id));
+      `);
+
+      // ── Sync vessel_owners (upsert by id) ──
+      if (vessel_owners.length > 0) {
+        const upsertOwner = db.prepare(`INSERT INTO vessel_owners (id, owner_name, owner_email, owner_phone, make, model, year, length, estimated_value, location, vessel_name, how_known, description, status, notes, lead_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET owner_name=excluded.owner_name, owner_email=excluded.owner_email, owner_phone=excluded.owner_phone, make=excluded.make, model=excluded.model, year=excluded.year, length=excluded.length, estimated_value=excluded.estimated_value, location=excluded.location, vessel_name=excluded.vessel_name, how_known=excluded.how_known, description=excluded.description, status=excluded.status, notes=excluded.notes, lead_id=excluded.lead_id, updated_at=excluded.updated_at`);
+        for (const o of vessel_owners) {
+          upsertOwner.run(o.id, o.owner_name||'', o.owner_email||'', o.owner_phone||'', o.make||'', o.model||'', o.year||'', o.length||'', o.estimated_value||'', o.location||'', o.vessel_name||'', o.how_known||'', o.description||'', o.status||'active', o.notes||'', o.lead_id||null, o.created_at||new Date().toISOString(), o.updated_at||new Date().toISOString());
+        }
+      }
+
+      // ── Sync buyer_searches (upsert by id) ──
+      if (buyer_searches.length > 0) {
+        const upsertBuyer = db.prepare(`INSERT INTO buyer_searches (id, buyer_name, buyer_email, buyer_phone, make, model, year_min, year_max, length_min, length_max, budget_min, budget_max, preferred_location, description, status, notes, lead_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET buyer_name=excluded.buyer_name, buyer_email=excluded.buyer_email, make=excluded.make, model=excluded.model, year_min=excluded.year_min, year_max=excluded.year_max, length_min=excluded.length_min, length_max=excluded.length_max, budget_min=excluded.budget_min, budget_max=excluded.budget_max, status=excluded.status, notes=excluded.notes, updated_at=excluded.updated_at`);
+        for (const b of buyer_searches) {
+          upsertBuyer.run(b.id, b.buyer_name||'', b.buyer_email||'', b.buyer_phone||'', b.make||'', b.model||'', b.year_min||'', b.year_max||'', b.length_min||'', b.length_max||'', b.budget_min||'', b.budget_max||'', b.preferred_location||'', b.description||'', b.status||'active', b.notes||'', b.lead_id||null, b.created_at||new Date().toISOString(), b.updated_at||new Date().toISOString());
+        }
+      }
+
       db.pragma("foreign_keys = ON");
 
       const counts = { leads: leads.length, boats: boats.length, todos: todos.length,
         pocket_listings: pocket_listings.length, iso_requests: iso_requests.length, marinas: marinas.length,
+        my_listings: listings.length, vessel_owners: vessel_owners.length, buyer_searches: buyer_searches.length,
         enrichment_profiles: enrichment_profiles.length, enrichment_sources: enrichment_sources.length };
       console.log("[SYNC] Database synced:", counts);
       return NextResponse.json({ ok: true, synced: counts });

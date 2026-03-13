@@ -64,4 +64,11 @@ export type Contact = {
   identity_confidence?: number;
   identity_verifications?: string;
   manual_corrections?: string;
+  // Phase 3: reverify deep dive
+  court_records?: string;
+  professional_history?: string;
+  relatives?: string;
+  additional_properties?: string;
+  reverify_status?: string;
+  broker_notes?: string;
 };

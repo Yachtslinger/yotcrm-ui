@@ -109,6 +109,47 @@ export default function ClientsPage(): React.ReactElement {
   const [boatFilter, setBoatFilter] = useState<string>("");
   const [sortBy, setSortBy] = useState<string>("newest");
   const [showFilters, setShowFilters] = useState(false);
+  const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
+  const [batchEnriching, setBatchEnriching] = useState(false);
+
+  const toggleSelect = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedLeads(prev => {
+      const s = new Set(prev);
+      s.has(id) ? s.delete(id) : s.add(id);
+      return s;
+    });
+  };
+  const toggleSelectAll = () => {
+    if (selectedLeads.size === sorted.length) setSelectedLeads(new Set());
+    else setSelectedLeads(new Set(sorted.map(c => c.id)));
+  };
+
+  const runBatchEnrich = async () => {
+    if (selectedLeads.size === 0) return;
+    setBatchEnriching(true);
+    const ids = [...selectedLeads];
+    let done = 0;
+    toast(`Scanning ${ids.length} leads…`);
+    for (const id of ids) {
+      setEnriching(prev => new Set(prev).add(id));
+      try {
+        const res = await fetch("/api/intel/profile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lead_id: Number(id), action: "enrich" }),
+        });
+        const data = await res.json();
+        done++;
+        if (data.ok) toast(`${done}/${ids.length}: ${data.score}/100`);
+      } catch { /* continue */ }
+      finally { setEnriching(prev => { const s = new Set(prev); s.delete(id); return s; }); }
+    }
+    await fetchContacts();
+    setSelectedLeads(new Set());
+    setBatchEnriching(false);
+    toast(`✅ Batch scan complete — ${done}/${ids.length} processed`);
+  };
 
   const runEnrich = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -376,6 +417,19 @@ export default function ClientsPage(): React.ReactElement {
 
       {error && <p className="mb-4 text-sm text-[var(--coral-500)]">{error}</p>}
 
+      {/* Batch Actions */}
+      {selectedLeads.size > 0 && (
+        <div className="mb-3 flex items-center gap-3 px-4 py-2.5 rounded-lg" style={{ background: "var(--brass-50)", border: "1px solid var(--brass-200)" }}>
+          <span className="text-sm font-bold" style={{ color: "var(--brass-700)" }}>{selectedLeads.size} selected</span>
+          <button onClick={runBatchEnrich} disabled={batchEnriching}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-all"
+            style={{ background: "var(--brass-500)" }}>
+            {batchEnriching ? "⟳ Scanning…" : `🔍 Scan ${selectedLeads.size} Lead${selectedLeads.size > 1 ? "s" : ""}`}
+          </button>
+          <button onClick={() => setSelectedLeads(new Set())} className="text-xs font-semibold" style={{ color: "var(--navy-400)" }}>Clear</button>
+        </div>
+      )}
+
       {/* Table */}
       {isLoading ? (
         <LeadsTableSkeleton />
@@ -394,6 +448,10 @@ export default function ClientsPage(): React.ReactElement {
           <table className="w-full hidden md:table">
             <thead className="sticky top-0 z-10">
               <tr className="border-b border-[var(--sand-200)] dark:border-[var(--navy-700)] bg-[var(--sand-50)] dark:bg-[var(--navy-900)]">
+                <th className="px-2 py-3 w-8 text-center">
+                  <input type="checkbox" checked={selectedLeads.size === sorted.length && sorted.length > 0}
+                    onChange={toggleSelectAll} className="rounded border-gray-300" />
+                </th>
                 <th className="px-5 py-3 text-left text-[10px] font-semibold text-[var(--navy-400)] uppercase tracking-widest">Name</th>
                 <th className="px-5 py-3 text-left text-[10px] font-semibold text-[var(--navy-400)] uppercase tracking-widest">Contact</th>
                 <th className="px-5 py-3 text-left text-[10px] font-semibold text-[var(--navy-400)] uppercase tracking-widest">Boat</th>
@@ -412,6 +470,11 @@ export default function ClientsPage(): React.ReactElement {
                   <tr key={c.id}
                     className="hover:bg-[var(--sand-100)] dark:hover:bg-[var(--navy-800)] cursor-pointer transition-colors"
                     onClick={() => router.push(`/clients/${encodeURIComponent(c.id)}`)}>
+                    <td className="px-2 py-3.5 text-center" onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" checked={selectedLeads.has(c.id)}
+                        onChange={() => setSelectedLeads(prev => { const s = new Set(prev); s.has(c.id) ? s.delete(c.id) : s.add(c.id); return s; })}
+                        className="rounded border-gray-300" />
+                    </td>
                     <td className="px-5 py-3.5">
                       <div className="font-semibold text-sm text-[var(--navy-900)] dark:text-white">{name}</div>
                       {c.notes && <div className="text-xs text-[var(--navy-400)] mt-0.5 truncate max-w-[200px]">{c.notes}</div>}

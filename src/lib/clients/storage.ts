@@ -42,6 +42,12 @@ function getDb() {
     ["identity_confidence", "INTEGER DEFAULT 0"],
     ["identity_verifications", "TEXT DEFAULT '[]'"],
     ["manual_corrections", "TEXT DEFAULT '[]'"],
+    ["court_records", "TEXT DEFAULT ''"],
+    ["professional_history", "TEXT DEFAULT ''"],
+    ["relatives", "TEXT DEFAULT ''"],
+    ["additional_properties", "TEXT DEFAULT ''"],
+    ["reverify_status", "TEXT DEFAULT ''"],
+    ["broker_notes", "TEXT DEFAULT ''"],
   ];
   for (const [col, def] of profileCols) {
     try { db.exec(`ALTER TABLE leads ADD COLUMN ${col} ${def}`); } catch { /* already exists */ }
@@ -122,6 +128,12 @@ export type ContactFlat = Contact & {
   identity_confidence?: number;
   identity_verifications?: string;
   manual_corrections?: string;
+  court_records?: string;
+  professional_history?: string;
+  relatives?: string;
+  additional_properties?: string;
+  reverify_status?: string;
+  broker_notes?: string;
 };
 
 const STATUS_TAGS = new Set(["hot", "warm", "cold", "other", "new", "nurture"]);
@@ -220,6 +232,12 @@ export async function readContacts(): Promise<ContactFlat[]> {
         identity_confidence: row.identity_confidence || 0,
         identity_verifications: row.identity_verifications || "[]",
         manual_corrections: row.manual_corrections || "[]",
+        court_records: row.court_records || "",
+        professional_history: row.professional_history || "",
+        relatives: row.relatives || "",
+        additional_properties: row.additional_properties || "",
+        reverify_status: row.reverify_status || "",
+        broker_notes: row.broker_notes || "",
       };
     });
   } finally {
@@ -299,6 +317,12 @@ export async function readContact(id: string): Promise<ContactFlat | null> {
       identity_confidence: row.identity_confidence || 0,
       identity_verifications: row.identity_verifications || "[]",
       manual_corrections: row.manual_corrections || "[]",
+      court_records: row.court_records || "",
+      professional_history: row.professional_history || "",
+      relatives: row.relatives || "",
+      additional_properties: row.additional_properties || "",
+      reverify_status: row.reverify_status || "",
+      broker_notes: row.broker_notes || "",
     };
   } finally {
     db.close();
@@ -323,6 +347,8 @@ export async function updateContact(id: string, updates: Partial<ContactRecord>)
       "estimated_net_worth", "net_worth_breakdown", "date_of_birth", "age",
       "spouse_name", "spouse_employer", "primary_address", "secondary_addresses",
       "identity_confidence", "identity_verifications", "manual_corrections",
+      "court_records", "professional_history", "relatives", "additional_properties", "reverify_status",
+      "broker_notes",
     ];
     for (const field of allowedFields) {
       if (field in updates && updates[field as keyof ContactRecord] !== undefined) {

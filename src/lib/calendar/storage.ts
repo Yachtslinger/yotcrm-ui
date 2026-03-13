@@ -530,10 +530,35 @@ export function getProspects(): { id: number; name: string }[] {
 export function getVessels(): { id: number; name: string }[] {
   const db = getDb();
   try {
-    return db.prepare("SELECT id, (COALESCE(make,'') || ' ' || COALESCE(model,'') || ' ' || COALESCE(year,'')) AS name FROM boats ORDER BY make")
+    return db.prepare("SELECT id, TRIM(COALESCE(make,'') || ' ' || COALESCE(model,'') || ' ' || COALESCE(year,'')) AS name FROM boats ORDER BY make")
       .all() as { id: number; name: string }[];
   } finally { db.close(); }
 }
+
+export function createBoat(name: string): { id: number; name: string } {
+  const db = getDb();
+  try {
+    const now = new Date().toISOString();
+    // Parse "Year Make Model" or just use name as make
+    const parts = name.trim().split(" ");
+    const yearCandidate = parts[0];
+    let make = name.trim();
+    let model = "";
+    let year = "";
+    if (/^\d{4}$/.test(yearCandidate) && parts.length > 1) {
+      year = yearCandidate;
+      make = parts.slice(1).join(" ");
+    }
+    const result = db.prepare(
+      `INSERT INTO boats (lead_id, make, model, year, length, price, location, listing_url, source_email, added_at)
+       VALUES (NULL, ?, ?, ?, '', '', '', '', '', ?)`
+    ).run(make, model, year, now);
+    const id = result.lastInsertRowid as number;
+    return { id, name: TRIM([make, model, year].filter(Boolean).join(" ")) };
+  } finally { db.close(); }
+}
+
+function TRIM(s: string) { return s.trim(); }
 
 // ═══ DEALS ══════════════════════════════════════════════
 

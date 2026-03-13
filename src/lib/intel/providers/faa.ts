@@ -5,6 +5,7 @@
  */
 
 import { addSource, logAuditEvent } from "../storage";
+import { type IdentityAnchors } from "../validation";
 
 export type FAAResult = {
   aircraft: {
@@ -25,7 +26,8 @@ export async function searchFAA(
   profileId: number,
   leadId: number,
   fullName: string,
-  companyName?: string
+  companyName?: string,
+  anchors?: IdentityAnchors,
 ): Promise<FAAResult> {
   const result: FAAResult = { aircraft: [] };
 
@@ -48,14 +50,19 @@ export async function searchFAA(
       return true;
     });
 
-    // Store enrichment sources
+    // Store enrichment sources — lower confidence for name-only matches
+    // FAA doesn't provide owner address in search results, so we can't
+    // validate against location anchors. Flag as "unverified location".
+    const hasLocationAnchors = anchors && (anchors.city || anchors.state);
+    const confidence = hasLocationAnchors ? 60 : 85; // Lower when we can't cross-verify
+
     for (const aircraft of result.aircraft) {
       addSource({
         profile_id: profileId,
         lead_id: leadId,
         source_type: "faa",
         source_url: aircraft.source_url,
-        source_label: `FAA: N${aircraft.n_number} ${aircraft.manufacturer} ${aircraft.model}`,
+        source_label: `FAA: N${aircraft.n_number} ${aircraft.manufacturer} ${aircraft.model}${hasLocationAnchors ? " (name match only)" : ""}`,
         layer: "capital",
         data_key: "aircraft_registration",
         data_value: JSON.stringify({
@@ -65,7 +72,7 @@ export async function searchFAA(
           year: aircraft.year,
           type: aircraft.type,
         }),
-        confidence: 90,
+        confidence: confidence,
         fetched_at: new Date().toISOString(),
       });
     }

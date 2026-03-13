@@ -239,6 +239,16 @@ function seedDefaultWeights(db: Database.Database) {
     ["wealth_signal", "Wealth Signal (Web)", 8, "capital"],
     ["home_ownership", "Home/Property Record Found", 10, "capital"],
     ["company_verified", "Company Details Verified", 8, "capital"],
+    // Phase 2 — Re-verification & deep dive
+    ["identity_reverified", "Identity Re-Verified (Targeted Search)", 15, "identity"],
+    ["multiple_addresses", "Multiple Addresses Discovered", 8, "identity"],
+    ["relatives_found", "Associates/Relatives Found", 5, "identity"],
+    ["professional_history", "Professional History Discovered", 8, "identity"],
+    ["multiple_properties", "Multiple Properties Found", 12, "capital"],
+    ["court_record_clean", "Clean Court Record", 5, "capital"],
+    ["court_bankruptcy", "Bankruptcy Record Found", -20, "risk"],
+    ["court_lien", "Lien/Foreclosure Record Found", -10, "risk"],
+    ["court_lawsuit", "Litigation Record Found", -5, "risk"],
   ];
   for (const [factor, label, points, category] of defaults) {
     insert.run(factor, label, points, category);

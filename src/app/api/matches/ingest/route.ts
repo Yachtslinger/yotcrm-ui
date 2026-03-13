@@ -102,7 +102,8 @@ export async function POST(req: NextRequest) {
     const matchCount = runMatchesForBatch(batch.id);
 
     // Generate "Send Boat" todos for Will & Paolo
-    const todosCreated = generateMatchTodos(batch.id);
+    const { human: humanTodos, bot: botTodos } = generateMatchTodos(batch.id);
+    const todosCreated = humanTodos + botTodos;
 
     return NextResponse.json({
       ok: true,

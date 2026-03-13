@@ -52,6 +52,7 @@ export default function ImportPage() {
   const [searchFilter, setSearchFilter] = useState("");
   const [showDupes, setShowDupes] = useState(true);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [importSource, setImportSource] = useState("VerticalResponse");
 
   /* ─── File Handler ─── */
   const handleFile = useCallback(async (file: File) => {
@@ -125,7 +126,7 @@ export default function ImportPage() {
       const res = await fetch("/api/contacts/bulk-import", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contacts: toImport }),
+        body: JSON.stringify({ contacts: toImport, source: importSource }),
       });
 
       const data = await res.json();
@@ -199,7 +200,7 @@ export default function ImportPage() {
      Render
      ═══════════════════════════════════════════ */
   return (
-    <PageShell title="Import Contacts" subtitle="Upload your Apple Contacts, Google CSV, or any vCard export">
+    <PageShell title="Import Contacts" subtitle="Import from VerticalResponse, Apple Contacts, Google, or any CSV export">
       <div className="max-w-6xl mx-auto space-y-6">
 
         {/* ════ STEP 1: UPLOAD ════ */}
@@ -236,10 +237,26 @@ export default function ImportPage() {
                     or click to browse — supports <strong>.vcf</strong> (vCard) and <strong>.csv</strong>
                   </p>
                 </div>
-                <div className="flex gap-6 mt-4">
-                  <HowTo icon="🍎" label="Apple Contacts" steps="Open Contacts → Select All (⌘A) → File → Export vCard" />
-                  <HowTo icon="📧" label="Google Contacts" steps="contacts.google.com → Export → vCard" />
-                  <HowTo icon="📋" label="Any CRM / Excel" steps="Export as CSV with name, email, phone columns" />
+                <div className="flex gap-6 mt-4 flex-wrap justify-center">
+                  <HowTo icon="📧" label="VerticalResponse" steps={["1. Log into VerticalResponse", "2. Contacts → pick your list", "3. Click Export → Download CSV"]} />
+                  <HowTo icon="🍎" label="Apple Contacts" steps={["1. Open Contacts app", "2. Select All (⌘A)", "3. File → Export vCard"]} />
+                  <HowTo icon="🌐" label="Google Contacts" steps={["1. contacts.google.com", "2. Export → Google CSV or vCard"]} />
+                  <HowTo icon="📋" label="Any CRM / Excel" steps={["1. Export as CSV", "2. Needs Name, Email, Phone columns"]} />
+                </div>
+
+                {/* Source label */}
+                <div className="mt-6 flex items-center gap-3 justify-center">
+                  <label className="text-sm font-medium" style={{ color: "var(--navy-400)" }}>Tag these leads as imported from:</label>
+                  <select
+                    value={importSource}
+                    onChange={e => setImportSource(e.target.value)}
+                    className="form-input text-sm px-3 py-1.5 w-auto"
+                  >
+                    <option value="VerticalResponse">VerticalResponse</option>
+                    <option value="Apple Contacts">Apple Contacts</option>
+                    <option value="Google Contacts">Google Contacts</option>
+                    <option value="csv-import">Other CSV</option>
+                  </select>
                 </div>
               </div>
             )}
@@ -424,13 +441,16 @@ function Stat({ icon, label, value, color }: { icon: React.ReactNode; label: str
   );
 }
 
-function HowTo({ icon, label, steps }: { icon: string; label: string; steps: string }) {
+function HowTo({ icon, label, steps }: { icon: string; label: string; steps: string | string[] }) {
+  const list = Array.isArray(steps) ? steps : [steps];
   return (
-    <div className="text-left max-w-[200px]">
-      <p className="text-sm font-semibold mb-0.5" style={{ color: "var(--foreground)" }}>
+    <div className="text-left max-w-[180px]">
+      <p className="text-sm font-semibold mb-1" style={{ color: "var(--foreground)" }}>
         {icon} {label}
       </p>
-      <p className="text-xs leading-relaxed" style={{ color: "var(--navy-400)" }}>{steps}</p>
+      {list.map((s, i) => (
+        <p key={i} className="text-xs leading-relaxed" style={{ color: "var(--navy-400)" }}>{s}</p>
+      ))}
     </div>
   );
 }

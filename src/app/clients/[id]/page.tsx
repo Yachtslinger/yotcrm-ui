@@ -104,6 +104,11 @@ function LeadDetailPageClient({ id }: { id: string }) {
             identity_confidence: ld.identity_confidence || 0,
             identity_verifications: ld.identity_verifications || "[]",
             manual_corrections: ld.manual_corrections || "[]",
+            court_records: ld.court_records || "",
+            professional_history: ld.professional_history || "",
+            relatives: ld.relatives || "",
+            additional_properties: ld.additional_properties || "",
+            reverify_status: ld.reverify_status || "",
           };
           setLead(refreshed);
           setForm(refreshed);
@@ -175,6 +180,12 @@ function LeadDetailPageClient({ id }: { id: string }) {
           identity_confidence: data.identity_confidence || 0,
           identity_verifications: data.identity_verifications || "[]",
           manual_corrections: data.manual_corrections || "[]",
+          court_records: data.court_records || "",
+          professional_history: data.professional_history || "",
+          relatives: data.relatives || "",
+          additional_properties: data.additional_properties || "",
+          reverify_status: data.reverify_status || "",
+          broker_notes: data.broker_notes || "",
         };
         
         setLead(normalized);
@@ -229,6 +240,7 @@ function LeadDetailPageClient({ id }: { id: string }) {
           primary_address: form.primary_address,
           secondary_addresses: form.secondary_addresses,
           estimated_net_worth: form.estimated_net_worth,
+          broker_notes: form.broker_notes,
         }),
       });
 
@@ -652,6 +664,63 @@ function LeadDetailPageClient({ id }: { id: string }) {
                       </div>
                     </div>
                   )}
+                  {/* Court Records */}
+                  {lead.court_records && !editing && (() => {
+                    try { const cr = JSON.parse(lead.court_records); if (!Array.isArray(cr) || cr.length === 0) return null;
+                      return (<div>
+                        <label className="text-xs text-gray-500 dark:text-gray-400">Court Records ({cr.length})</label>
+                        <div className="mt-1 space-y-1.5">{cr.map((r: any, i: number) => (
+                          <div key={i} className="rounded-lg p-2 text-sm" style={{ background: r.type === "Bankruptcy" ? "rgba(239,68,68,0.05)" : "var(--sand-50, #f9fafb)" }}>
+                            <span className="font-bold" style={{ color: r.type === "Bankruptcy" || r.type === "Foreclosure" ? "#ef4444" : "#374151" }}>{r.type}</span>
+                            {r.date && <span className="ml-2 text-xs text-gray-400">{r.date}</span>}
+                            <div className="text-xs text-gray-600 dark:text-gray-300 mt-0.5">{r.description?.substring(0, 120)}</div>
+                          </div>
+                        ))}</div>
+                      </div>);
+                    } catch { return null; }
+                  })()}
+                  {/* Professional History */}
+                  {lead.professional_history && !editing && (() => {
+                    try { const ph = JSON.parse(lead.professional_history); if (!Array.isArray(ph) || ph.length === 0) return null;
+                      return (<div>
+                        <label className="text-xs text-gray-500 dark:text-gray-400">Professional History</label>
+                        <div className="mt-1 space-y-1">{ph.map((p: any, i: number) => (
+                          <div key={i} className="text-sm"><span className="font-semibold">{p.title}</span> at {p.company}</div>
+                        ))}</div>
+                      </div>);
+                    } catch { return null; }
+                  })()}
+                  {/* Relatives */}
+                  {lead.relatives && !editing && (() => {
+                    try { const rel = JSON.parse(lead.relatives); if (!Array.isArray(rel) || rel.length === 0) return null;
+                      return (<div>
+                        <label className="text-xs text-gray-500 dark:text-gray-400">Known Associates</label>
+                        <div className="flex flex-wrap gap-1.5 mt-1">{rel.map((r: string, i: number) => (
+                          <span key={i} className="px-2 py-0.5 rounded text-sm font-medium bg-gray-100 dark:bg-gray-800">{r}</span>
+                        ))}</div>
+                      </div>);
+                    } catch { return null; }
+                  })()}
+                  {/* Additional Properties */}
+                  {lead.additional_properties && !editing && (() => {
+                    try { const props = JSON.parse(lead.additional_properties); if (!Array.isArray(props) || props.length === 0) return null;
+                      return (<div>
+                        <label className="text-xs text-gray-500 dark:text-gray-400">Properties</label>
+                        <div className="mt-1 space-y-1">{props.map((p: any, i: number) => (
+                          <div key={i} className="text-sm flex justify-between">
+                            <span>{p.address}</span>
+                            {p.estimated_value && <span className="font-bold text-green-600">{p.estimated_value}</span>}
+                          </div>
+                        ))}</div>
+                      </div>);
+                    } catch { return null; }
+                  })()}
+                  {lead.reverify_status && !editing && (
+                    <div>
+                      <label className="text-xs text-gray-500 dark:text-gray-400">Re-Verification</label>
+                      <p className="text-sm font-semibold mt-0.5" style={{ color: "#059669" }}>{lead.reverify_status}</p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -761,23 +830,24 @@ function LeadDetailPageClient({ id }: { id: string }) {
             </div>
           </div>
 
-          {/* Notes Section */}
-          <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
-            <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-4">
-              Customer Message
-            </h2>
-            {editing ? (
-              <textarea
-                value={form?.notes || ""}
-                onChange={(e) => setForm({ ...form!, notes: e.target.value })}
-                className="form-input w-full min-h-[120px] resize-none"
-              />
-            ) : (
-              <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                {lead.notes || "No message"}
+          {/* ═══ BROKER NOTES ═══ */}
+          <BrokerNotesPanel
+            leadId={id}
+            initialValue={lead.broker_notes || ""}
+            onSaved={(val) => { setLead(l => l ? { ...l, broker_notes: val } : l); setForm(f => f ? { ...f, broker_notes: val } : f); }}
+          />
+
+          {/* Customer Message (read-only, from lead form) */}
+          {lead.notes && (
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-6 mt-6">
+              <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">
+                Original Lead Message
+              </h2>
+              <p className="text-gray-500 dark:text-gray-400 whitespace-pre-wrap text-sm italic">
+                {lead.notes}
               </p>
-            )}
-          </div>
+            </div>
+          )}
 
         </div>
       </div>
@@ -785,6 +855,124 @@ function LeadDetailPageClient({ id }: { id: string }) {
   );
 }
 
+
+function BrokerNotesPanel({ leadId, initialValue, onSaved }: {
+  leadId: string;
+  initialValue: string;
+  onSaved: (val: string) => void;
+}) {
+  const { toast } = useToast();
+  const [value, setValue] = React.useState(initialValue);
+  const [saving, setSaving] = React.useState(false);
+  const [saved, setSaved] = React.useState(false);
+  const [listening, setListening] = React.useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recogRef = React.useRef<any>(null);
+  const saveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Keep in sync if parent reloads
+  React.useEffect(() => { setValue(initialValue); }, [initialValue]);
+
+  // Voice setup
+  React.useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    const r = new SR();
+    r.continuous = false; r.interimResults = false; r.lang = "en-US";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    r.onresult = (e: any) => {
+      const transcript = e.results[0][0].transcript;
+      setValue(prev => {
+        const sep = prev && !prev.endsWith("\n") ? " " : "";
+        return prev + sep + transcript;
+      });
+      setListening(false);
+    };
+    r.onerror = () => setListening(false);
+    r.onend   = () => setListening(false);
+    recogRef.current = r;
+  }, []);
+
+  const saveNow = React.useCallback(async (text: string) => {
+    setSaving(true);
+    try {
+      const decodedId = decodeURIComponent(leadId);
+      const res = await fetch(`/api/clients/${encodeURIComponent(decodedId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ broker_notes: text }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      onSaved(text);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch { toast("Failed to save notes", "error"); }
+    finally { setSaving(false); }
+  }, [leadId, onSaved, toast]);
+
+  // Debounced auto-save after 1.5s of inactivity
+  const handleChange = (text: string) => {
+    setValue(text);
+    setSaved(false);
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => saveNow(text), 1500);
+  };
+
+  const toggleVoice = () => {
+    if (!recogRef.current) { toast("Voice not supported in this browser", "info"); return; }
+    if (listening) { recogRef.current.stop(); setListening(false); }
+    else { recogRef.current.start(); setListening(true); }
+  };
+
+  return (
+    <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide flex items-center gap-2">
+          📋 Client Notes
+          <span className="text-[10px] font-normal text-gray-400 normal-case tracking-normal">
+            — what they&apos;re looking for, background, preferences
+          </span>
+        </h2>
+        <div className="flex items-center gap-2">
+          {saved && <span className="text-xs text-green-500 font-semibold">✓ Saved</span>}
+          {saving && <span className="text-xs text-gray-400">Saving…</span>}
+          <button
+            onClick={toggleVoice}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              listening
+                ? "bg-red-500 text-white animate-pulse"
+                : "bg-gray-100 dark:bg-neutral-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-neutral-700"
+            }`}
+            style={{ minHeight: "36px" }}
+          >
+            {listening ? "⏹ Stop" : "🎤 Dictate"}
+          </button>
+        </div>
+      </div>
+
+      {listening && (
+        <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 text-xs font-semibold">
+          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+          Listening… speak now
+        </div>
+      )}
+
+      <textarea
+        value={value}
+        onChange={e => handleChange(e.target.value)}
+        onBlur={() => {
+          if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+          if (value !== initialValue) saveNow(value);
+        }}
+        placeholder="Type or dictate notes about this client — what they're looking for, budget, timeline, personal details, preferences…"
+        className="w-full rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-gray-800 dark:text-gray-100 text-sm p-4 resize-none focus:outline-none focus:ring-2 focus:ring-blue-400 leading-relaxed"
+        style={{ minHeight: "160px", fontSize: "16px" }}
+      />
+      <p className="text-[11px] text-gray-400 mt-1.5">Auto-saves as you type. Use the mic button to dictate.</p>
+    </div>
+  );
+}
 
 function IntelScoreBadge({ score, band }: { score: number; band: string }) {
   const colors: Record<string, { bg: string; text: string }> = {

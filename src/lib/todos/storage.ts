@@ -19,13 +19,19 @@ export type TodoRecord = {
   assignee: string;
   created_at: string;
   completed_at: string | null;
+  email_draft?: string | null;
+  todo_type?: string;
+  queue?: string;
   lead_name?: string;
   lead_email?: string;
 };
 
-export function getAllTodos(): TodoRecord[] {
+export function getAllTodos(queue = "human"): TodoRecord[] {
   const db = getDb();
   try {
+    try { db.exec("ALTER TABLE todos ADD COLUMN email_draft TEXT DEFAULT ''"); } catch {}
+    try { db.exec("ALTER TABLE todos ADD COLUMN todo_type TEXT DEFAULT 'manual'"); } catch {}
+    try { db.exec("ALTER TABLE todos ADD COLUMN queue TEXT DEFAULT 'human'"); } catch {}
     return db.prepare(`
       SELECT t.*,
         CASE WHEN t.lead_id IS NOT NULL
@@ -34,10 +40,11 @@ export function getAllTodos(): TodoRecord[] {
           THEN l.email ELSE NULL END as lead_email
       FROM todos t
       LEFT JOIN leads l ON t.lead_id = l.id
-      ORDER BY t.completed ASC, 
+      WHERE (t.queue = ? OR t.queue IS NULL)
+      ORDER BY t.completed ASC,
         CASE t.priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END,
         t.created_at DESC
-    `).all() as TodoRecord[];
+    `).all(queue) as TodoRecord[];
   } finally {
     db.close();
   }

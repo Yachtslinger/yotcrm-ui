@@ -41,8 +41,10 @@ export function computeScore(profileId: number, leadId: number): ScoreResult {
   const flags: string[] = [];
 
   // Index sources by data_key for fast lookup
+  // FILTER: exclude sources with confidence < 20 (sweep-downgraded wrong-person data)
   const sourcesByKey = new Map<string, EnrichmentSource[]>();
   for (const s of sources) {
+    if (s.confidence < 20) continue; // Skip sweep-rejected sources (⚠ wrong person)
     const list = sourcesByKey.get(s.data_key) || [];
     list.push(s);
     sourcesByKey.set(s.data_key, list);
@@ -63,6 +65,11 @@ export function computeScore(profileId: number, leadId: number): ScoreResult {
     web_executive_mention: "digital", media_presence: "digital",
     specific_inquiry: "engagement", fast_response: "engagement",
     professional_tone: "engagement", yacht_club_member: "engagement",
+    // Phase 2 factors
+    identity_reverified: "identity", multiple_addresses: "identity",
+    relatives_found: "identity", professional_history: "identity",
+    multiple_properties: "capital", court_record_clean: "capital",
+    court_bankruptcy: "risk", court_lien: "risk", court_lawsuit: "risk",
   };
 
   // Max possible points per layer (for normalization)
@@ -375,6 +382,79 @@ function evaluateFactor(weight: ScoreWeight, sources: Map<string, EnrichmentSour
           const co = JSON.parse(hits[0].data_value);
           return { matched: true, source_ids: hits.map(h => h.id), reason: `${co.name}${co.revenue ? ` — ${co.revenue}` : ""}` };
         } catch { return { matched: true, source_ids: hits.map(h => h.id), reason: "Company verified" }; }
+      }
+      return no;
+    }
+    // ── Phase 2: Re-verification & deep dive factors ──
+    case "identity_reverified": {
+      const hits = sources.get("reverify_confirmation") || [];
+      const confirmed = hits.filter(h => { try { return JSON.parse(h.data_value).confirmed; } catch { return false; } });
+      if (confirmed.length > 0) {
+        return { matched: true, source_ids: confirmed.map(h => h.id), reason: `${confirmed.length}/${hits.length} data points confirmed` };
+      }
+      return no;
+    }
+    case "multiple_addresses": {
+      const hits = sources.get("secondary_address") || [];
+      if (hits.length >= 1) {
+        return { matched: true, source_ids: hits.map(h => h.id), reason: `${hits.length} additional address(es)` };
+      }
+      return no;
+    }
+    case "relatives_found": {
+      const hits = sources.get("relative") || [];
+      if (hits.length > 0) {
+        return { matched: true, source_ids: hits.map(h => h.id), reason: `${hits.length} associate(s)` };
+      }
+      return no;
+    }
+    case "professional_history": {
+      const hits = sources.get("professional_history") || [];
+      if (hits.length > 0) {
+        try {
+          const ph = JSON.parse(hits[0].data_value);
+          return { matched: true, source_ids: hits.map(h => h.id), reason: `${hits.length} prior role(s): ${ph.title} at ${ph.company}` };
+        } catch { return { matched: true, source_ids: hits.map(h => h.id), reason: `${hits.length} prior role(s)` }; }
+      }
+      return no;
+    }
+    case "multiple_properties": {
+      const hits = sources.get("additional_property") || [];
+      if (hits.length > 0) {
+        return { matched: true, source_ids: hits.map(h => h.id), reason: `${hits.length} additional property/ies` };
+      }
+      return no;
+    }
+    case "court_record_clean": {
+      const courtHits = sources.get("court_record") || [];
+      // Award points only if enrichment ran but found NO court records
+      const reverifyRan = (sources.get("reverify_confirmation") || []).length > 0;
+      if (reverifyRan && courtHits.length === 0) {
+        return { matched: true, source_ids: [], reason: "No court records found — clean background" };
+      }
+      return no;
+    }
+    case "court_bankruptcy": {
+      const hits = sources.get("court_record") || [];
+      const bankrupt = hits.filter(h => { try { return JSON.parse(h.data_value).type === "Bankruptcy"; } catch { return false; } });
+      if (bankrupt.length > 0) {
+        return { matched: true, source_ids: bankrupt.map(h => h.id), reason: `${bankrupt.length} bankruptcy record(s)` };
+      }
+      return no;
+    }
+    case "court_lien": {
+      const hits = sources.get("court_record") || [];
+      const liens = hits.filter(h => { try { const t = JSON.parse(h.data_value).type; return t === "Lien" || t === "Foreclosure"; } catch { return false; } });
+      if (liens.length > 0) {
+        return { matched: true, source_ids: liens.map(h => h.id), reason: `${liens.length} lien/foreclosure record(s)` };
+      }
+      return no;
+    }
+    case "court_lawsuit": {
+      const hits = sources.get("court_record") || [];
+      const lawsuits = hits.filter(h => { try { const t = JSON.parse(h.data_value).type; return t === "Lawsuit" || t === "Court Filing" || t === "Judgment"; } catch { return false; } });
+      if (lawsuits.length > 0) {
+        return { matched: true, source_ids: lawsuits.map(h => h.id), reason: `${lawsuits.length} litigation record(s)` };
       }
       return no;
     }

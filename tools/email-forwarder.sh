@@ -15,10 +15,12 @@ FAILED_DIR="$HOME/YotCRM/inbox/failed_emails"
 LOG_DIR="$HOME/YotCRM/logs"
 LOG_FILE="$LOG_DIR/email-forwarder.log"
 API_URL="https://yotcrm-production.up.railway.app/api/emails"
+INGEST_URL="https://yotcrm-production.up.railway.app/api/matches/ingest"
 API_KEY="yotcrm-email-intake-2026"
 POLL_INTERVAL=30
 NODE_BIN=$(which node 2>/dev/null || echo "/usr/local/bin/node")
 HEARTBEAT_INTERVAL=10  # log heartbeat every N cycles (10 × 30s = 5 min)
+PULL_INTERVAL=10       # pull Railway → local every N cycles (keeps uploaded contacts safe)
 
 # ── Who gets text notifications ──
 NOTIFY_NUMBERS=("8504613342" "7862512588")
@@ -73,6 +75,30 @@ process_inbox() {
     local filename=$(basename "$filepath")
     local response=""
     local http_code=""
+
+    # ── Detect BoatsGroup digest → route to matches/ingest instead of /api/emails ──
+    local is_boatsgroup=0
+    if grep -qiE "boatsgroup\.com|boatwizard\.com" "$filepath" 2>/dev/null && \
+       grep -qiE "Professional Boat Shopper|New Listings From" "$filepath" 2>/dev/null; then
+      is_boatsgroup=1
+    fi
+
+    if [ "$is_boatsgroup" = "1" ]; then
+      log "🚢 $filename — BoatsGroup digest detected, routing to matches/ingest..."
+      local ingest_response=$(curl -s -w "\n%{http_code}" \
+        --connect-timeout 10 \
+        --max-time 60 \
+        -X POST \
+        -H "Content-Type: text/plain" \
+        -H "X-Api-Key: $API_KEY" \
+        --data-binary "@$filepath" \
+        "$INGEST_URL" 2>/dev/null)
+      local ingest_code=$(echo "$ingest_response" | tail -1)
+      local ingest_body=$(echo "$ingest_response" | sed '$d')
+      log "📦 Ingest result (HTTP $ingest_code): $ingest_body"
+      mv "$filepath" "$PROCESSED_DIR/$filename"
+      continue
+    fi
 
     for attempt in 1 2 3; do
       response=$(curl -s -w "\n%{http_code}" \
@@ -148,6 +174,17 @@ while true; do
   rotate_log
   process_inbox
   CYCLE=$((CYCLE + 1))
+
+  # ── Periodic pull: Railway → local (catches web-uploaded contacts) ──
+  if [ $((CYCLE % PULL_INTERVAL)) -eq 0 ]; then
+    log "🔄 Scheduled pull Railway → local (cycle $CYCLE)..."
+    PULL_OUT=$("$NODE_BIN" /Users/willnoftsinger/yotcrm-deploy/scripts/pullFromRailway.js 2>&1)
+    # Only log if there were actual changes (skip "No changes" noise)
+    if echo "$PULL_OUT" | grep -q "+[1-9]\|new,"; then
+      log "$PULL_OUT"
+    fi
+  fi
+
   if [ $((CYCLE % HEARTBEAT_INTERVAL)) -eq 0 ]; then
     log "💓 Heartbeat — PID $$ alive, cycle $CYCLE"
   fi

@@ -32,6 +32,8 @@ export async function POST(req: NextRequest) {
         "primary_address", "secondary_addresses", "estimated_net_worth",
         "occupation", "employer", "city", "state", "zip",
         "net_worth_range", "net_worth_confidence",
+        "court_records", "professional_history", "relatives",
+        "additional_properties", "reverify_status",
       ]);
 
       const sets: string[] = [];

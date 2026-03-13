@@ -6,6 +6,7 @@ PORT="${PORT:-3001}"
 if [ -d /data ] && [ -w /data ]; then
   export DB_PATH=/data/yotcrm.db
   export DATA_DIR=/data/listings
+  export LISTING_FILES_DIR=/data/listing-files
 
   if [ ! -f /data/yotcrm.db ]; then
     echo "Seeding database to volume..."
@@ -15,14 +16,21 @@ if [ -d /data ] && [ -w /data ]; then
     echo "Seeding complete."
   fi
 
-  # Ensure inbox dirs exist on volume
-  mkdir -p /data/inbox/raw_emails /data/inbox/processed_emails
+  # Migrate any listing-files from old container path to volume (one-time)
+  if [ -d /app/data/listing-files ] && [ "$(ls -A /app/data/listing-files 2>/dev/null)" ]; then
+    echo "Migrating listing-files from container to volume..."
+    cp -n /app/data/listing-files/. /data/listing-files/ 2>/dev/null && echo "Migration complete." || echo "Migration skipped (files may already exist)"
+  fi
+
+  # Ensure all data dirs exist on volume
+  mkdir -p /data/inbox/raw_emails /data/inbox/processed_emails /data/listing-files
   export RAW_EMAILS_DIR=/data/inbox/raw_emails
   export PROCESSED_DIR=/data/inbox/processed_emails
 else
-  mkdir -p /app/data/listings /app/data/inbox/raw_emails /app/data/inbox/processed_emails
+  mkdir -p /app/data/listings /app/data/inbox/raw_emails /app/data/inbox/processed_emails /app/data/listing-files
   export DB_PATH=/app/data/yotcrm.db
   export DATA_DIR=/app/data/listings
+  export LISTING_FILES_DIR=/app/data/listing-files
   export RAW_EMAILS_DIR=/app/data/inbox/raw_emails
   export PROCESSED_DIR=/app/data/inbox/processed_emails
 fi

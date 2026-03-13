@@ -147,11 +147,20 @@ export default function Dossier({ lead, intel, sources, leadName, onRunEnrich, e
             {sources.length} sources collected
           </span>
         </div>
-        <button onClick={onRunEnrich} disabled={enriching}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
-          style={{ background: "var(--brass-500)", color: "#fff" }}>
-          {enriching ? <><span className="animate-spin">⟳</span> Scanning…</> : hasIntel ? "🔄 Re-scan" : "🔍 Run Deep Scan"}
-        </button>
+        <div className="flex items-center gap-2">
+          {hasIntel && (
+            <a href={`/api/intel/report?lead_id=${lead.id}`} target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+              style={{ background: "var(--navy-100)", color: "var(--navy-700)" }}>
+              📄 Report
+            </a>
+          )}
+          <button onClick={onRunEnrich} disabled={enriching}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+            style={{ background: "var(--brass-500)", color: "#fff" }}>
+            {enriching ? <><span className="animate-spin">⟳</span> Scanning…</> : hasIntel ? "🔄 Re-scan" : "🔍 Run Deep Scan"}
+          </button>
+        </div>
       </div>
 
       {!hasIntel ? (

@@ -81,10 +81,11 @@ export async function POST(req: NextRequest) {
    ═══════════════════════════════════════════ */
 export async function PUT(req: NextRequest) {
   try {
-    const { contacts } = await req.json() as { contacts: ParsedContact[] };
+    const { contacts, source: importSource } = await req.json() as { contacts: ParsedContact[]; source?: string };
     if (!contacts?.length) {
       return NextResponse.json({ error: "No contacts to import" }, { status: 400 });
     }
+    const source = importSource || "csv-import";
 
     const db = new Database(DB_PATH, { readonly: false });
     db.pragma("journal_mode = WAL");
@@ -96,7 +97,7 @@ export async function PUT(req: NextRequest) {
 
     const insert = db.prepare(`
       INSERT INTO leads (first_name, last_name, email, phone, status, tags, notes, source, company, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'new', '', ?, 'Apple Contacts', ?, datetime('now'), datetime('now'))
+      VALUES (?, ?, ?, ?, 'new', '', ?, ?, ?, datetime('now'), datetime('now'))
     `);
 
     let imported = 0;
@@ -114,6 +115,7 @@ export async function PUT(req: NextRequest) {
             emailVal,
             c.phone?.trim() || "",
             notes,
+            source,
             c.company?.trim() || "",
           );
           imported++;

@@ -13,6 +13,7 @@
  */
 
 import { addSource, logAuditEvent, getSourcesByProfile } from "../storage";
+import { ddgSearch } from "./ddg";
 
 export type CompanyResult = {
   companies: {
@@ -225,26 +226,11 @@ async function searchOpenCorpForCompany(name: string): Promise<CompanyDetails | 
 async function searchWebForCompany(name: string): Promise<CompanyDetails | null> {
   try {
     const query = `"${name}" company revenue employees founded`;
-    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-        "Accept": "text/html",
-      },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!res.ok) return null;
-    const html = await res.text();
+    const results = await ddgSearch(query, 5);
+    if (results.length === 0) return null;
     const details: CompanyDetails = {};
 
-    // Extract snippets
-    const snippetRegex = /class="result__snippet"[^>]*>(.*?)<\/a>/gs;
-    let match;
-    const allText: string[] = [];
-    while ((match = snippetRegex.exec(html)) !== null) {
-      allText.push(match[1].replace(/<[^>]*>/g, ""));
-    }
-    const text = allText.join(" ").toLowerCase();
+    const text = results.map(r => `${r.title} ${r.snippet}`).join(" ").toLowerCase();
 
     // Revenue patterns
     const revMatch = text.match(/revenue[^.]*?\$[\d,.]+\s*(?:billion|million|B|M)/i)
@@ -265,9 +251,8 @@ async function searchWebForCompany(name: string): Promise<CompanyDetails | null>
     const indMatch = text.match(/(?:is a|is an|leading)\s+([a-zA-Z\s]+?)\s+(?:company|firm|corporation|agency|group)/i);
     if (indMatch) details.industry = indMatch[1].trim().substring(0, 40);
 
-    // Website from results
-    const urlMatch = html.match(/href="([^"]*)"[^>]*class="result__url"/);
-    if (urlMatch) details.website = urlMatch[1];
+    // Website from first result
+    if (results[0]?.url) details.website = results[0].url;
 
     // Headquarters
     const hqMatch = text.match(/(?:headquartered|based|hq)\s+(?:in|at)\s+([A-Z][a-zA-Z\s]+?,\s*[A-Z]{2})/);

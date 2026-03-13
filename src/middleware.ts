@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const COOKIE_NAME = "yotcrm_session";
 
-const PUBLIC_PATHS = ["/login", "/api/auth", "/api/health", "/api/sync", "/api/clients/recent", "/api/emails"];
+const PUBLIC_PATHS = ["/login", "/api/auth", "/api/health", "/api/sync", "/api/clients/recent", "/api/emails", "/api/cards/leads", "/api/cards/views", "/card", "/api/matches/ingest", "/api/public", "/home", "/api/listings/files", "/api/listings/debug"];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -11,6 +11,7 @@ export function middleware(req: NextRequest) {
   if (
     PUBLIC_PATHS.some(p => pathname.startsWith(p)) ||
     pathname.match(/^\/api\/clients\/\d+\/vcard$/) ||
+    pathname.match(/^\/api\/cards\/[^/]+/) ||  // all /api/cards/* routes are public
     pathname.startsWith("/_next") ||
     pathname.startsWith("/icons") ||
     pathname === "/manifest.json" ||

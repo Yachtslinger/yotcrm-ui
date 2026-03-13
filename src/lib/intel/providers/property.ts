@@ -9,6 +9,7 @@
  */
 
 import { addSource, logAuditEvent, getSourcesByProfile } from "../storage";
+import { ddgSearch } from "./ddg";
 
 export type PropertyResult = {
   address: { city: string; state: string; zip: string };
@@ -122,30 +123,15 @@ async function probeZillowSearch(
   name: string, city: string, state: string, zip: string,
 ): Promise<{ value: string; type: string } | null> {
   try {
-    // Use DuckDuckGo to search for property records with owner name
     const query = `"${name}" property "${city}" "${state}" home value zillow OR redfin OR realtor`;
-    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-        "Accept": "text/html",
-      },
-      signal: AbortSignal.timeout(10000),
-    });
+    const results = await ddgSearch(query, 5);
 
-    if (!res.ok) return null;
-    const html = await res.text();
-
-    // Look for dollar amounts near property/home/value keywords
-    const valuePattern = /\$[\d,]+(?:\.\d{2})?(?:\s*(?:million|M|k|K))?/g;
-    const snippets = html.match(/class="result__snippet"[^>]*>(.*?)<\/a>/gs) || [];
-    
-    for (const snippet of snippets) {
-      const text = snippet.replace(/<[^>]*>/g, "").toLowerCase();
+    for (const r of results) {
+      const text = `${r.title} ${r.snippet}`.toLowerCase();
       if (text.includes(name.split(" ")[name.split(" ").length - 1].toLowerCase())) {
+        const valuePattern = /\$[\d,]+(?:\.\d{2})?(?:\s*(?:million|M|k|K))?/g;
         const values = text.match(valuePattern);
         if (values) {
-          // Find the largest reasonable home value
           for (const v of values) {
             const num = parseValue(v);
             if (num >= 100000 && num <= 500000000) {

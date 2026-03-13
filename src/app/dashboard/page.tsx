@@ -399,6 +399,82 @@ export default function DashboardPage() {
             </div>
           )}
 
+          {/* Digital Cards */}
+          <div className="card-elevated overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--sand-200)] dark:border-[var(--navy-700)]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-[var(--brass-50)] dark:bg-[var(--brass-500)]/10 flex items-center justify-center">
+                  <span className="text-sm">🪪</span>
+                </div>
+                <h2 className="font-semibold text-sm text-[var(--navy-900)] dark:text-white">Digital Cards</h2>
+              </div>
+            </div>
+            <div className="divide-y divide-[var(--sand-200)] dark:divide-[var(--navy-800)]">
+              {[
+                {
+                  id: "will", name: "Will Noftsinger",
+                  title: "Yacht Broker · Build Consultant",
+                  company: "Denison · YachtSlinger · Oceanking",
+                  phone: "8504613342", phoneLabel: "850.461.3342",
+                  email: "WN@DenisonYachting.com",
+                  photo: "https://firebasestorage.googleapis.com/v0/b/poplco.appspot.com/o/photos%2f42958226346-icon-1740663706841399017.jpg?alt=media",
+                  color: "#0a2e5c",
+                },
+                {
+                  id: "paolo", name: "Paolo Ameglio",
+                  title: "Yacht Broker",
+                  company: "Denison Yachting",
+                  phone: "7862512588", phoneLabel: "786.251.2588",
+                  email: "PGA@DenisonYachting.com",
+                  photo: null,
+                  color: "#1a3a4a",
+                },
+              ].map(broker => (
+                <div key={broker.id} className="px-4 py-3.5">
+                  <div className="flex items-center gap-3 mb-2.5">
+                    <div
+                      className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 overflow-hidden border-2"
+                      style={{ borderColor: "var(--brass-200)", background: broker.color }}
+                    >
+                      {broker.photo
+                        ? <img src={broker.photo} alt={broker.name} className="w-full h-full object-cover object-top" />
+                        : <span className="text-white font-semibold text-sm">
+                            {broker.name.split(" ").map(w => w[0]).join("")}
+                          </span>}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-[var(--navy-900)] dark:text-white leading-tight truncate">{broker.name}</div>
+                      <div className="text-[10px] text-[var(--navy-400)] truncate mt-0.5">{broker.title}</div>
+                    </div>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <a
+                      href={`tel:${broker.phone}`}
+                      className="flex-1 text-center text-[10px] font-semibold tracking-wide py-1.5 rounded-lg border transition-colors"
+                      style={{ borderColor: "var(--brass-200)", color: "var(--brass-500)" }}
+                    >
+                      📞 Call
+                    </a>
+                    <a
+                      href={`mailto:${broker.email}`}
+                      className="flex-1 text-center text-[10px] font-semibold tracking-wide py-1.5 rounded-lg border transition-colors"
+                      style={{ borderColor: "var(--sand-300)", color: "var(--navy-500)" }}
+                    >
+                      ✉ Email
+                    </a>
+                    <Link
+                      href={`/card/${broker.id}`}
+                      className="flex-1 text-center text-[10px] font-semibold tracking-wide py-1.5 rounded-lg border transition-colors"
+                      style={{ borderColor: "var(--sand-300)", color: "var(--navy-500)" }}
+                    >
+                      🪪 Card
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
           {/* Quick Actions */}
           <div className="card-elevated p-5">
             <h2 className="font-semibold text-sm text-[var(--navy-900)] dark:text-white mb-3.5">Quick Actions</h2>

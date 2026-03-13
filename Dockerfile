@@ -29,8 +29,8 @@ RUN npm run build
 # Remove build-only deps to save memory
 RUN apt-get purge -y python3 make g++ && apt-get autoremove -y
 
-# Create data directories
-RUN mkdir -p /data/listings /data/inbox/raw_emails /data/inbox/processed_emails
+# Create app-local data fallback dirs (NOT /data — that dir must only exist when Railway volume is mounted)
+RUN mkdir -p /app/data/listings /app/data/inbox/raw_emails /app/data/inbox/processed_emails /app/data/listing-files
 
 # Make start script executable
 RUN chmod +x /app/start.sh

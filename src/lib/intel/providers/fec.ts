@@ -10,6 +10,7 @@
  */
 
 import { addSource, logAuditEvent } from "../storage";
+import { type IdentityAnchors, validateFECRecord } from "../validation";
 
 // Free FEC API key (demo key works, rate-limited)
 const FEC_API_KEY = process.env.FEC_API_KEY || "DEMO_KEY";
@@ -41,6 +42,7 @@ export async function searchFEC(
   profileId: number,
   leadId: number,
   fullName: string,
+  anchors?: IdentityAnchors,
 ): Promise<FECResult> {
   const result: FECResult = {
     donations: [],
@@ -78,10 +80,10 @@ export async function searchFEC(
         return result;
       }
       const altData = await altRes.json();
-      processResults(altData, result);
+      processResults(altData, result, anchors);
     } else {
       const data = await response.json();
-      processResults(data, result);
+      processResults(data, result, anchors);
     }
 
     // Store discovered data as enrichment sources
@@ -145,6 +147,7 @@ export async function searchFEC(
       employer: result.employer,
       occupation: result.occupation,
       location: result.address_city ? `${result.address_city}, ${result.address_state}` : "",
+      anchor_filtered: anchors ? true : false,
     });
   } catch (err: any) {
     result.error = err.message;
@@ -156,15 +159,31 @@ export async function searchFEC(
 
 // ─── Process FEC API results ────────────────────────────────────────
 
-function processResults(data: any, result: FECResult) {
+function processResults(data: any, result: FECResult, anchors?: IdentityAnchors) {
   const results = data?.results || [];
   if (results.length === 0) return;
 
   // Track most recent employer/occupation/address (most recent donation wins)
   const employerCounts = new Map<string, number>();
   const occupationCounts = new Map<string, number>();
+  let rejectedCount = 0;
 
   for (const r of results) {
+    // ── VALIDATION GATE: Filter by identity anchors ──
+    if (anchors && (anchors.city || anchors.state || anchors.employer || anchors.emailDomain)) {
+      const validation = validateFECRecord({
+        contributor_city: r.contributor_city,
+        contributor_state: r.contributor_state,
+        contributor_zip: (r.contributor_zip || "").substring(0, 5),
+        contributor_employer: r.contributor_employer,
+      }, anchors);
+
+      if (!validation.accepted && !validation.flagged) {
+        rejectedCount++;
+        continue; // Skip this record — different person
+      }
+    }
+
     const donation = {
       contributor_name: r.contributor_name || "",
       contributor_city: r.contributor_city || "",

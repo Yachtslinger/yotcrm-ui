@@ -180,11 +180,11 @@ export default function VesselsPage(): React.ReactElement {
         </div>
 
         <div className="mb-3">
-          <label className="form-label">YachtWorld Listing URL</label>
+          <label className="form-label">Listing URL</label>
           <input
             value={url}
             onChange={e => setUrl(e.target.value)}
-            placeholder="https://www.yachtworld.com/yacht/..."
+            placeholder="denisonyachtsales.com or yachtworld.com URL"
             className="form-input"
             disabled={generating}
           />
@@ -446,13 +446,15 @@ export default function VesselsPage(): React.ReactElement {
           {/* Toolbar */}
           <div
             className="flex items-center justify-between px-4 bg-gray-50 dark:bg-neutral-900 border-b border-gray-200 dark:border-neutral-800 shrink-0"
-            style={{ paddingTop: "max(12px, env(safe-area-inset-top))", minHeight: "56px" }}
+            style={{ paddingTop: "max(16px, env(safe-area-inset-top))", paddingBottom: 12, minHeight: 64 }}
           >
+            {/* Done button — big tap target, iOS style */}
             <button
               onClick={() => setViewingPdf(null)}
-              className="text-blue-500 font-semibold text-[17px] px-1 py-1 active:opacity-60"
+              style={{ WebkitTapHighlightColor: "transparent", minWidth: 72, minHeight: 44 }}
+              className="flex items-center justify-center px-4 py-2 rounded-xl bg-blue-500 text-white font-bold text-[16px] active:opacity-70 transition-opacity"
             >
-              Done
+              ✕ Done
             </button>
             <div className="flex-1 text-center mx-3 min-w-0">
               <p className="text-[13px] font-semibold dark:text-white truncate">{viewingPdf.title}</p>
@@ -471,9 +473,10 @@ export default function VesselsPage(): React.ReactElement {
                   }
                 } catch { /* cancelled */ }
               }}
-              className="text-blue-500 p-1 active:opacity-60"
+              style={{ minWidth: 44, minHeight: 44, WebkitTapHighlightColor: "transparent" }}
+              className="flex items-center justify-center rounded-xl text-blue-500 active:opacity-60"
             >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" /><polyline points="16 6 12 2 8 6" /><line x1="12" y1="2" x2="12" y2="15" />
               </svg>
             </button>

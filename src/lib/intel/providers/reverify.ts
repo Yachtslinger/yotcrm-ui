@@ -12,6 +12,8 @@
  */
 
 import { addSource, logAuditEvent, getSourcesByProfile } from "../storage";
+import { type IdentityAnchors, validateAgainstAnchors } from "../validation";
+import { ddgSearch } from "./ddg";
 
 export type ReverifyResult = {
   confirmations: { field: string; original: string; confirmed: boolean; new_value?: string; source: string }[];
@@ -29,6 +31,7 @@ export async function reverifyAndDeepDive(
   leadId: number,
   fullName: string,
   email?: string,
+  anchors?: IdentityAnchors,
 ): Promise<ReverifyResult> {
   const result: ReverifyResult = {
     confirmations: [],
@@ -79,6 +82,18 @@ export async function reverifyAndDeepDive(
     if (webTitles.length > 0) {
       targetedQueries.push(`"${fullName}" "${webTitles[0]}"`);
     }
+    // Phone-based search — strongest identifier (phone numbers are nearly unique)
+    if (anchors?.phoneDigits && anchors.phoneDigits.length >= 10) {
+      const p = anchors.phoneDigits;
+      const area = p.slice(-10, -7);
+      const mid = p.slice(-7, -4);
+      const last = p.slice(-4);
+      targetedQueries.push(`"${area}-${mid}-${last}" OR "(${area}) ${mid}-${last}"`);
+    }
+    // Email-based search — unique identifier
+    if (email) {
+      targetedQueries.push(`"${email}"`);
+    }
 
     // Run targeted confirmation searches
     const confirmResults = await Promise.allSettled(
@@ -111,6 +126,22 @@ export async function reverifyAndDeepDive(
         source: confirmed ? "targeted web search" : "unconfirmed",
       });
     }
+    // Confirm phone — if phone search found results containing the person's name
+    if (anchors?.phoneDigits && anchors.phoneDigits.length >= 10) {
+      const nameInPhoneResults = confirmText.toLowerCase().includes(lastName.toLowerCase());
+      result.confirmations.push({
+        field: "phone", original: anchors.phone || anchors.phoneDigits, confirmed: nameInPhoneResults,
+        source: nameInPhoneResults ? "phone web search confirms identity" : "phone not confirmed online",
+      });
+    }
+    // Confirm email — if email search found results containing the person's name
+    if (email) {
+      const nameInEmailResults = confirmText.toLowerCase().includes(lastName.toLowerCase());
+      result.confirmations.push({
+        field: "email", original: email, confirmed: nameInEmailResults,
+        source: nameInEmailResults ? "email web search confirms identity" : "email not confirmed online",
+      });
+    }
 
     // ═══ 2. PEOPLE SEARCH — AGE, RELATIVES, ADDRESSES ═══
     const peopleQueries = [
@@ -126,6 +157,12 @@ export async function reverifyAndDeepDive(
       if (pr.status !== "fulfilled" || !pr.value) continue;
       for (const r of pr.value) {
         const text = `${r.title} ${r.snippet}`;
+
+        // Validate result against identity anchors — skip wrong-person results
+        if (anchors && (anchors.city || anchors.phoneDigits || anchors.emailDomain)) {
+          const v = validateAgainstAnchors(text, anchors);
+          if (!v.accepted && !v.flagged) continue; // Skip results that don't match our person
+        }
 
         // Age extraction (multiple patterns)
         const agePatterns = [
@@ -159,12 +196,19 @@ export async function reverifyAndDeepDive(
           /(?:wife|husband|spouse|daughter|son|brother|sister|mother|father)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/gi,
           /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+\((?:wife|husband|spouse|daughter|son)\)/gi,
         ];
+        const junkRelWords = new Set(["named","any","the","our","his","her","their","this",
+          "that","which","about","from","with","into","will","been","also","such",
+          "eligibility","determination","information","construction","company","business"]);
         for (const rp of relPatterns) {
           let rm;
           while ((rm = rp.exec(text)) !== null) {
             const rel = rm[1]?.trim();
             if (rel && rel.length > 3 && rel.length < 40 && !result.relatives.includes(rel)) {
-              result.relatives.push(rel);
+              // Validate: first word must look like a name, not a common word
+              const firstWord = rel.split(/\s+/)[0]?.toLowerCase() || "";
+              if (!junkRelWords.has(firstWord) && /^[A-Z][a-z]{2,}$/.test(rel.split(/\s+/)[0] || "")) {
+                result.relatives.push(rel);
+              }
             }
           }
         }
@@ -190,7 +234,7 @@ export async function reverifyAndDeepDive(
     const courtQueries = [
       `"${fullName}" court case lawsuit judgment`,
       `"${fullName}" bankruptcy lien foreclosure`,
-      `"${lastName}" ${state || ""} court records docket`,
+      `"${firstName}" "${lastName}" ${city || ""} ${state || ""} court records`,
     ];
 
     const courtResults = await Promise.allSettled(
@@ -201,8 +245,14 @@ export async function reverifyAndDeepDive(
       if (cr.status !== "fulfilled" || !cr.value) continue;
       for (const r of cr.value) {
         const text = `${r.title} ${r.snippet}`.toLowerCase();
-        const nameInResult = text.includes(lastName.toLowerCase());
+        const nameInResult = text.includes(lastName.toLowerCase()) && text.includes(firstName.toLowerCase());
         if (!nameInResult) continue;
+
+        // Validate against identity anchors — reject wrong-person court records
+        if (anchors && (anchors.city || anchors.phoneDigits || anchors.emailDomain)) {
+          const v = validateAgainstAnchors(`${r.title} ${r.snippet}`, anchors);
+          if (!v.accepted && !v.flagged) continue;
+        }
 
         let recordType = "";
         if (/bankrupt/i.test(text)) recordType = "Bankruptcy";
@@ -265,6 +315,11 @@ export async function reverifyAndDeepDive(
     const historyResults = await duckDuckGoSearch(historyQuery);
     for (const r of historyResults) {
       const text = `${r.title} ${r.snippet}`;
+      // Validate against anchors
+      if (anchors && (anchors.city || anchors.phoneDigits || anchors.emailDomain)) {
+        const v = validateAgainstAnchors(text, anchors);
+        if (!v.accepted && !v.flagged) continue;
+      }
       // "Previously CEO of X" / "Former VP at Y" / "spent 10 years at Z"
       const histPatterns = [
         /(?:previously|formerly|former|past|prior|was)\s+(\w+(?:\s+\w+)?)\s+(?:of|at|for)\s+([A-Z][A-Za-z\s&]+?)(?:\.|,|;|\s+(?:from|for|before|and|where))/gi,
@@ -398,46 +453,10 @@ export async function reverifyAndDeepDive(
   return result;
 }
 
-// ─── DuckDuckGo Search Helper ───────────────────────────────────────
+// ─── DuckDuckGo Search Helper (uses shared throttled DDG) ───────────
 
 async function duckDuckGoSearch(query: string): Promise<{ title: string; url: string; snippet: string }[]> {
-  try {
-    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html",
-      },
-      signal: AbortSignal.timeout(12000),
-    });
-    if (!res.ok) return [];
-    const html = await res.text();
-
-    const results: { title: string; url: string; snippet: string }[] = [];
-    const resultRegex = /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>(.*?)<\/a>/g;
-    let match;
-    while ((match = resultRegex.exec(html)) !== null && results.length < 10) {
-      const rawUrl = decodeURIComponent(match[1].replace(/.*uddg=/, "").replace(/&.*/, ""));
-      const title = match[2].replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").trim();
-      const snippet = match[3].replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").trim();
-      if (title && rawUrl.startsWith("http")) {
-        results.push({ title, url: rawUrl, snippet });
-      }
-    }
-
-    // Fallback regex
-    if (results.length === 0) {
-      const altRegex = /<a[^>]*rel="nofollow"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g;
-      while ((match = altRegex.exec(html)) !== null && results.length < 10) {
-        const rawUrl = match[1];
-        const title = match[2].replace(/<[^>]*>/g, "").trim();
-        if (title && rawUrl.startsWith("http") && !rawUrl.includes("duckduckgo")) {
-          results.push({ title, url: rawUrl, snippet: "" });
-        }
-      }
-    }
-    return results;
-  } catch { return []; }
+  return ddgSearch(query, 10);
 }
 
 function parseMoneyValue(str: string): number {

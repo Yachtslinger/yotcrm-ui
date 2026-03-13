@@ -417,6 +417,7 @@ function toAbsolute(src: string, base: string): string {
 function formatPrice(price: unknown, currency: unknown): string | undefined {
   if (typeof price === "string" && price.trim()) return price.trim();
   if (typeof price === "number") {
+    if (price === 0) return undefined; // POA / price on application
     const symbol = currency === "EUR" ? "€" : "$";
     return `${symbol}${price.toLocaleString("en-US")}`;
   }

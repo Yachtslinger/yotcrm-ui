@@ -584,9 +584,12 @@ function EmailPacketPanel({ listing: l, onClose }: {
 
     // Attachments and links
     if (l.pdf_urls.length > 0 || l.listing_urls.length > 0) {
-      body += "Attached to this email:\n";
+      body += "📎 Documents & Links:\n";
       for (const pdf of l.pdf_urls) {
-        body += `📄 ${pdf.label || "Document"}\n`;
+        const fullUrl = typeof window !== "undefined"
+          ? `${window.location.origin}${pdf.url}`
+          : pdf.url;
+        body += `📄 ${pdf.label || "Document"}: ${fullUrl}\n`;
       }
       for (const link of l.listing_urls) {
         body += `🔗 ${link.label || "Listing"}: ${link.url}\n`;
@@ -607,6 +610,40 @@ function EmailPacketPanel({ listing: l, onClose }: {
 
   const emailBody = buildEmailBody();
 
+  const [sending, setSending] = useState(false);
+  const [sendResult, setSendResult] = useState<"sent"|"error"|null>(null);
+
+  async function sendViaResend() {
+    if (!recipientEmail) { toast("Enter a recipient email first"); return; }
+    setSending(true); setSendResult(null);
+    const sig = SIGNATURES[signOff] || SIGNATURES.Will;
+    try {
+      const res = await fetch("/api/listings/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: recipientEmail,
+          cc: ccPaolo ? "PGA@denisonyachting.com" : undefined,
+          subject,
+          body: emailBody,
+          pdf_urls: l.pdf_urls,
+          from_name: sig.name,
+          from_email: "WN@yachtslinger.yachts",
+        }),
+      });
+      const d = await res.json();
+      if (d.ok) {
+        const msg = d.attachments > 0
+          ? `Sent with ${d.attachments} PDF attachment${d.attachments !== 1 ? "s" : ""}`
+          : d.skipped?.length
+            ? `Sent — PDFs not found on server (${d.skipped[0]})`
+            : "Sent (no PDFs attached)";
+        setSendResult("sent"); toast(msg);
+      } else { setSendResult("error"); toast("Send failed: " + d.error); }
+    } catch { setSendResult("error"); toast("Send failed"); }
+    setSending(false);
+  }
+
   function copyEmail() {
     navigator.clipboard.writeText(emailBody).then(() => {
       setCopied(true);
@@ -615,11 +652,31 @@ function EmailPacketPanel({ listing: l, onClose }: {
     });
   }
 
-  function openInMail() {
-    const to = recipientEmail || "";
-    const cc = ccPaolo ? "PGA@denisonyachting.com" : "";
+  const [mailOpening, setMailOpening] = useState(false);
+
+  async function openInMail() {
+    const sig = SIGNATURES[signOff] || SIGNATURES.Will;
+    const to  = recipientEmail || "";
+    const cc  = ccPaolo ? "PGA@denisonyachting.com" : "";
+
+    // Call same-origin API route — works from any URL (no mixed-content issues with http://localhost)
+    setMailOpening(true);
+    try {
+      const res = await fetch("/api/mail-compose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to, cc, subject, body: emailBody, pdf_urls: l.pdf_urls }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) { setMailOpening(false); return; }
+    } catch {
+      // API unavailable — fall through to mailto fallback
+    }
+
+    // Fallback: standard mailto (no attachments, but at least opens Mail)
     const mailtoUrl = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&cc=${encodeURIComponent(cc)}&body=${encodeURIComponent(emailBody)}`;
     window.open(mailtoUrl, "_blank");
+    setMailOpening(false);
   }
 
   return (
@@ -638,9 +695,19 @@ function EmailPacketPanel({ listing: l, onClose }: {
             <div className="text-[10px] text-[var(--navy-400)]">{l.name} — {vessel}</div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={openInMail}
-              className="text-xs px-3 py-1.5 rounded-lg font-semibold bg-[var(--brass-400)] hover:bg-[var(--brass-500)] text-white">
-              Open in Mail
+            <button onClick={sendViaResend} disabled={sending || !recipientEmail}
+              className={`text-xs px-3 py-1.5 rounded-lg font-semibold transition-all flex items-center gap-1.5 ${
+                sendResult === "sent" ? "bg-emerald-500 text-white" :
+                sendResult === "error" ? "bg-red-500 text-white" :
+                !recipientEmail ? "bg-white/10 text-white/40 cursor-not-allowed" :
+                "bg-[var(--sea-500)] hover:bg-[var(--sea-600)] text-white"
+              }`}>
+              <Send className="w-3 h-3" />
+              {sending ? "Sending…" : sendResult === "sent" ? "✓ Sent!" : "Send + Attach"}
+            </button>
+            <button onClick={openInMail} disabled={mailOpening}
+              className="text-xs px-3 py-1.5 rounded-lg font-semibold bg-[var(--brass-400)] hover:bg-[var(--brass-500)] text-white disabled:opacity-60 transition-all">
+              {mailOpening ? "Opening…" : "Open in Mail"}
             </button>
             <button onClick={copyEmail}
               className={`text-xs px-3 py-1.5 rounded-lg font-semibold transition-all ${

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 
+export const runtime = "nodejs";
+
 const UPLOAD_DIR = process.env.LISTING_FILES_DIR
   || path.join(process.env.DB_PATH ? path.dirname(process.env.DB_PATH) : "/app/data", "listing-files");
 

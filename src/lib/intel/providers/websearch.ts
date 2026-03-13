@@ -13,6 +13,8 @@
  */
 
 import { addSource, logAuditEvent } from "../storage";
+import { type IdentityAnchors, validateAgainstAnchors, buildSmartQueries } from "../validation";
+import { ddgSearch } from "./ddg";
 
 export type WebSearchResult = {
   results: {
@@ -28,6 +30,8 @@ export type WebSearchResult = {
     yacht_club: string[];
     charity_boards: string[];
     net_worth_signals: string[];
+    education: string[];
+    clubs: string[];
     spouse_name?: string;
     age?: string;
     birth_year?: string;
@@ -42,6 +46,7 @@ export async function searchWeb(
   leadId: number,
   fullName: string,
   email?: string,
+  anchors?: IdentityAnchors,
 ): Promise<WebSearchResult> {
   const result: WebSearchResult = {
     results: [],
@@ -52,22 +57,36 @@ export async function searchWeb(
       yacht_club: [],
       charity_boards: [],
       net_worth_signals: [],
+      education: [],
+      clubs: [],
       secondary_addresses: [],
     },
   };
 
   try {
-    // Run multiple targeted searches in parallel
-    const queries = [
-      `"${fullName}"`,                           // Exact name match
-      `"${fullName}" CEO OR president OR founder OR chairman OR director`,  // Executive roles
-      `"${fullName}" yacht OR boat OR marina OR vessel`,    // Yacht/boating connections
-      `"${fullName}" charity OR foundation OR board OR trustee`, // Philanthropy
-      `"${fullName}" real estate OR property OR home`,      // Property signals
-      `"${fullName}" wife OR husband OR spouse OR married OR age OR born`,  // Personal details
-    ];
+    // Build smart queries using all available identity anchors
+    const smartQueries = anchors ? buildSmartQueries(anchors) : [];
 
-    const searchPromises = queries.map(q => duckDuckGoSearch(q));
+    // Core targeted searches — anchored to location/employer when possible
+    const cityState = anchors?.city && anchors?.state ? ` "${anchors.city}" "${anchors.state}"` : "";
+    // Company/employer name for disambiguation (the single best query pattern)
+    const companyQ = anchors?.employer && anchors.employer.length > 3 ? ` "${anchors.employer}"` : 
+                     anchors?.emailDomain ? ` "${anchors.emailDomain}"` : "";
+    const queries = [
+      // #1 best pattern: "Name" "Company" City — this is what works manually
+      companyQ ? `"${fullName}"${companyQ}${cityState}` : null,
+      // Company revenue/size query — for net worth estimation
+      companyQ ? `${companyQ.replace(/"/g, '')} revenue employees` : null,
+      // Smart queries (phone, email, name+city)
+      ...smartQueries.slice(0, 3),
+      // Then targeted topic queries, anchored to location
+      `"${fullName}"${cityState} CEO OR president OR founder OR chairman OR director`,
+      `"${fullName}"${cityState} yacht OR boat OR marina OR vessel`,
+      `"${fullName}"${cityState} charity OR foundation OR board OR trustee`,
+      `"${fullName}" wife OR husband OR spouse OR married OR age OR born${cityState}`,
+    ].filter(Boolean) as string[];
+
+    const searchPromises = queries.map(q => ddgSearch(q));
     const searchResults = await Promise.allSettled(searchPromises);
 
     const allResults: { title: string; url: string; snippet: string }[] = [];
@@ -85,7 +104,34 @@ export async function searchWeb(
     }
 
     // Categorize and extract intelligence from results
-    for (const r of allResults) {
+    // Apply validation gate — filter out results that don't match our person
+    // BUT: always accept results that mention the company name or email domain
+    const companyName = (anchors?.employer || anchors?.company || "").toLowerCase();
+    const emailDom = (anchors?.emailDomain || "").toLowerCase();
+    // Extract core company word for fuzzy match (e.g. "abel" from "abel construction")
+    const companyCore = companyName.split(/\s+/)[0] || "";
+    
+    let validatedResults = allResults;
+    if (anchors && (anchors.city || anchors.phoneDigits || anchors.emailDomain || anchors.employer)) {
+      validatedResults = allResults.filter(r => {
+        const text = `${r.title} ${r.snippet} ${r.url}`;
+        const textLower = text.toLowerCase();
+        
+        // Always accept if result mentions the company name or domain
+        if (companyCore.length > 3 && textLower.includes(companyCore)) return true;
+        if (emailDom && textLower.includes(emailDom)) return true;
+        
+        // Otherwise use standard anchor validation
+        const v = validateAgainstAnchors(text, anchors);
+        return v.accepted || v.flagged;
+      });
+      // If validation filtered out everything, keep some results but mark as low confidence
+      if (validatedResults.length === 0 && allResults.length > 0) {
+        validatedResults = allResults.slice(0, 3); // Keep top 3 as unverified
+      }
+    }
+
+    for (const r of validatedResults) {
       const text = `${r.title} ${r.snippet}`.toLowerCase();
       let category = "other";
 
@@ -119,6 +165,16 @@ export async function searchWeb(
       if (/net worth|fortune|wealth|billionaire|millionaire|\$\d+\s*(million|billion)/.test(text)) {
         const wMatch = text.match(/(?:net worth|fortune|wealth)[^.]*?\$[\d,.]+\s*(?:million|billion|m|b)/i);
         if (wMatch) result.extracted.net_worth_signals.push(wMatch[0]);
+      }
+
+      // Company revenue/employee signals → wealth indicator
+      const revMatch = text.match(/\$\s*([\d,.]+)\s*(million|billion|m|b)\s*(?:in\s+)?(?:revenue|annual|sales)/i);
+      if (revMatch) {
+        result.extracted.net_worth_signals.push(`Company revenue: ${revMatch[0].trim()}`);
+      }
+      const empMatch = text.match(/(\d[\d,]+)\s*employees/i);
+      if (empMatch && parseInt(empMatch[1].replace(/,/g, "")) >= 50) {
+        result.extracted.net_worth_signals.push(`${empMatch[1]} employees`);
       }
 
       // Location extraction
@@ -175,6 +231,37 @@ export async function searchWeb(
         if (adm) {
           if (adm[1]) result.extracted.secondary_addresses.push(adm[1].trim());
           if (adm[2]) result.extracted.secondary_addresses.push(adm[2].trim());
+        }
+      }
+
+      // Education detection
+      const eduPatterns = [
+        /(?:Education|University|College|School|Alumnus|Alumna|Graduate|Graduated|Degree|MBA|B\.?A\.?|B\.?S\.?|M\.?A\.?|M\.?S\.?|Ph\.?D)[:\s]+([A-Z][A-Za-z\s&']+(?:University|College|Institute|School|Academy))/gi,
+        /(?:University|College|Institute)\s+of\s+[A-Z][A-Za-z\s]+/gi,
+        /([A-Z][A-Za-z\s&']+(?:University|College|Institute|School))/g,
+      ];
+      const snippet = r.title + " " + r.snippet;
+      for (const ep of eduPatterns) {
+        let em;
+        while ((em = ep.exec(snippet)) !== null) {
+          const edu = (em[1] || em[0]).trim();
+          if (edu.length > 8 && edu.length < 60 && !result.extracted.education.includes(edu)) {
+            result.extracted.education.push(edu);
+          }
+        }
+      }
+
+      // Club / membership detection (country clubs, yacht clubs, social clubs)
+      const clubPatterns = [
+        /([A-Z][A-Za-z\s']+(?:Country Club|Yacht Club|Golf Club|Tennis Club|Athletic Club|Rowing Club|Sailing Club|Beach Club|Club))/g,
+      ];
+      for (const cp of clubPatterns) {
+        let cm;
+        while ((cm = cp.exec(snippet)) !== null) {
+          const club = cm[1]?.trim();
+          if (club && club.length > 6 && club.length < 60 && !result.extracted.clubs.includes(club)) {
+            result.extracted.clubs.push(club);
+          }
         }
       }
 
@@ -235,6 +322,28 @@ export async function searchWeb(
         source_label: `Web: Wealth Signal — ${signal}`,
         layer: "capital", data_key: "wealth_signal",
         data_value: signal, confidence: 35,
+        fetched_at: new Date().toISOString(),
+      });
+    }
+    // Education
+    for (const edu of [...new Set(extracted.education)].slice(0, 2)) {
+      addSource({
+        profile_id: profileId, lead_id: leadId,
+        source_type: "websearch", source_url: "",
+        source_label: `Web: Education — ${edu}`,
+        layer: "identity", data_key: "education",
+        data_value: edu, confidence: 40,
+        fetched_at: new Date().toISOString(),
+      });
+    }
+    // Clubs (country clubs, yacht clubs, etc.)
+    for (const club of [...new Set([...extracted.clubs, ...extracted.yacht_club])].slice(0, 3)) {
+      addSource({
+        profile_id: profileId, lead_id: leadId,
+        source_type: "websearch", source_url: "",
+        source_label: `Web: Club — ${club}`,
+        layer: "engagement", data_key: "yacht_club",
+        data_value: club, confidence: 45,
         fetched_at: new Date().toISOString(),
       });
     }
@@ -318,53 +427,6 @@ export async function searchWeb(
   return result;
 }
 
-// ─── DuckDuckGo HTML Search ─────────────────────────────────────────
-
-async function duckDuckGoSearch(query: string): Promise<{ title: string; url: string; snippet: string }[]> {
-  try {
-    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html",
-      },
-      signal: AbortSignal.timeout(12000),
-    });
-
-    if (!res.ok) return [];
-    const html = await res.text();
-
-    const results: { title: string; url: string; snippet: string }[] = [];
-    // Parse DuckDuckGo HTML results
-    const resultRegex = /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>(.*?)<\/a>/g;
-    let match;
-    while ((match = resultRegex.exec(html)) !== null && results.length < 10) {
-      const rawUrl = decodeURIComponent(match[1].replace(/.*uddg=/, "").replace(/&.*/, ""));
-      const title = stripHtml(match[2]);
-      const snippet = stripHtml(match[3]);
-      if (title && rawUrl.startsWith("http")) {
-        results.push({ title, url: rawUrl, snippet });
-      }
-    }
-
-    // Fallback: simpler regex pattern
-    if (results.length === 0) {
-      const altRegex = /<a[^>]*rel="nofollow"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g;
-      while ((match = altRegex.exec(html)) !== null && results.length < 10) {
-        const rawUrl = match[1];
-        const title = stripHtml(match[2]);
-        if (title && rawUrl.startsWith("http") && !rawUrl.includes("duckduckgo")) {
-          results.push({ title, url: rawUrl, snippet: "" });
-        }
-      }
-    }
-
-    return results;
-  } catch {
-    return [];
-  }
-}
-
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#x27;/g, "'").trim();
@@ -372,31 +434,44 @@ function stripHtml(html: string): string {
 
 // ─── Intelligence Extraction Helpers ────────────────────────────────
 
-function extractTitlesAndCompanies(text: string, extracted: WebSearchResult["extracted"]) {
-  // Extract titles like "CEO of X", "President at Y", "Founder, Z"
-  const titlePatterns = [
-    /\b(CEO|CFO|CTO|COO|President|Chairman|Founder|Partner|Managing Director|Director|VP|Vice President|Principal|Owner)\s+(?:of|at|,)\s+([A-Z][A-Za-z\s&.,]+?)(?:\.|,|\s-\s|$)/gi,
-    /\b([A-Z][A-Za-z\s&.,]+?)\s+(?:CEO|CFO|CTO|COO|President|Chairman|Founder|Partner)\b/gi,
+function extractTitlesAndCompanies(
+  text: string,
+  extracted: WebSearchResult["extracted"],
+): void {
+  // Title patterns: "CEO of X", "President at X", "X Director"
+  const titlePats = [
+    /(?:CEO|President|Chairman|Founder|Director|Partner|Managing Director|Owner)\s+(?:of|at)\s+([A-Z][A-Za-z\s&'.,-]+?)(?:\.|,|\s+and|\s+since|\s*$)/gi,
+    /([A-Z][A-Za-z\s&'.]+?)\s+(?:CEO|President|Chairman|Founder|Director)/g,
   ];
-
-  for (const pattern of titlePatterns) {
+  for (const p of titlePats) {
     let m;
-    while ((m = pattern.exec(text)) !== null) {
-      const title = m[1].trim();
-      const company = (m[2] || "").trim().replace(/[.,]+$/, "");
-      if (title.length > 2 && title.length < 40) extracted.possible_titles.push(title);
-      if (company.length > 2 && company.length < 60) extracted.possible_companies.push(company);
+    while ((m = p.exec(text)) !== null) {
+      const val = m[1]?.trim();
+      if (val && val.length > 2 && val.length < 60) {
+        if (p.source.startsWith("(?:CEO")) {
+          extracted.possible_companies.push(val);
+        } else {
+          extracted.possible_titles.push(val);
+        }
+      }
     }
   }
 }
 
 function extractOrgName(title: string, snippet: string): string | null {
   const text = title + " " + snippet;
-  const m = text.match(/(?:board (?:of|member)|trustee|director)[^.]*?(?:of|at|for)\s+(?:the\s+)?([A-Z][A-Za-z\s&]+?)(?:\.|,|$)/i);
-  return m ? m[1].trim().substring(0, 60) : null;
+  const patterns = [
+    /(?:board|trustee|director)\s+(?:of|at|for)\s+(?:the\s+)?([A-Z][A-Za-z\s&']+(?:Foundation|Fund|Trust|Association|Society|Institute|Museum|Hospital|Center))/i,
+    /([A-Z][A-Za-z\s&']+(?:Foundation|Fund|Trust|Association|Society|Institute|Museum|Hospital|Center))/,
+  ];
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m && m[1]?.trim().length > 5) return m[1].trim();
+  }
+  return null;
 }
 
 function extractYachtClub(text: string): string | null {
-  const m = text.match(/([A-Z][A-Za-z\s]+(?:yacht|sailing|boat|marina|nautical)[A-Za-z\s]*(?:club|association|society))/i);
-  return m ? m[1].trim().substring(0, 60) : null;
+  const m = text.match(/([A-Z][A-Za-z\s']+(?:Yacht Club|Sailing Club|Boat Club|Marina Club))/i);
+  return m ? m[1].trim() : null;
 }

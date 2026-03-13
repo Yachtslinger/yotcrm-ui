@@ -4,7 +4,7 @@ import {
   getEvent, getAuditLog, getProspects, getVessels,
   generateICS, generateICSFeed, markEventPushed, markBulkPushed,
   getSyncLog, listDeals, createDeal, updateDeal, deleteDeal,
-  getDealTimeline,
+  getDealTimeline, createBoat,
 } from "@/lib/calendar/storage";
 
 export const runtime = "nodejs";

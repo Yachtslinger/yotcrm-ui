@@ -58,6 +58,12 @@ export async function PUT(
       identity_confidence: body.identity_confidence,
       identity_verifications: body.identity_verifications,
       manual_corrections: body.manual_corrections,
+      court_records: body.court_records,
+      professional_history: body.professional_history,
+      relatives: body.relatives,
+      additional_properties: body.additional_properties,
+      reverify_status: body.reverify_status,
+      broker_notes: body.broker_notes,
     });
     if (!updated) {
       return NextResponse.json({ error: "Client not found" }, { status: 404 });
