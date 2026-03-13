@@ -659,24 +659,16 @@ function EmailPacketPanel({ listing: l, onClose }: {
     const to  = recipientEmail || "";
     const cc  = ccPaolo ? "PGA@denisonyachting.com" : "";
 
-    // Call same-origin API route — works from any URL (no mixed-content issues with http://localhost)
+    // Use yotcrm:// custom URL scheme — works from HTTPS (no mixed-content restrictions).
+    // The registered macOS app at ~/Applications/YotCRM Compose.app handles it,
+    // downloads the PDFs, and opens Mail.app with real attachments via AppleScript.
     setMailOpening(true);
-    try {
-      const res = await fetch("/api/mail-compose", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to, cc, subject, body: emailBody, pdf_urls: l.pdf_urls }),
-      });
-      const d = await res.json().catch(() => ({}));
-      if (res.ok && d.ok) { setMailOpening(false); return; }
-    } catch {
-      // API unavailable — fall through to mailto fallback
-    }
-
-    // Fallback: standard mailto (no attachments, but at least opens Mail)
-    const mailtoUrl = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&cc=${encodeURIComponent(cc)}&body=${encodeURIComponent(emailBody)}`;
-    window.open(mailtoUrl, "_blank");
-    setMailOpening(false);
+    const payload = { to, cc, subject, body: emailBody, pdf_urls: l.pdf_urls };
+    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+    const schemeUrl = `yotcrm://compose?data=${encoded}`;
+    window.location.href = schemeUrl;
+    // Give macOS a moment to hand off to the handler app, then reset button state
+    setTimeout(() => setMailOpening(false), 2000);
   }
 
   return (
