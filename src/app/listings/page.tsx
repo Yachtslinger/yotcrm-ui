@@ -663,7 +663,7 @@ function EmailPacketPanel({ listing: l, onClose }: {
     // The registered macOS app at ~/Applications/YotCRM Compose.app handles it,
     // downloads the PDFs, and opens Mail.app with real attachments via AppleScript.
     setMailOpening(true);
-    const payload = { to, cc, subject, body: emailBody, pdf_urls: l.pdf_urls };
+    const payload = { to, cc, subject, body: emailBody, pdf_urls: l.pdf_urls, make: l.make || l.name || "Yacht" };
     const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
     const schemeUrl = `yotcrm://compose?data=${encoded}`;
     window.location.href = schemeUrl;
