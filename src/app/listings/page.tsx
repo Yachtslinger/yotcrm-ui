@@ -481,12 +481,19 @@ function ListingFormModal({ listing, onClose, onSave }: {
                 <input value={p.label} onChange={e => updatePdf(i, "label", e.target.value)}
                   placeholder="Label (e.g. Brochure)" className="w-32 px-2 py-1.5 rounded-lg border border-[var(--sand-200)] dark:border-[var(--navy-700)] text-sm bg-white dark:bg-[var(--navy-800)]" />
                 {p.url.startsWith("/api/listings/files/") ? (
-                  <div className="flex-1 flex items-center gap-2 px-2 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 text-sm">
+                  <div className="flex-1 flex items-center gap-2 px-2 py-1.5 rounded-lg border text-sm
+                    bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800">
                     <FileText className="w-4 h-4 text-emerald-500 shrink-0" />
-                    <span className="text-emerald-700 dark:text-emerald-300 truncate text-xs">Uploaded file</span>
-                    <a href={p.url} target="_blank" rel="noopener noreferrer" className="ml-auto shrink-0">
-                      <ExternalLink className="w-3.5 h-3.5 text-emerald-500 hover:text-emerald-700" />
-                    </a>
+                    <span className="text-emerald-700 dark:text-emerald-300 truncate text-xs">
+                      {p.content_b64 ? "Uploaded file" : "⚠ File missing — re-upload to restore"}
+                    </span>
+                    {p.content_b64 ? (
+                      <a href={p.url} target="_blank" rel="noopener noreferrer" className="ml-auto shrink-0">
+                        <ExternalLink className="w-3.5 h-3.5 text-emerald-500 hover:text-emerald-700" />
+                      </a>
+                    ) : (
+                      <span className="ml-auto shrink-0 text-[10px] font-bold text-amber-600 dark:text-amber-400">RE-UPLOAD</span>
+                    )}
                   </div>
                 ) : (
                   <input value={p.url} onChange={e => updatePdf(i, "url", e.target.value)}
@@ -539,6 +546,53 @@ function EmailPacketPanel({ listing: l, onClose }: {
   const [copied, setCopied] = useState(false);
   const [customIntro, setCustomIntro] = useState("");
   const [signOff, setSignOff] = useState("Will");
+  // Local PDF state — allows re-uploading broken entries directly from the panel
+  const [pdfUrls, setPdfUrls] = useState<ListingPdf[]>(l.pdf_urls || []);
+  const [pdfUploading, setPdfUploading] = useState(false);
+  const panelFileRef = React.useRef<HTMLInputElement>(null);
+
+  const brokenPdfs = pdfUrls.filter(p => p.url.startsWith("/api/listings/files/") && !p.content_b64);
+  const hasBroken = brokenPdfs.length > 0;
+
+  async function handlePanelUpload(fileList: FileList | File[]) {
+    const files = Array.from(fileList).filter(f => f.size > 0);
+    if (!files.length) return;
+    setPdfUploading(true);
+    try {
+      const form = new FormData();
+      if (l.id) form.append("listing_id", String(l.id));
+      for (const f of files) form.append("files", f);
+      const res = await fetch("/api/listings/upload", { method: "POST", body: form });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "Upload failed");
+      const newPdfs = (data.files || []).map((f: any) => ({
+        label: f.label, url: f.url,
+        ...(f.content_b64 ? { content_b64: f.content_b64 } : {}),
+      }));
+      // Replace broken entries by label match, otherwise append
+      setPdfUrls(prev => {
+        const updated = [...prev];
+        for (const np of newPdfs) {
+          const matchIdx = updated.findIndex(p => !p.content_b64 && p.label === np.label);
+          if (matchIdx >= 0) updated[matchIdx] = np;
+          else updated.push(np);
+        }
+        return updated;
+      });
+      // Persist to DB immediately so email panel has latest data
+      await fetch("/api/listings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "update", id: l.id, pdf_urls: [...pdfUrls.filter(p => p.content_b64 || !p.url.startsWith("/api/")), ...newPdfs] }),
+      });
+      toast(`${newPdfs.length} PDF${newPdfs.length !== 1 ? "s" : ""} re-uploaded — ready to attach`);
+    } catch (e: any) {
+      toast("Upload failed: " + e.message, "error");
+    } finally {
+      setPdfUploading(false);
+      if (panelFileRef.current) panelFileRef.current.value = "";
+    }
+  }
 
   const vessel = [l.year, l.length, l.make, l.model].filter(Boolean).join(" ");
   const highlightLines = l.highlights.split("\n").map(s => s.trim()).filter(Boolean);
@@ -630,7 +684,7 @@ function EmailPacketPanel({ listing: l, onClose }: {
           cc: ccPaolo ? "PGA@denisonyachting.com" : undefined,
           subject,
           body: emailBody,
-          pdf_urls: l.pdf_urls,
+          pdf_urls: pdfUrls,  // use live state (may have re-uploaded content_b64)
           from_name: sig.name,
           from_email: "WN@yachtslinger.yachts",
         }),
@@ -667,7 +721,7 @@ function EmailPacketPanel({ listing: l, onClose }: {
     // The registered macOS app at ~/Applications/YotCRM Compose.app handles it,
     // downloads the PDFs, and opens Mail.app with real attachments via AppleScript.
     setMailOpening(true);
-    const payload = { to, cc, subject, body: emailBody, pdf_urls: l.pdf_urls, make: l.make || l.name || "Yacht" };
+    const payload = { to, cc, subject, body: emailBody, pdf_urls: pdfUrls, make: l.make || l.name || "Yacht" };
     const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
     const schemeUrl = `yotcrm://compose?data=${encoded}`;
     window.location.href = schemeUrl;
@@ -750,26 +804,60 @@ function EmailPacketPanel({ listing: l, onClose }: {
               className="w-full px-3 py-2 rounded-lg border border-[var(--sand-200)] dark:border-[var(--navy-700)] text-sm resize-y bg-white dark:bg-[var(--navy-800)] text-[var(--navy-900)] dark:text-white" />
           </div>
 
-          {/* Attachments reminder */}
-          {(l.pdf_urls.length > 0 || l.listing_urls.length > 0) && (
+          {/* PDF Attachments — with re-upload for broken entries */}
+          {pdfUrls.length > 0 && (
             <div className="bg-[var(--sand-50)] dark:bg-[var(--navy-800)] rounded-xl p-4">
-              <div className="text-xs font-semibold text-[var(--navy-500)] mb-2 uppercase tracking-wider">Remember to Attach</div>
-              {l.pdf_urls.map((p, i) => (
-                <a key={`pdf-${i}`} href={p.url} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-sm text-[var(--navy-700)] dark:text-[var(--navy-300)] hover:text-[var(--brass-500)] py-1">
-                  <FileText className="w-4 h-4 text-red-400" />
-                  {p.label || "PDF Document"}
-                  <ExternalLink className="w-3 h-3 ml-auto text-[var(--navy-400)]" />
-                </a>
-              ))}
-              {l.listing_urls.map((u, i) => (
-                <a key={`link-${i}`} href={u.url} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-sm text-[var(--navy-700)] dark:text-[var(--navy-300)] hover:text-[var(--brass-500)] py-1">
-                  <Link2 className="w-4 h-4 text-[var(--sea-500)]" />
-                  {u.label || "Online Listing"}
-                  <ExternalLink className="w-3 h-3 ml-auto text-[var(--navy-400)]" />
-                </a>
-              ))}
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs font-semibold text-[var(--navy-500)] uppercase tracking-wider">
+                  PDF Attachments
+                </div>
+                {hasBroken && (
+                  <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 rounded-full">
+                    {brokenPdfs.length} need re-upload
+                  </span>
+                )}
+              </div>
+
+              {pdfUrls.map((p, i) => {
+                const isBroken = p.url.startsWith("/api/listings/files/") && !p.content_b64;
+                return (
+                  <div key={i} className={`flex items-center gap-2 py-1.5 px-2 rounded-lg mb-1 ${
+                    isBroken ? "bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800"
+                             : "bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800"
+                  }`}>
+                    <FileText className={`w-4 h-4 shrink-0 ${isBroken ? "text-amber-500" : "text-emerald-500"}`} />
+                    <span className={`text-xs flex-1 truncate ${isBroken ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}`}>
+                      {p.label || "PDF Document"}
+                    </span>
+                    {isBroken ? (
+                      <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 shrink-0">⚠ Re-upload below</span>
+                    ) : (
+                      <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 shrink-0">✓ Ready</span>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Re-upload zone — only shown when broken entries exist */}
+              {hasBroken && (
+                <div
+                  onClick={() => panelFileRef.current?.click()}
+                  className="mt-3 border-2 border-dashed border-amber-300 dark:border-amber-700 rounded-xl p-3 text-center cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-all"
+                >
+                  <input ref={panelFileRef} type="file" accept=".pdf" multiple className="hidden"
+                    onChange={e => e.target.files && handlePanelUpload(e.target.files)} />
+                  {pdfUploading ? (
+                    <div className="flex items-center justify-center gap-2 text-xs text-amber-600">
+                      <div className="w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                      Uploading…
+                    </div>
+                  ) : (
+                    <div className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                      ↑ Re-upload PDFs to attach them to this email
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
