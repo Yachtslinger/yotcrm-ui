@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 type ListingLink = { label: string; url: string };
-type ListingPdf = { label: string; url: string };
+type ListingPdf = { label: string; url: string; content_b64?: string };
 type MyListing = {
   id: number; name: string; make: string; model: string;
   year: string; length: string; price: string; location: string;
@@ -310,7 +310,11 @@ function ListingFormModal({ listing, onClose, onSave }: {
       const res = await fetch("/api/listings/upload", { method: "POST", body: form });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "Upload failed");
-      const newPdfs = (data.files || []).map((f: any) => ({ label: f.label, url: f.url }));
+      const newPdfs = (data.files || []).map((f: any) => ({
+        label: f.label,
+        url: f.url,
+        ...(f.content_b64 ? { content_b64: f.content_b64 } : {}),
+      }));
       setPdfUrls(prev => [...prev, ...newPdfs]);
     } catch (e: any) {
       alert(e.message || "Upload failed");

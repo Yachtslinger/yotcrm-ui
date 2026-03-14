@@ -25,25 +25,32 @@ export async function POST(req: NextRequest) {
     for (const pdf of (pdf_urls || [])) {
       try {
         const rawUrl = pdf.url || "";
-        // Handle both "/api/listings/files/foo.pdf" and full URLs
         const filename = decodeURIComponent(rawUrl.split("/").pop() || "");
         if (!filename || filename.includes("..") || filename.includes("/")) {
           skipped.push(`bad-filename:${rawUrl}`);
           continue;
         }
+        const attachFilename = pdf.label
+          ? `${pdf.label.replace(/[^a-zA-Z0-9 _-]/g, "")}.pdf`
+          : filename;
+
+        // PRIMARY: use base64 content stored in DB (survives container restarts)
+        if (pdf.content_b64) {
+          attachments.push({ filename: attachFilename, content: pdf.content_b64 });
+          console.log(`[listings/send] attached (db): ${attachFilename}`);
+          continue;
+        }
+
+        // FALLBACK: try disk (works in dev or if file still present)
         const filepath = path.join(UPLOAD_DIR, filename);
         console.log(`[listings/send] checking file: ${filepath}`);
         if (fs.existsSync(filepath)) {
           const buffer = fs.readFileSync(filepath);
-          const attachFilename = pdf.label
-            ? `${pdf.label.replace(/[^a-zA-Z0-9 _-]/g, "")}.pdf`
-            : filename;
           attachments.push({ filename: attachFilename, content: buffer.toString("base64") });
-          console.log(`[listings/send] attached: ${attachFilename} (${buffer.length} bytes)`);
+          console.log(`[listings/send] attached (disk): ${attachFilename} (${buffer.length} bytes)`);
         } else {
           skipped.push(`not-found:${filepath}`);
-          console.warn(`[listings/send] file not found: ${filepath}`);
-          // List what IS in the upload dir for debugging
+          console.warn(`[listings/send] file not found and no content_b64: ${filepath}`);
           try {
             const dirFiles = fs.readdirSync(UPLOAD_DIR);
             console.log(`[listings/send] UPLOAD_DIR contents (${dirFiles.length}):`, dirFiles.slice(0, 10));

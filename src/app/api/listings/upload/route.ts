@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "No files provided" }, { status: 400 });
     }
 
-    const uploaded: { label: string; url: string; filename: string; size: number }[] = [];
+    const uploaded: { label: string; url: string; filename: string; size: number; content_b64: string }[] = [];
 
     for (const file of files) {
       if (!file.name || file.size === 0) continue;
@@ -53,11 +53,14 @@ export async function POST(req: NextRequest) {
       fs.writeFileSync(filepath, buffer);
 
       const label = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ");
+      // Include base64 content so it survives container restarts (stored in DB)
+      const content_b64 = buffer.toString("base64");
       uploaded.push({
         label,
         url: `/api/listings/files/${encodeURIComponent(filename)}`,
         filename,
         size: file.size,
+        content_b64,
       });
     }
 
