@@ -95,14 +95,10 @@ export async function PUT(req: NextRequest) {
     const ok = updateBrochure(id, vessel, brokers, isPocket);
     if (!ok) return NextResponse.json({ error: "Brochure not found" }, { status: 404 });
 
-    // Sync pocket listing
+    // Sync pocket listing — get slug via getBrochureById
     const BASE = process.env.NEXT_PUBLIC_BASE_URL || "https://yotcrm-production.up.railway.app";
-    const row = getBrochure(id.toString().padStart(1));
-    // Get slug from the DB row
-    const slugRow = (await import("better-sqlite3")).default(
-      process.env.DB_PATH || "/app/data/yotcrm.db"
-    ).prepare("SELECT slug FROM brochures WHERE id=?").get(id) as {slug:string}|undefined;
-    const slug = slugRow?.slug;
+    const row = getBrochureById(id);
+    const slug = row?.slug;
     if (slug) {
       if (isPocket) {
         syncPocketListingFromBrochure({

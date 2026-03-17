@@ -24,7 +24,7 @@ interface SendResult {
   error?: string;
 }
 
-// ── Provider: Resend ────────────────────────────────────────────────────
+// ── Provider: Resend — single email ────────────────────────────────────
 async function sendViaResend(opts: {
   from: string; to: Recipient; subject: string; html: string; apiKey: string; cc?: string[]; replyTo?: string;
   attachments?: { filename: string; content: string; type: string }[];
@@ -60,6 +60,44 @@ async function sendViaResend(opts: {
   }
   const json = await res.json() as { id: string };
   return json.id;
+}
+
+// ── Resend batch API — up to 100 emails per call ────────────────────────
+async function sendBatchViaResend(opts: {
+  from: string; recipients: Recipient[]; subject: string; html: string;
+  apiKey: string; cc?: string[]; replyTo?: string;
+  attachments?: { filename: string; content: string; type: string }[];
+}): Promise<{ email: string; ok: boolean; messageId?: string; error?: string }[]> {
+  const messages = opts.recipients.map(to => ({
+    from: opts.from,
+    to: [to.name ? `${to.name} <${to.email}>` : to.email],
+    cc: opts.cc?.length ? opts.cc : undefined,
+    reply_to: opts.replyTo || undefined,
+    subject: opts.subject,
+    html: opts.html,
+    attachments: opts.attachments?.length ? opts.attachments.map(a => ({
+      filename: a.filename, content: a.content, type: a.type,
+    })) : undefined,
+  }));
+
+  const res = await fetch("https://api.resend.com/emails/batch", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${opts.apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(messages),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    if (res.status === 429) throw new Error(`RATE_LIMIT: ${errText}`);
+    throw new Error(`Resend batch error ${res.status}: ${errText}`);
+  }
+
+  const json = await res.json() as { data: { id: string }[] };
+  return opts.recipients.map((to, i) => ({
+    email: to.email,
+    ok: true,
+    messageId: json.data?.[i]?.id,
+  }));
 }
 
 // ── Provider: Postmark ─────────────────────────────────────────────────
@@ -167,30 +205,49 @@ export async function POST(req: NextRequest) {
     const targets = testMode ? [recipients[0]] : recipients;
 
     const results: SendResult[] = [];
-    const BATCH_SIZE = 20;
-    const DELAY_MS = 100;
     let rateLimitHit = false;
+    const resendKey = process.env.RESEND_API_KEY;
 
-    for (let i = 0; i < targets.length; i += BATCH_SIZE) {
-      if (rateLimitHit) break;
-      const batch = targets.slice(i, i + BATCH_SIZE);
-      const batchResults = await Promise.allSettled(
-        batch.map(to => sendOne({ from, to, subject, html, cc, replyTo, attachments }))
-      );
-      for (let j = 0; j < batch.length; j++) {
-        const r = batchResults[j];
-        if (r.status === "fulfilled") {
-          results.push({ email: batch[j].email, ok: true, messageId: r.value });
-        } else {
-          const msg = r.reason?.message || "Failed";
-          results.push({ email: batch[j].email, ok: false, error: msg });
-          if (msg.startsWith("RATE_LIMIT")) {
-            rateLimitHit = true;
+    if (resendKey) {
+      // ── Resend batch path: 100 emails per API call, ~20 calls for 2000 recipients ──
+      const BATCH = 100;
+      for (let i = 0; i < targets.length; i += BATCH) {
+        if (rateLimitHit) break;
+        const batch = targets.slice(i, i + BATCH);
+        try {
+          const batchResults = await sendBatchViaResend({
+            from, recipients: batch, subject, html, apiKey: resendKey, cc, replyTo, attachments,
+          });
+          results.push(...batchResults);
+        } catch (err: any) {
+          const msg = err?.message || "Batch failed";
+          if (msg.startsWith("RATE_LIMIT")) rateLimitHit = true;
+          // Mark all in batch as failed
+          batch.forEach(to => results.push({ email: to.email, ok: false, error: msg }));
+        }
+        // Small delay between batches to stay within per-second limits
+        if (i + BATCH < targets.length) await new Promise(r => setTimeout(r, 200));
+      }
+    } else {
+      // ── Fallback: one-at-a-time for Postmark/SendGrid ──
+      const BATCH_SIZE = 20;
+      for (let i = 0; i < targets.length; i += BATCH_SIZE) {
+        if (rateLimitHit) break;
+        const batch = targets.slice(i, i + BATCH_SIZE);
+        const batchResults = await Promise.allSettled(
+          batch.map(to => sendOne({ from, to, subject, html, cc, replyTo, attachments }))
+        );
+        for (let j = 0; j < batch.length; j++) {
+          const r = batchResults[j];
+          if (r.status === "fulfilled") {
+            results.push({ email: batch[j].email, ok: true, messageId: r.value });
+          } else {
+            const msg = r.reason?.message || "Failed";
+            results.push({ email: batch[j].email, ok: false, error: msg });
+            if (msg.startsWith("RATE_LIMIT")) rateLimitHit = true;
           }
         }
-      }
-      if (i + BATCH_SIZE < targets.length) {
-        await new Promise(r => setTimeout(r, DELAY_MS));
+        if (i + BATCH_SIZE < targets.length) await new Promise(r => setTimeout(r, 100));
       }
     }
 
