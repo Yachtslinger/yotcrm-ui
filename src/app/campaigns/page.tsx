@@ -1250,7 +1250,10 @@ export default function CampaignsPage(): React.ReactElement {
             </div>
             {/* Col 3: Copy HTML for Vertical Response */}
             <button onClick={()=>{
-                navigator.clipboard.writeText(html).then(
+                // Vertical Response wraps with its own DOCTYPE/html/body — just give it the inner body content
+                const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+                const vrHtml = bodyMatch ? bodyMatch[1].trim() : html;
+                navigator.clipboard.writeText(vrHtml).then(
                   ()=>toast("HTML copied — paste into Vertical Response ✓","success"),
                   ()=>toast("Copy failed","error")
                 );
