@@ -66,6 +66,7 @@ function formatCapacityClient(raw: string): string {
 type Brochure = {
   slug: string; title: string; subtitle: string; builder: string;
   year: string; tag: string; updatedAt: string; source: "file" | "db"; id?: number;
+  heroSrc?: string; is_pocket_listing?: number;
 };
 
 type VesselData = {
@@ -236,7 +237,12 @@ export default function BrochuresPage() {
   const [previewLoading, setPreviewLoading] = React.useState(false);
   const previewDebounce = React.useRef<ReturnType<typeof setTimeout>|null>(null);
   const [draftSaved, setDraftSaved] = React.useState(false);
+  const [hasDraft, setHasDraft] = React.useState(false);
   const DRAFT_KEY = "yotcrm_brochure_draft_v1";
+  // Check for saved draft after mount
+  React.useEffect(() => {
+    try { setHasDraft(!!localStorage.getItem(DRAFT_KEY)); } catch { /* ignore */ }
+  }, []);
   const [editingId, setEditingId] = React.useState<number | null>(null);
   // Broker selection — all three on by default, user can toggle
   const [selectedBrokers, setSelectedBrokers] = React.useState<Set<string>>(new Set(["Will Noftsinger","Paolo Ameglio","Peter Quintal"]));
@@ -974,6 +980,36 @@ export default function BrochuresPage() {
         </div>
       )}
 
+      {/* Draft loader */}
+      {hasDraft && (
+        <div className="rounded-xl p-4 mb-4 flex items-center justify-between gap-3" style={{ background: "rgba(184,147,58,.06)", border: "1px solid rgba(184,147,58,.3)" }}>
+          <div>
+            <p className="text-sm font-semibold" style={{ color: "var(--brass-400)" }}>📝 Unsaved draft found</p>
+            <p className="text-xs mt-0.5" style={{ color: "var(--navy-400)" }}>You have a brochure draft in progress — resume editing it.</p>
+          </div>
+          <button
+            onClick={() => {
+              try {
+                const raw = localStorage.getItem("yotcrm_brochure_draft_v1");
+                if (!raw) return;
+                const draft = JSON.parse(raw);
+                if (draft.vessel) {
+                  setVessel(prepVessel(draft.vessel));
+                  setEditingId(null);
+                  setIsPocket(draft.vessel.isPocket || false);
+                  setHasDraft(false);
+                  setStep("preview");
+                  showToast("Draft loaded — continue editing");
+                }
+              } catch { showToast("Could not load draft", "error"); }
+            }}
+            className="shrink-0 px-4 py-2 rounded-xl text-sm font-bold"
+            style={{ background: "var(--brass-400)", color: "#fff" }}>
+            Resume Draft →
+          </button>
+        </div>
+      )}
+
       {/* Generate card */}
       <div className="rounded-xl p-5 mb-6" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
         <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: "var(--brass-400)" }}>Generate New Brochure</p>
@@ -1054,7 +1090,15 @@ export default function BrochuresPage() {
             const isDb = b.source === "db";
             return (
               <div key={b.slug} className="rounded-xl overflow-hidden transition-shadow hover:shadow-lg" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-                <div className="h-1.5" style={{ background: "var(--brass-400)" }} />
+                {/* Hero image */}
+                {b.heroSrc ? (
+                  <div className="w-full h-36 overflow-hidden" style={{ background: "var(--navy-900)" }}>
+                    <img src={b.heroSrc} alt={b.title} className="w-full h-full object-cover"
+                      onError={e => { (e.currentTarget as HTMLImageElement).parentElement!.style.display = "none"; }} />
+                  </div>
+                ) : (
+                  <div className="h-1.5" style={{ background: "var(--brass-400)" }} />
+                )}
                 <div className="p-5">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
@@ -1067,7 +1111,6 @@ export default function BrochuresPage() {
                       <p className="text-xs mt-0.5" style={{ color: "var(--navy-500)" }}>{b.subtitle}</p>
                       {b.builder && <p className="text-xs mt-1 font-medium" style={{ color: "var(--brass-400)" }}>{b.builder}</p>}
                     </div>
-                    <BookOpen className="w-8 h-8 shrink-0 mt-1" style={{ color: "var(--navy-300)" }} />
                   </div>
                   <div className="flex gap-2 mt-4 pt-4 flex-wrap" style={{ borderTop: "1px solid var(--border)" }}>
                     <a href={isDb ? `/brochures/${b.slug}` : `/api/brochures/${b.slug}`} target="_blank" rel="noopener noreferrer"
@@ -1112,27 +1155,22 @@ export default function BrochuresPage() {
 }
 
 /* ── ImageGrid — all images, ↑↓←→ movement, no cap ── */
+/* ── ImageGrid — drag-and-drop reordering ── */
 function ImageGrid({ images, onMove, onRemove, onCategory }: {
   images: { src: string; alt: string; category?: string }[];
   onMove: (from: number, to: number) => void;
   onRemove: (idx: number) => void;
   onCategory: (idx: number, cat: string) => void;
 }) {
-  const THUMB_W = 114;
-  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [dragIdx, setDragIdx] = React.useState<number | null>(null);
+  const [overIdx, setOverIdx] = React.useState<number | null>(null);
   const [expanded, setExpanded] = React.useState<number | null>(null);
-
-  function colsPerRow(): number {
-    if (!containerRef.current) return 6;
-    return Math.max(1, Math.floor(containerRef.current.offsetWidth / THUMB_W));
-  }
 
   const CATS = [
     { key: "exterior",  label: "EXT", color: "#0ea5e9" },
     { key: "interior",  label: "INT", color: "#a78bfa" },
     { key: "technical", label: "TEC", color: "#34d399" },
   ];
-
   function catColor(cat?: string) {
     return CATS.find(c => c.key === cat)?.color || "rgba(255,255,255,.25)";
   }
@@ -1142,77 +1180,80 @@ function ImageGrid({ images, onMove, onRemove, onCategory }: {
   );
 
   return (
-    <div ref={containerRef} className="flex flex-wrap gap-2 mb-3">
+    <div className="flex flex-wrap gap-2 mb-3">
       {images.map((img, i) => {
-        const cols = colsPerRow();
-        const canUp    = i >= cols;
-        const canDown  = i + cols < images.length;
-        const canLeft  = i > 0;
-        const canRight = i < images.length - 1;
-        const cat      = img.category || "";
-        const isOpen   = expanded === i;
+        const cat    = img.category || "";
+        const isOpen = expanded === i;
+        const isDragging = dragIdx === i;
+        const isOver     = overIdx === i && dragIdx !== i;
         return (
-          <div key={i} className="relative rounded overflow-hidden flex-shrink-0"
-            style={{ width: 110, height: 74, background: "var(--navy-800,#0f172a)" }}>
-            <img src={img.src} alt="" className="w-full h-full object-cover block"
+          <div key={i}
+            draggable
+            onDragStart={() => { setDragIdx(i); setExpanded(null); }}
+            onDragEnter={() => setOverIdx(i)}
+            onDragOver={e => { e.preventDefault(); setOverIdx(i); }}
+            onDragEnd={() => {
+              if (dragIdx !== null && overIdx !== null && dragIdx !== overIdx) {
+                onMove(dragIdx, overIdx);
+              }
+              setDragIdx(null); setOverIdx(null);
+            }}
+            onDrop={e => { e.preventDefault(); }}
+            className="relative rounded overflow-hidden flex-shrink-0 select-none"
+            style={{
+              width: 110, height: 74,
+              background: "var(--navy-800,#0f172a)",
+              cursor: isDragging ? "grabbing" : "grab",
+              opacity: isDragging ? 0.45 : 1,
+              outline: isOver ? "2px solid var(--brass-400)" : "none",
+              transition: "opacity .15s, outline .1s",
+            }}>
+            <img src={img.src} alt="" className="w-full h-full object-cover block pointer-events-none"
               onError={e => { (e.currentTarget as HTMLImageElement).style.opacity = "0.15"; }} />
+
             {/* HERO badge */}
-            {i === 0 && <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded text-[9px] font-bold z-10"
+            {i === 0 && <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded text-[9px] font-bold z-10 pointer-events-none"
               style={{ background: "var(--brass-400)", color: "#fff" }}>HERO</span>}
-            {/* Category badge — top-left (not on hero) */}
+
+            {/* Category badge */}
             {i > 0 && !isOpen && (
-              <button onClick={() => setExpanded(i)}
+              <button onMouseDown={e => e.stopPropagation()}
+                onClick={e => { e.stopPropagation(); setExpanded(i); }}
                 className="absolute top-1 left-1 px-1.5 py-0.5 rounded text-[8px] font-bold z-10 leading-tight"
                 style={{ background: cat ? catColor(cat) : "rgba(0,0,0,.45)", color: "#fff", border: `1px solid ${cat ? catColor(cat) : "rgba(255,255,255,.2)"}` }}>
                 {cat ? CATS.find(c=>c.key===cat)?.label : "TAG"}
               </button>
             )}
+
             {/* Category picker overlay */}
             {isOpen && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-1"
                 style={{ background: "rgba(0,0,0,.82)" }}>
                 {CATS.map(c => (
-                  <button key={c.key} onClick={() => { onCategory(i, c.key); setExpanded(null); }}
+                  <button key={c.key} onMouseDown={e => e.stopPropagation()}
+                    onClick={() => { onCategory(i, c.key); setExpanded(null); }}
                     className="w-16 py-0.5 rounded text-[9px] font-bold leading-tight"
                     style={{ background: cat===c.key ? c.color : "rgba(255,255,255,.1)", color: "#fff", border: `1px solid ${c.color}` }}>
                     {c.key}
                   </button>
                 ))}
-                <button onClick={() => { onCategory(i, ""); setExpanded(null); }}
+                <button onMouseDown={e => e.stopPropagation()}
+                  onClick={() => { onCategory(i, ""); setExpanded(null); }}
                   className="w-16 py-0.5 rounded text-[9px] leading-tight"
                   style={{ background: "rgba(255,255,255,.06)", color: "rgba(255,255,255,.5)" }}>clear</button>
-                <button onClick={() => setExpanded(null)}
+                <button onMouseDown={e => e.stopPropagation()} onClick={() => setExpanded(null)}
                   className="absolute top-0.5 right-0.5 w-4 h-4 flex items-center justify-center rounded text-[9px]"
                   style={{ background: "rgba(180,0,0,.5)", color: "#fff" }}>✕</button>
               </div>
             )}
-            {/* Top row: ↑ delete ↓ */}
 
-            <div className="absolute top-0 left-0 right-0 flex justify-between items-center px-1 pt-0.5">
-              {canUp
-                ? <button className="w-5 h-5 flex items-center justify-center rounded text-white text-[10px] font-bold"
-                    style={{ background: "rgba(0,0,0,.55)" }} onClick={() => onMove(i, i - cols)}>↑</button>
-                : <div className="w-5" />}
-              <button className="w-5 h-5 flex items-center justify-center rounded text-white text-[10px] font-bold"
-                style={{ background: "rgba(180,0,0,.6)" }} onClick={() => onRemove(i)}>✕</button>
-              {canDown
-                ? <button className="w-5 h-5 flex items-center justify-center rounded text-white text-[10px] font-bold"
-                    style={{ background: "rgba(0,0,0,.55)" }} onClick={() => onMove(i, i + cols)}>↓</button>
-                : <div className="w-5" />}
-            </div>
-            {/* Bottom row: ← → */}
-            <div className="absolute bottom-0 left-0 right-0 flex justify-center gap-1 px-1 pb-0.5"
-              style={{ background: "rgba(0,0,0,.55)" }}>
-              {canLeft
-                ? <button className="flex-1 py-0.5 rounded text-[10px] text-white"
-                    style={{ background: "rgba(255,255,255,.18)" }} onClick={() => onMove(i, i - 1)}>←</button>
-                : <div className="flex-1" />}
-              <span className="text-[9px] text-white/40 self-center">{i + 1}</span>
-              {canRight
-                ? <button className="flex-1 py-0.5 rounded text-[10px] text-white"
-                    style={{ background: "rgba(255,255,255,.18)" }} onClick={() => onMove(i, i + 1)}>→</button>
-                : <div className="flex-1" />}
-            </div>
+            {/* Delete button — top right */}
+            <button onMouseDown={e => e.stopPropagation()} onClick={() => onRemove(i)}
+              className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded z-10 text-[10px] font-bold text-white"
+              style={{ background: "rgba(180,0,0,.6)" }}>✕</button>
+
+            {/* Index badge — bottom right */}
+            <span className="absolute bottom-1 right-1 text-[9px] text-white/40 pointer-events-none">{i + 1}</span>
           </div>
         );
       })}

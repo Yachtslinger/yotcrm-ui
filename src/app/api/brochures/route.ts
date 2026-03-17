@@ -53,6 +53,12 @@ export async function GET() {
   try {
     const dbRows = listBrochures();
     for (const row of dbRows) {
+      // Pull hero image from stored vessel_data without a full getBrochure call
+      let heroSrc = "";
+      try {
+        const full = getBrochure(row.slug);
+        heroSrc = full?.vessel?.images?.[0]?.src || "";
+      } catch { /* ignore */ }
       brochures.push({
         slug: row.slug,
         title: row.vessel_name,
@@ -63,6 +69,8 @@ export async function GET() {
         updatedAt: row.created_at,
         source: "db",
         id: row.id,
+        heroSrc,
+        is_pocket_listing: (row as any).is_pocket_listing,
       });
     }
   } catch {
