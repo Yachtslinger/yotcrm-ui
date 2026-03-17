@@ -209,7 +209,7 @@ export default function CampaignsPage(): React.ReactElement {
   async function loadContacts(source: "pipeline"|"apple_contacts"|"all") {
     setContactsLoading(true); setContactSearch("");
     try {
-      const res = await fetch(`/api/campaign/contacts?source=${source}&limit=2000`);
+      const res = await fetch(`/api/campaign/contacts?source=${source}&limit=5000`);
       const data = await res.json();
       if (data.ok) setAllContacts(data.contacts); else toast(data.error||"Failed to load contacts","error");
     } catch { toast("Failed to load contacts","error"); } finally { setContactsLoading(false); }

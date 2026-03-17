@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = req.nextUrl;
     const source = searchParams.get("source") || "pipeline";
     const search = (searchParams.get("search") || "").trim().toLowerCase();
-    const limit = Math.min(parseInt(searchParams.get("limit") || "500", 10), 2000);
+    const limit = Math.min(parseInt(searchParams.get("limit") || "500", 10), 5000);
     const offset = parseInt(searchParams.get("offset") || "0", 10);
 
     const db = new Database(DB_PATH, { readonly: true });
