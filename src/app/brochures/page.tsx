@@ -238,6 +238,8 @@ export default function BrochuresPage() {
   const previewDebounce = React.useRef<ReturnType<typeof setTimeout>|null>(null);
   const [draftSaved, setDraftSaved] = React.useState(false);
   const [hasDraft, setHasDraft] = React.useState(false);
+  const [showPasteImport, setShowPasteImport] = React.useState(false);
+  const [pasteText, setPasteText] = React.useState("");
   const DRAFT_KEY = "yotcrm_brochure_draft_v1";
   // Check for saved draft after mount
   React.useEffect(() => {
@@ -393,6 +395,77 @@ export default function BrochuresPage() {
     setPendingPdf(file);
     setPdfFileName(file.name);
     showToast(`PDF staged: ${file.name} — click Build Brochure to include it`, "success");
+  }
+
+  /* ── Paste import — parse YachtWorld / any listing page text client-side ── */
+  function handlePasteImport() {
+    const text = pasteText.trim();
+    if (!text) return;
+
+    const v: Partial<VesselData> = {};
+
+    // Name: first line that looks like "YYYY Make Model" or a title
+    const titleMatch = text.match(/^([A-Z][^\n]{5,60})\n/m);
+    if (titleMatch) v.name = titleMatch[1].trim();
+
+    // Year from title or standalone
+    const yearMatch = text.match(/\b(19[5-9]\d|20[0-4]\d)\b/);
+    if (yearMatch) v.year = parseInt(yearMatch[1]);
+
+    // Price: US$X,XXX,XXX or $X,XXX,XXX
+    const priceMatch = text.match(/\b(US\$[\d,]+|USD\s*[\d,]+|\$[\d,]+|€[\d,]+)\b/);
+    if (priceMatch) v.price = priceMatch[1];
+
+    // Location: "City, State" or "City, Country"
+    const locMatch = text.match(/\n([A-Z][a-zA-Z\s]{2,30},\s+[A-Z][a-zA-Z\s]{2,20})\n/);
+    if (locMatch) v.location = locMatch[1].trim();
+
+    // LOA: "65'" or "20.5 m" or "LOA: 65'"
+    const loaMatch = text.match(/(?:LOA|Length[^:]*?):?\s*([\d.]+\s*(?:m|ft|'))/i);
+    if (loaMatch) v.loa = loaMatch[1].trim();
+
+    // Beam
+    const beamMatch = text.match(/(?:Beam)[^:]*?:?\s*([\d.]+\s*(?:m|ft|'))/i);
+    if (beamMatch) v.beam = beamMatch[1].trim();
+
+    // Images: boatsgroup CDN URLs
+    const imgRegex = /https:\/\/images\.boatsgroup\.com\/[^\s"')]+\.(?:jpg|jpeg|png|webp)/gi;
+    const imgMatches = text.match(imgRegex) || [];
+    const seen = new Set<string>();
+    const images: { src: string; alt: string }[] = [];
+    for (const src of imgMatches) {
+      // Upscale: swap w=200 → w=1200
+      const big = src.replace(/[?&]w=\d+/, m => m.replace(/\d+/, "1200"))
+                     .replace(/[?&]format=webp/, "")
+                     .replace(/[?&]exact/, "");
+      if (!seen.has(big) && !/logo|icon|sprite/i.test(big)) {
+        seen.add(big);
+        images.push({ src: big, alt: "" });
+      }
+    }
+    if (images.length) v.images = images;
+
+    // Description: longest paragraph (>100 chars, not a heading)
+    const paras = text.split(/\n{2,}/).map(p => p.trim()).filter(p => p.length > 100 && !/^[A-Z\s]+$/.test(p));
+    if (paras.length) v.description = paras[0].slice(0, 800);
+
+    if (!v.name && !v.price && !images.length) {
+      showToast("Couldn't extract data — try selecting all text on the listing page (CMD+A, CMD+C)", "error");
+      return;
+    }
+
+    const base = vessel || ({
+      name: "", builder: "", year: null, location: "", price: "",
+      loa: "", beam: "", draft: "", description: "", images: [],
+      features: [], sourceUrl: url || "",
+    } as unknown as VesselData);
+
+    const merged: VesselData = { ...base, ...v, images: v.images || base.images || [] };
+    setVessel(prepVessel(merged));
+    setPasteText("");
+    setShowPasteImport(false);
+    setStep("preview");
+    showToast(`Paste import: ${Object.keys(v).filter(k => (v as Record<string,unknown>)[k]).length} fields extracted${images.length ? ` · ${images.length} images` : ""}`, "success");
   }
 
   /* ── Hidden fields ── */
@@ -1071,6 +1144,55 @@ export default function BrochuresPage() {
         <p className="text-xs" style={{ color: "var(--navy-400)" }}>
           All sources are merged — URL 1 wins for text fields, others fill any gaps. More sources = more complete brochure.
         </p>
+      </div>
+
+      {/* ── Paste import for Cloudflare-blocked sites (e.g. YachtWorld) ── */}
+      <div className="rounded-xl mb-6 overflow-hidden" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+        <button
+          onClick={() => setShowPasteImport(v => !v)}
+          className="w-full flex items-center justify-between px-5 py-3.5 text-left"
+          style={{ background: "transparent" }}>
+          <div>
+            <p className="text-xs font-semibold" style={{ color: "var(--brass-400)" }}>
+              📋 Paste Page Source <span className="font-normal ml-1" style={{ color: "var(--navy-400)" }}>— for YachtWorld &amp; sites that block auto-scraping</span>
+            </p>
+            <p className="text-[11px] mt-0.5" style={{ color: "var(--navy-500)" }}>
+              Open the listing in your browser → CMD+A → CMD+C → paste here
+            </p>
+          </div>
+          <span className="text-lg" style={{ color: "var(--navy-400)" }}>{showPasteImport ? "−" : "+"}</span>
+        </button>
+        {showPasteImport && (
+          <div className="px-5 pb-5" style={{ borderTop: "1px solid var(--border)" }}>
+            <p className="text-xs mt-3 mb-2" style={{ color: "var(--navy-400)" }}>
+              1. Open the YachtWorld listing in a new tab<br />
+              2. Press <strong>CMD+A</strong> to select all, then <strong>CMD+C</strong> to copy<br />
+              3. Click in the box below and press <strong>CMD+V</strong> to paste
+            </p>
+            <textarea
+              value={pasteText}
+              onChange={e => setPasteText(e.target.value)}
+              placeholder="Paste the full page text here…"
+              rows={6}
+              className="form-input w-full resize-y"
+              style={{ fontSize: 13, minHeight: 100, fontFamily: "monospace" }}
+            />
+            <div className="flex gap-2 mt-2">
+              <button
+                onClick={handlePasteImport}
+                disabled={!pasteText.trim()}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold"
+                style={{ background: pasteText.trim() ? "var(--brass-400)" : "var(--border)", color: pasteText.trim() ? "#fff" : "var(--navy-400)" }}>
+                Extract &amp; Build →
+              </button>
+              <button onClick={() => { setPasteText(""); setShowPasteImport(false); }}
+                className="px-4 py-2.5 rounded-xl text-sm"
+                style={{ background: "var(--sand-100)", color: "var(--navy-600)" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {loading && <div className="flex justify-center py-16"><div className="w-6 h-6 border-2 border-[var(--brass-400)] border-t-transparent rounded-full animate-spin" /></div>}

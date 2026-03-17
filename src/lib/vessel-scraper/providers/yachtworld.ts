@@ -68,30 +68,36 @@ function upscaleBoatsgroup(src: string): string {
     .replace(/[?&]$/, "");
 }
 
-// ── Boatsgroup image fetcher ──────────────────────────────────────────────────
-// When Cloudflare blocks the page, we can still fetch the image manifest
-// from the boatsgroup search API which doesn't require browser rendering.
+// ── Boatsgroup image fetcher via YachtWorld embed page ───────────────────────
+// The standard page is Cloudflare-blocked, but we can still extract images
+// from the raw HTML by trying alternate entry points and parsing img tags.
 async function fetchBoatsgroupImages(listingId: string): Promise<{ src: string; alt: string }[]> {
-  try {
-    // Boatsgroup serves a plain JSON search result for listing IDs
-    const res = await fetch(
-      `https://www.yachtworld.com/api/search-bff/v2/listings/${listingId}?locale=en-US&currency=USD`,
-      {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-          "Accept": "application/json",
-          "Referer": "https://www.yachtworld.com/",
-        },
-        signal: AbortSignal.timeout(10000),
+  // Try fetching the YachtWorld listing via a Google cache or alternative proxy
+  const urls = [
+    `https://webcache.googleusercontent.com/search?q=cache:yachtworld.com/yacht/-${listingId}/`,
+    `https://www.bing.com/search?q=yachtworld+${listingId}&format=json`,
+  ];
+
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0", "Accept": "text/html,*/*" },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) continue;
+      const text = await res.text();
+      const imgRegex = /https:\/\/images\.boatsgroup\.com\/resize\/[^\s"')]+\.(?:jpg|jpeg|png|webp)/gi;
+      const imgs = text.match(imgRegex) || [];
+      if (imgs.length > 0) {
+        const seen = new Set<string>();
+        return imgs
+          .map(src => upscaleBoatsgroup(src))
+          .filter(src => !seen.has(src) && seen.add(src) && !isJunk(src))
+          .map(src => ({ src, alt: "" }));
       }
-    );
-    if (!res.ok) return [];
-    const data = await res.json() as Record<string, unknown>;
-    const media = (data.media || data.images || []) as { url?: string; caption?: string }[];
-    return media
-      .filter(m => m.url && /^https?:\/\//i.test(m.url))
-      .map(m => ({ src: upscaleBoatsgroup(m.url!), alt: m.caption || "" }));
-  } catch { return []; }
+    } catch { continue; }
+  }
+  return [];
 }
 
 // ── Markdown page parser — extracts data from plain-text page fetch ───────────
