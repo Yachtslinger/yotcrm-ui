@@ -1264,6 +1264,25 @@ export default function CampaignsPage(): React.ReactElement {
             </button>
           </div>
 
+          {/* Export contacts row */}
+          <div className="px-2 pb-2 md:px-3 md:pb-3 flex gap-2 flex-wrap" style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+            <span className="text-[11px] font-semibold self-center" style={{ color: "var(--navy-400)" }}>Export contacts for Vertical Response:</span>
+            {[
+              { label: "All Contacts", source: "all" },
+              { label: "Pipeline Only", source: "pipeline" },
+              { label: "Apple Contacts", source: "apple_contacts" },
+            ].map(({ label, source }) => (
+              <a key={source}
+                href={`/api/campaign/export?source=${source}`}
+                download
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
+                style={{ background: "rgba(14,116,144,0.1)", color: "#0e7490", border: "1px solid rgba(14,116,144,0.3)" }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                {label}
+              </a>
+            ))}
+          </div>
+
           {/* ── Save Template Panel ── */}
           {tmplSaving && (
             <div className="mt-2 p-3 rounded-xl bg-indigo-50 border border-indigo-200">
