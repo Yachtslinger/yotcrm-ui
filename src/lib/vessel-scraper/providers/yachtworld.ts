@@ -68,7 +68,60 @@ function upscaleBoatsgroup(src: string): string {
     .replace(/[?&]$/, "");
 }
 
-// ── Plain fetch (fast path) ───────────────────────────────────────────────────
+// ── Boatsgroup image fetcher ──────────────────────────────────────────────────
+// When Cloudflare blocks the page, we can still fetch the image manifest
+// from the boatsgroup search API which doesn't require browser rendering.
+async function fetchBoatsgroupImages(listingId: string): Promise<{ src: string; alt: string }[]> {
+  try {
+    // Boatsgroup serves a plain JSON search result for listing IDs
+    const res = await fetch(
+      `https://www.yachtworld.com/api/search-bff/v2/listings/${listingId}?locale=en-US&currency=USD`,
+      {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+          "Accept": "application/json",
+          "Referer": "https://www.yachtworld.com/",
+        },
+        signal: AbortSignal.timeout(10000),
+      }
+    );
+    if (!res.ok) return [];
+    const data = await res.json() as Record<string, unknown>;
+    const media = (data.media || data.images || []) as { url?: string; caption?: string }[];
+    return media
+      .filter(m => m.url && /^https?:\/\//i.test(m.url))
+      .map(m => ({ src: upscaleBoatsgroup(m.url!), alt: m.caption || "" }));
+  } catch { return []; }
+}
+
+// ── Markdown page parser — extracts data from plain-text page fetch ───────────
+// YachtWorld's page renders price/location in markdown even when JS is blocked
+function parseFromMarkdown(text: string): Partial<VesselData> {
+  const result: Partial<VesselData> = { images: [] };
+
+  // Price: "US$3,750,000" or "$3,750,000"
+  const priceMatch = text.match(/\b(US\$[\d,]+(?:\.\d+)?|\$[\d,]+(?:\.\d+)?|€[\d,]+(?:\.\d+)?)\b/);
+  if (priceMatch) result.price = priceMatch[1];
+
+  // Location: city + state pattern after price
+  const locMatch = text.match(/\n([A-Z][a-zA-Z\s]+,\s+[A-Z][a-zA-Z\s]+)\n/);
+  if (locMatch) result.location = locMatch[1].trim();
+
+  // Images: extract boatsgroup thumbnail URLs and upscale
+  const imgRegex = /https:\/\/images\.boatsgroup\.com\/resize\/[^\s")]+\.(?:jpg|jpeg|png|webp)[^\s")"]*/gi;
+  const imgs = text.match(imgRegex) || [];
+  const seen = new Set<string>();
+  for (const src of imgs) {
+    const clean = src.replace(/[?&]format=webp/, "").replace(/[?&]exact/, "").replace(/&&+/g, "&");
+    const upscaled = upscaleBoatsgroup(clean);
+    if (!seen.has(upscaled) && !isJunk(upscaled)) {
+      seen.add(upscaled);
+      (result.images as { src: string; alt: string }[]).push({ src: upscaled, alt: "" });
+    }
+  }
+
+  return result;
+}
 async function plainFetch(url: string): Promise<string> {
   const res = await fetch(url, {
     headers: {
@@ -87,36 +140,56 @@ async function plainFetch(url: string): Promise<string> {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 export async function scrapeYachtWorld(url: string): Promise<VesselData> {
-  // 1. Always seed with slug data — guaranteed to have name/year/builder
+  // 1. Always seed with slug data
   const slugData = parseSlug(url);
+  const listingId = url.match(/[-/](\d{6,8})[/?]?$/)?.[1] || null;
 
   let html = "";
+  let markdownText = "";
 
-  // 2. Try plain fetch first (cheap, fast)
+  // 2. Try plain fetch — even if Cloudflare blocks JS rendering,
+  //    the plain HTML often has price/location/images in it
   try {
-    html = await plainFetch(url);
-    // Cloudflare challenge check
-    if (html.length < 8000 && /checking your browser|just a moment|challenge-platform/i.test(html)) {
-      html = "";
+    const rawHtml = await plainFetch(url);
+    if (rawHtml.length > 5000 && !/checking your browser|just a moment/i.test(rawHtml)) {
+      html = rawHtml;
     }
+    // Always try markdown-style extraction on raw text too
+    markdownText = rawHtml;
   } catch { /* fall through */ }
 
-  // 3. If plain fetch blocked, try Puppeteer stealth
+  // 3. Puppeteer stealth fallback
   if (!html) {
     try {
       html = await stealthFetch(url);
+      markdownText = html;
     } catch { /* fall through */ }
   }
 
-  // 4. Parse whatever HTML we got
+  // 4. Parse HTML if available
   const vessel = html ? parseYachtWorld(url, html) : emptyVessel(url);
 
-  // 5. Back-fill with slug data for any missing fields
-  if (!vessel.name  && slugData.name)    vessel.name    = slugData.name;
-  if (!vessel.year  && slugData.year)    vessel.year    = slugData.year;
+  // 5. Back-fill from markdown text extraction (price/location/images)
+  if (markdownText) {
+    const mdData = parseFromMarkdown(markdownText);
+    if (!vessel.price    && mdData.price)    vessel.price    = mdData.price;
+    if (!vessel.location && mdData.location) vessel.location = mdData.location;
+    if (vessel.images.length === 0 && mdData.images?.length) {
+      vessel.images = mdData.images as { src: string; alt: string }[];
+    }
+  }
+
+  // 6. Back-fill from slug
+  if (!vessel.name    && slugData.name)    vessel.name    = slugData.name;
+  if (!vessel.year    && slugData.year)    vessel.year    = slugData.year;
   if (!vessel.builder && slugData.builder) vessel.builder = slugData.builder;
 
-  // 6. Upscale boatsgroup thumbnail images to full-res
+  // 7. If still no images, try boatsgroup API directly
+  if (vessel.images.length === 0 && listingId) {
+    vessel.images = await fetchBoatsgroupImages(listingId);
+  }
+
+  // 8. Upscale any remaining thumbnail images
   vessel.images = vessel.images.map(img => ({
     ...img,
     src: upscaleBoatsgroup(img.src),
