@@ -123,55 +123,148 @@ export function mergeVessel(base: VesselData, patch: Partial<VesselData>): Vesse
  * Keys are lowercase substrings to match against spec labels.
  */
 export const SPEC_MAP: { patterns: string[]; field: keyof VesselData }[] = [
-  { patterns: ["loa", "length overall", "length (oa)", "hull length", "length over all"], field: "loa" },
-  { patterns: ["lwl", "waterline"],                                            field: "lwl" },
-  { patterns: ["beam", "breadth"],                                             field: "beam" },
-  { patterns: ["draft", "draught"],                                            field: "draft" },
-  { patterns: ["displacement"],                                                field: "displacement" },
-  { patterns: ["gross ton", "gross tonnage", "gt ", "g.t.", "gross register"], field: "grossTonnage" },
-  { patterns: ["classification", "class ", "bureau veritas", "rina", "dnv"],   field: "classification" },
-  { patterns: ["flag"],                                                         field: "flagState" },
-  { patterns: ["hull form", "hull type", "hull shape"],                        field: "hullForm" },
-  { patterns: ["hull material", "construction material", "hull construction"], field: "hullMaterial" },
-  { patterns: ["superstructure"],                                              field: "superstructure" },
-  { patterns: ["exterior design", "exterior designer", "exterior styling"],    field: "exteriorDesign" },
-  { patterns: ["interior design", "interior designer"],                        field: "interiorDesign" },
-  { patterns: ["naval architect", "naval arch"],                               field: "navalArchitect" },
-  { patterns: ["engine brand", "main engine", "engines", "engine type", "engine &", "^engine$", "engine "],  field: "engines" },
-  { patterns: ["engine hp", "engine power", "power output", "total power", "mhp", "bhp"], field: "power" },
-  { patterns: ["gearbox", "gear box", "gear ratio"],                           field: "gearbox" },
-  { patterns: ["propulsion type", "propulsion system"],                        field: "propulsion" },
-  { patterns: ["propeller", "propellor", "shaft &", "shaft/"],                 field: "propellers" },
-  { patterns: ["generator", "genset"],                                         field: "gensets" },
-  { patterns: ["bow thruster"],                                                field: "bowThruster" },
-  { patterns: ["stern thruster"],                                              field: "sternThruster" },
-  { patterns: ["air condition", "hvac", "a/c"],                               field: "airCon" },
-  { patterns: ["max speed", "maximum speed", "top speed"],                    field: "maxSpeed" },
-  { patterns: ["cruise speed", "cruising speed", "service speed"],            field: "cruiseSpeed" },
-  { patterns: ["range"],                                                       field: "range" },
-  { patterns: ["fuel capacity", "fuel tank"],                                  field: "fuelTank" },
-  { patterns: ["fresh water", "freshwater", "water capacity", "water tank"],   field: "freshWater" },
-  { patterns: ["holding tank", "sewage"],                                      field: "holdingTank" },
-  { patterns: ["lube oil"],                                                    field: "lubeOil" },
-  { patterns: ["guest", "passengers", "pax"],                                  field: "guests" },
-  { patterns: ["stateroom", "cabin", "guest cabin", "sleeping"],               field: "staterooms" },
-  { patterns: ["crew capacity", "crew number", "number of crew"],              field: "crew" },
-  { patterns: ["crew cabin", "crew stateroom"],                                field: "crewCabins" },
-  { patterns: ["tender", "garage", "toy"],                                     field: "tender" },
-  { patterns: ["interior area", "living area", "deck area", "total area"],     field: "livingSpace" },
-  { patterns: ["navigation", "nav equipment"],                                 field: "navigation" },
-  { patterns: ["stabiliser", "stabilizer", "fin stabiliser"],                  field: "stabilisers" },
-  { patterns: ["water maker", "watermaker", "reverse osmosis"],                field: "waterMaker" },
-  { patterns: ["builder", "shipyard", "manufacturer"],                         field: "builder" },
-  { patterns: ["model"],                                                        field: "name" },
-  { patterns: ["year built", "year of build", "delivery year", "^year$", "year "], field: "year" },
-  { patterns: ["location", "lying"],                                           field: "location" },
-  { patterns: ["asking price", "price"],                                        field: "price" },
+  // ── Identity / admin ──────────────────────────────────────────────────────
+  { patterns: ["asking price", "price (usd)", "price usd", "^price$"], field: "price" },
+  { patterns: ["price (eur)", "price eur", "asking price eur", "eur price"], field: "askingPriceEUR" },
+  { patterns: ["vat status", "vat paid", "tax status"],                  field: "vatStatus" },
+  { patterns: ["stock no", "stock number", "ref no", "ref number", "listing ref"], field: "stockNumber" },
+  { patterns: ["hull no", "hull number"],                                field: "hullNumber" },
+  { patterns: ["imo"],                                                   field: "imoNumber" },
+  { patterns: ["mmsi"],                                                  field: "mmsiNumber" },
+  { patterns: ["registry", "port of registry"],                         field: "registryPort" },
+  { patterns: ["home port", "homeport", "lying at", "lying"],           field: "homePort" },
+  { patterns: ["flag"],                                                  field: "flagState" },
+  { patterns: ["navigation class", "nav class", "navalclass"],          field: "navalClass" },
+  { patterns: ["classification society", "class society"],              field: "classification" },
+  { patterns: ["classification", "class ", "bureau veritas", "rina", "dnv", "lloyds"], field: "classification" },
+  { patterns: ["gross ton", "gross tonnage", "gt ", "g.t.", "gross register", "grt"], field: "grossTonnage" },
+  { patterns: ["location", "located"],                                  field: "location" },
+  { patterns: ["refit year", "last refit"],                             field: "refitYear" },
+  { patterns: ["refit detail", "refit description", "refit info"],      field: "refitDetails" },
+
+  // ── Dimensions ────────────────────────────────────────────────────────────
+  { patterns: ["loa", "length overall", "length (oa)", "hull length", "length over all", "length, m", "length (m)", "length m"], field: "loa" },
+  { patterns: ["lwl", "waterline length", "length waterline"],          field: "lwl" },
+  { patterns: ["beam max", "maximum beam", "max beam"],                 field: "beamMax" },
+  { patterns: ["beam", "breadth", "beam, m", "beam (m)", "beam m"],    field: "beam" },
+  { patterns: ["draft (max)", "max draft", "maximum draft", "draught (max)", "max draught", "draught, m", "draft, m", "draught m", "draft m", "draught", "draft"], field: "draft" },
+  { patterns: ["draft (min)", "min draft", "minimum draft"],           field: "draftMin" },
+  { patterns: ["air draft", "air draught"],                            field: "airDraft" },
+  { patterns: ["freeboard"],                                           field: "freeboard" },
+  { patterns: ["displacement", "displacement, tons", "displacement (t)"], field: "displacement" },
+  { patterns: ["number of decks", "deck count", "decks"],              field: "deckCount" },
+
+  // ── Hull & Construction ───────────────────────────────────────────────────
+  { patterns: ["hull form", "hull type", "hull shape"],                field: "hullForm" },
+  { patterns: ["hull material", "construction material", "hull construction", "hull"], field: "hullMaterial" },
+  { patterns: ["deck material"],                                       field: "deckMaterial" },
+  { patterns: ["superstructure"],                                      field: "superstructure" },
+  { patterns: ["paint system", "paint"],                               field: "paintSystem" },
+  { patterns: ["windows", "glazing", "window"],                        field: "windowGlazing" },
+  { patterns: ["keel type", "keel"],                                   field: "keelType" },
+
+  // ── Design ────────────────────────────────────────────────────────────────
+  { patterns: ["exterior design", "exterior designer", "exterior styling", "exterior by"], field: "exteriorDesign" },
+  { patterns: ["interior design", "interior designer", "interior by"], field: "interiorDesign" },
+  { patterns: ["naval architect", "naval arch"],                       field: "navalArchitect" },
+  { patterns: ["interior style"],                                      field: "interiorStyle" },
+  { patterns: ["color scheme", "colour scheme"],                       field: "colorScheme" },
+
+  // ── Propulsion ────────────────────────────────────────────────────────────
+  { patterns: ["main engine", "engine brand", "engine type", "engine &", "engines", "^engine$", "engine,"], field: "engines" },
+  { patterns: ["engine hp", "engine power", "power output", "total power", "mhp", "bhp", "engine power, hp"], field: "power" },
+  { patterns: ["engine hours"],                                        field: "engineHours" },
+  { patterns: ["gearbox", "gear box"],                                 field: "gearbox" },
+  { patterns: ["propulsion type", "propulsion system", "propulsion"],  field: "propulsion" },
+  { patterns: ["shaft count", "number of shafts", "shafts"],          field: "shaftCount" },
+  { patterns: ["propeller", "propellor"],                             field: "propellers" },
+  { patterns: ["bow thruster"],                                        field: "bowThruster" },
+  { patterns: ["stern thruster"],                                      field: "sternThruster" },
+  { patterns: ["stabiliser make", "stabilizer make", "stabiliser brand"], field: "stabiliserMake" },
+  { patterns: ["zero speed stabiliser", "zero speed stabilizer", "zero speed stab"], field: "zeroSpeedStabs" },
+  { patterns: ["stabiliser", "stabilizer", "fin stabiliser"],          field: "stabilisers" },
+
+  // ── Performance ───────────────────────────────────────────────────────────
+  { patterns: ["max speed", "maximum speed", "top speed", "top speed, knots"], field: "maxSpeed" },
+  { patterns: ["cruise speed", "cruising speed", "service speed", "cruising speed, knots"], field: "cruiseSpeed" },
+  { patterns: ["economy speed", "economical speed", "economic speed"], field: "economySpeed" },
+  { patterns: ["range (cruise)", "range cruise", "range at cruise", "range, nm", "range (nm)", "range nm", "^range$"], field: "range" },
+  { patterns: ["range (economy)", "range economy", "range at economy"], field: "rangeEconomy" },
+
+  // ── Electrical & Generators ───────────────────────────────────────────────
+  { patterns: ["generator set", "genset", "generator brand", "^generator$"], field: "gensets" },
+  { patterns: ["generator output", "generator kw", "generator power"],  field: "generatorKW" },
+  { patterns: ["shore power"],                                          field: "shorepower" },
+  { patterns: ["voltage system", "electrical system", "voltage"],      field: "voltageSystem" },
+  { patterns: ["emergency generator", "emergency gen"],                field: "emergencyGen" },
+  { patterns: ["air condition", "hvac", "a/c"],                       field: "airCon" },
+  { patterns: ["a/c make", "air con make", "hvac make"],               field: "airConMake" },
+
+  // ── Tanks ─────────────────────────────────────────────────────────────────
+  { patterns: ["fuel capacity", "fuel tank", "fuel, l", "fuel (l)", "fuel l"],  field: "fuelTank" },
+  { patterns: ["fuel type"],                                            field: "fuelType" },
+  { patterns: ["fresh water", "freshwater", "water capacity", "water tank", "fresh water, l", "fresh water (l)"], field: "freshWater" },
+  { patterns: ["holding tank", "black water"],                         field: "holdingTank" },
+  { patterns: ["grey water", "gray water"],                            field: "greyWater" },
+  { patterns: ["lube oil"],                                            field: "lubeOil" },
+  { patterns: ["sewage treatment"],                                    field: "sewageTreatment" },
+  { patterns: ["water maker capacity", "watermaker capacity"],         field: "waterMakerCapacity" },
+  { patterns: ["water maker", "watermaker", "reverse osmosis"],        field: "waterMaker" },
+
+  // ── Accommodation ─────────────────────────────────────────────────────────
+  { patterns: ["guest", "passengers", "pax", "^guests$"],              field: "guests" },
+  { patterns: ["owner", "owners cabin", "owner's cabin", "master cabin"], field: "ownersCabin" },
+  { patterns: ["guest cabin", "guest stateroom"],                      field: "guestCabins" },
+  { patterns: ["stateroom", "cabin", "sleeping", "^cabins$"],          field: "staterooms" },
+  { patterns: ["crew cabin", "crew stateroom"],                        field: "crewCabins" },
+  { patterns: ["crew mess"],                                           field: "crewMess" },
+  { patterns: ["crew capacity", "crew number", "number of crew", "^crew$"], field: "crew" },
+  { patterns: ["interior area", "living area", "deck area", "total area", "gross area"], field: "livingSpace" },
+
+  // ── Amenities ─────────────────────────────────────────────────────────────
+  { patterns: ["flybridge"],                                           field: "flybridge" },
+  { patterns: ["beach club"],                                          field: "beachClub" },
+  { patterns: ["swimming platform", "swim platform"],                  field: "swimmingPlatform" },
+  { patterns: ["jacuzzi", "hot tub", "whirlpool"],                    field: "jacuzzi" },
+  { patterns: ["gym", "gymnasium", "fitness"],                         field: "gym" },
+  { patterns: ["cinema", "theatre", "theater"],                        field: "cinema" },
+  { patterns: ["tender count", "number of tenders"],                   field: "tenderCount" },
+  { patterns: ["water toys", "toys"],                                  field: "toys" },
+  { patterns: ["tender", "garage", "toy garage"],                      field: "tender" },
+  { patterns: ["garage detail"],                                       field: "garage" },
+
+  // ── Navigation & Comms ────────────────────────────────────────────────────
+  { patterns: ["navigation system", "nav equipment", "navigation"],    field: "navigation" },
+  { patterns: ["radar"],                                               field: "radar" },
+  { patterns: ["chart plotter", "chartplotter"],                       field: "chartPlotter" },
+  { patterns: ["autopilot"],                                           field: "autopilot" },
+  { patterns: ["satcom", "vsat", "satellite comm"],                    field: "satcom" },
+  { patterns: ["ais"],                                                 field: "aisSystem" },
+  { patterns: ["anchoring system", "anchor system"],                   field: "anchoring" },
+  { patterns: ["windlass"],                                            field: "windlass" },
+
+  // ── Safety ────────────────────────────────────────────────────────────────
+  { patterns: ["fire suppression", "fire fighting", "fire system"],    field: "fireSuppression" },
+  { patterns: ["life raft", "liferaft"],                               field: "lifeRafts" },
+  { patterns: ["mob system", "man overboard"],                         field: "mobSystem" },
+  { patterns: ["helideck", "helipad", "helicopter"],                   field: "helideck" },
+
+  // ── Condition & Service ───────────────────────────────────────────────────
+  { patterns: ["last survey", "survey date"],                          field: "lastSurvey" },
+  { patterns: ["last dry dock", "last drydock", "last haul"],          field: "lastDrydock" },
+  { patterns: ["last service", "last maintenance", "last refit"],      field: "lastService" },
+
+  // ── Identity fallbacks ────────────────────────────────────────────────────
+  { patterns: ["builder", "shipyard", "manufacturer"],                 field: "builder" },
+  { patterns: ["^model$", "model name"],                               field: "name" },
+  { patterns: ["year built", "year of build", "delivery year", "^year$", "delivery", "built"], field: "year" },
 ];
 
 // Fields that should always display in dual metric/imperial
 const DUAL_MEASURE_FIELDS = new Set<keyof VesselData>([
-  "loa","lwl","beam","beamMax","draft","draftMin","airDraft","displacement","fuelTank","freshWater","holdingTank","greyWater","waterMakerCapacity","livingSpace"
+  "loa","lwl","beam","beamMax","draft","draftMin","airDraft","freeboard",
+  "displacement","fuelTank","freshWater","holdingTank","greyWater",
+  "waterMakerCapacity","livingSpace"
 ]);
 
 /** Assign a label:value pair to the correct VesselData field */

@@ -337,37 +337,75 @@ ${perfItems.length >= 2 ? `
     <div class="gold-rule reveal"></div>
     <h2 class="section-title reveal" style="margin-bottom:48px;">Full <em>Specifications</em></h2>
     <div class="specs-table reveal">
-      <div class="spec-header">Hull &amp; Construction</div>
-      ${specRow("Hull Form", vessel.hullForm)}${specRow("Hull Material", vessel.hullMaterial)}
-      ${specRow("Superstructure", vessel.superstructure)}${specRow("Displacement", vessel.displacement)}
-      <div class="spec-header">Classification &amp; Identity</div>
-      ${specRow("Classification", vessel.classification)}${specRow("Gross Tonnage", vessel.grossTonnage)}
-      ${specRow("Flag State", vessel.flagState)}${specRow("Stock Number", vessel.stockNumber)}
+      <div class="spec-header">Identity &amp; Registration</div>
+      ${specRow("Vessel Name", vessel.name)}${specRow("Builder", vessel.builder)}
+      ${specRow("Year / Delivery", vessel.year ? String(vessel.year) : "")}${specRow("Location", vessel.location)}
+      ${specRow("Asking Price", vessel.price)}${specRow("Price (EUR)", (vessel as any).askingPriceEUR || "")}
+      ${specRow("VAT Status", (vessel as any).vatStatus || "")}${specRow("Stock Number", vessel.stockNumber)}
+      ${specRow("Hull Number", (vessel as any).hullNumber || "")}${specRow("IMO Number", (vessel as any).imoNumber || "")}
+      ${specRow("MMSI Number", (vessel as any).mmsiNumber || "")}${specRow("Registry Port", (vessel as any).registryPort || "")}
+      ${specRow("Home Port", (vessel as any).homePort || "")}${specRow("Flag State", vessel.flagState)}
+      ${specRow("Navigation Class", (vessel as any).navalClass || "")}${specRow("Class Society", vessel.classification)}
+      ${specRow("Gross Tonnage", vessel.grossTonnage)}${specRow("Refit Details", (vessel as any).refitDetails || "")}
       <div class="spec-header">Dimensions</div>
       ${specRow("Length Overall", vessel.loa)}${specRow("Length Waterline", vessel.lwl)}
-      ${specRow("Max Beam", vessel.beam)}${specRow("Draft", vessel.draft)}
+      ${specRow("Beam", vessel.beam)}${specRow("Max Beam", (vessel as any).beamMax || "")}
+      ${specRow("Draft (Max)", vessel.draft)}${specRow("Draft (Min)", (vessel as any).draftMin || "")}
+      ${specRow("Air Draft", (vessel as any).airDraft || "")}${specRow("Freeboard", (vessel as any).freeboard || "")}
+      ${specRow("Displacement", vessel.displacement)}${specRow("Number of Decks", (vessel as any).deckCount || "")}
+      <div class="spec-header">Hull &amp; Construction</div>
+      ${specRow("Hull Form", vessel.hullForm)}${specRow("Hull Material", vessel.hullMaterial)}
+      ${specRow("Deck Material", (vessel as any).deckMaterial || "")}${specRow("Superstructure", vessel.superstructure)}
+      ${specRow("Paint System", (vessel as any).paintSystem || "")}${specRow("Windows / Glazing", (vessel as any).windowGlazing || "")}
+      ${specRow("Keel Type", (vessel as any).keelType || "")}${specRow("", "")}
       <div class="spec-header">Design</div>
       ${specRow("Exterior Design", vessel.exteriorDesign)}${specRow("Interior Design", vessel.interiorDesign)}
-      ${specRow("Naval Architecture", vessel.navalArchitect)}${specRow("Builder", vessel.builder)}
-      ${specRow("Year / Delivery", vessel.year ? String(vessel.year) : "")}${specRow("", "")}
-      <div class="spec-header">Propulsion &amp; Power</div>
+      ${specRow("Naval Architecture", vessel.navalArchitect)}${specRow("Interior Style", (vessel as any).interiorStyle || "")}
+      ${specRow("Colour Scheme", (vessel as any).colorScheme || "")}${specRow("", "")}
+      <div class="spec-header">Propulsion</div>
       ${specRow("Main Engines", vessel.engines)}${specRow("Power Output", vessel.power)}
-      ${specRow("Gearbox", vessel.gearbox)}${specRow("Propulsion", vessel.propulsion)}
-      ${specRow("Propellers", vessel.propellers)}${specRow("Bow Thruster", (vessel as Record<string,unknown>).bowThruster as string)}
-      ${specRow("Stern Thruster", (vessel as Record<string,unknown>).sternThruster as string)}${specRow("", "")}
+      ${specRow("Engine Hours", (vessel as any).engineHours || "")}${specRow("Gearbox", vessel.gearbox)}
+      ${specRow("Propulsion Type", vessel.propulsion)}${specRow("Shaft Count", (vessel as any).shaftCount || "")}
+      ${specRow("Propellers", vessel.propellers)}${specRow("Bow Thruster", vessel.bowThruster)}
+      ${specRow("Stern Thruster", vessel.sternThruster)}${specRow("Stabilisers", vessel.stabilisers)}
+      ${specRow("Stabiliser Make", (vessel as any).stabiliserMake || "")}${specRow("Zero Speed Stabs", (vessel as any).zeroSpeedStabs || "")}
       <div class="spec-header">Performance</div>
-      ${specRow("Maximum Speed", vessel.maxSpeed)}${specRow("Cruising Speed", vessel.cruiseSpeed)}
-      ${specRow("Range", vessel.range)}${specRow("", "")}
+      ${specRow("Maximum Speed", vessel.maxSpeed)}${specRow("Cruise Speed", vessel.cruiseSpeed)}
+      ${specRow("Economy Speed", (vessel as any).economySpeed || "")}${specRow("Range (Cruise)", vessel.range)}
+      ${specRow("Range (Economy)", (vessel as any).rangeEconomy || "")}${specRow("", "")}
       <div class="spec-header">Electrical &amp; Systems</div>
-      ${specRow("Generator Sets", vessel.gensets)}${specRow("Air Conditioning", vessel.airCon)}
-      ${specRow("Stabilisers", (vessel as Record<string,unknown>).stabilisers as string)}${specRow("Water Maker", (vessel as Record<string,unknown>).waterMaker as string)}
+      ${specRow("Generator Sets", vessel.gensets)}${specRow("Generator Output (kW)", (vessel as any).generatorKW || "")}
+      ${specRow("Shore Power", (vessel as any).shorepower || "")}${specRow("Voltage System", (vessel as any).voltageSystem || "")}
+      ${specRow("Emergency Generator", (vessel as any).emergencyGen || "")}${specRow("Air Conditioning", vessel.airCon)}
+      ${specRow("A/C Make", (vessel as any).airConMake || "")}${specRow("Water Maker", vessel.waterMaker)}
+      ${specRow("Water Maker Capacity", (vessel as any).waterMakerCapacity || "")}${specRow("", "")}
       <div class="spec-header">Tank Capacities</div>
-      ${specRow("Fuel Oil", formatCapacity(vessel.fuelTank))}${specRow("Fresh Water", formatCapacity(vessel.freshWater))}
-      ${specRow("Holding Tank", formatCapacity(vessel.holdingTank))}${specRow("Lube Oil", (vessel as Record<string,unknown>).lubeOil as string)}
+      ${specRow("Fuel Capacity", formatCapacity(vessel.fuelTank))}${specRow("Fuel Type", (vessel as any).fuelType || "")}
+      ${specRow("Fresh Water", formatCapacity(vessel.freshWater))}${specRow("Holding Tank", formatCapacity(vessel.holdingTank))}
+      ${specRow("Grey Water", (vessel as any).greyWater || "")}${specRow("Lube Oil", vessel.lubeOil)}
+      ${specRow("Sewage Treatment", (vessel as any).sewageTreatment || "")}${specRow("", "")}
       <div class="spec-header">Accommodation</div>
       ${specRow("Guest Capacity", vessel.guests)}${specRow("Staterooms", vessel.staterooms)}
+      ${specRow("Owner's Cabin", (vessel as any).ownersCabin || "")}${specRow("Guest Cabins", (vessel as any).guestCabins || "")}
       ${specRow("Crew", vessel.crew)}${specRow("Crew Cabins", vessel.crewCabins)}
-      ${specRow("Tender / Garage", vessel.tender)}${specRow("Interior Area", vessel.livingSpace)}
+      ${specRow("Crew Mess", (vessel as any).crewMess || "")}${specRow("Interior Area", vessel.livingSpace)}
+      <div class="spec-header">Amenities &amp; Deck</div>
+      ${specRow("Flybridge", (vessel as any).flybridge || "")}${specRow("Beach Club", (vessel as any).beachClub || "")}
+      ${specRow("Swimming Platform", (vessel as any).swimmingPlatform || "")}${specRow("Jacuzzi / Hot Tub", (vessel as any).jacuzzi || "")}
+      ${specRow("Gym", (vessel as any).gym || "")}${specRow("Cinema / Theatre", (vessel as any).cinema || "")}
+      ${specRow("Tender / Garage", vessel.tender)}${specRow("Tender Count", (vessel as any).tenderCount || "")}
+      ${specRow("Water Toys", (vessel as any).toys || "")}${specRow("Garage Details", (vessel as any).garage || "")}
+      <div class="spec-header">Navigation &amp; Communications</div>
+      ${specRow("Navigation", vessel.navigation)}${specRow("Radar", (vessel as any).radar || "")}
+      ${specRow("Chart Plotter", (vessel as any).chartPlotter || "")}${specRow("Autopilot", (vessel as any).autopilot || "")}
+      ${specRow("Satcom / VSAT", (vessel as any).satcom || "")}${specRow("AIS", (vessel as any).aisSystem || "")}
+      ${specRow("Anchoring System", (vessel as any).anchoring || "")}${specRow("Windlass", (vessel as any).windlass || "")}
+      <div class="spec-header">Safety</div>
+      ${specRow("Fire Suppression", (vessel as any).fireSuppression || "")}${specRow("Life Rafts", (vessel as any).lifeRafts || "")}
+      ${specRow("MOB System", (vessel as any).mobSystem || "")}${specRow("Helideck", (vessel as any).helideck || "")}
+      <div class="spec-header">Condition &amp; Service</div>
+      ${specRow("Last Survey", (vessel as any).lastSurvey || "")}${specRow("Last Dry Dock", (vessel as any).lastDrydock || "")}
+      ${specRow("Last Service", (vessel as any).lastService || "")}${specRow("", "")}
     </div>
   </div>
 </section>
