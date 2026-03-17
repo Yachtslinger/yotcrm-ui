@@ -288,6 +288,17 @@ export function saveBrochure(
   }
 }
 
+export function getBrochureById(id: number): { slug: string } | null {
+  const db = getDb();
+  try {
+    ensureTable(db);
+    const row = db.prepare("SELECT slug FROM brochures WHERE id = ?").get(id) as { slug: string } | undefined;
+    return row || null;
+  } finally {
+    db.close();
+  }
+}
+
 export function deleteBrochure(id: number): boolean {
   const db = getDb();
   try {
@@ -309,7 +320,7 @@ export function updateBrochure(id: number, vessel: VesselData, brokers?: BrokerI
     if (brokers) updatedData.brokers = brokers;
     const pocketVal = isPocket !== undefined ? (isPocket ? 1 : 0) : existing.is_pocket_listing;
     db.prepare(
-      "UPDATE brochures SET vessel_name=?, builder=?, year=?, source_url=?, vessel_data=?, is_pocket_listing=? WHERE id=?"
+      "UPDATE brochures SET vessel_name=?, builder=?, year=?, source_url=?, vessel_data=?, is_pocket_listing=?, updated_at=CURRENT_TIMESTAMP WHERE id=?"
     ).run(
       vessel.name || "Yacht",
       vessel.builder || "",

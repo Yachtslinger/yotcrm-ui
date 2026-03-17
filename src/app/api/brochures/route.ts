@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
-import { listBrochures, deleteBrochure, updateBrochure, getBrochure } from "@/lib/brochure-storage";
+import { listBrochures, deleteBrochure, updateBrochure, getBrochure, getBrochureById } from "@/lib/brochure-storage";
 import { syncPocketListingFromBrochure, removePocketListingBySlug } from "@/lib/pocket-brochure-sync";
 import type { VesselData, BrokerInfo } from "@/lib/brochure-storage";
 
