@@ -22,7 +22,7 @@ type IsoRequest = {
   created_at: string; updated_at: string;
 };
 
-type Tab = "pocket" | "iso";
+type Tab = "pocket" | "iso" | "brochures";
 
 const STATUS_BADGE: Record<string, string> = {
   active: "badge-active",
@@ -42,15 +42,25 @@ export default function OffMarketPage() {
   const [editPocket, setEditPocket] = useState<PocketListing | null>(null);
   const [editIso, setEditIso] = useState<IsoRequest | null>(null);
   const [emailPocket, setEmailPocket] = useState<PocketListing | null>(null);
+  const [brochures, setBrochures] = useState<{id:number;slug:string;title:string;heroSrc:string;is_pocket_listing:number}[]>([]);
+  const [togglingBrochure, setTogglingBrochure] = useState<number|null>(null);
 
   const fetchData = useCallback(async () => {
     try {
-      const [pRes, iRes] = await Promise.all([
+      const [pRes, iRes, bRes] = await Promise.all([
         fetch("/api/offmarket?type=pocket").then(r => r.json()),
         fetch("/api/offmarket?type=iso").then(r => r.json()),
+        fetch("/api/brochures").then(r => r.json()),
       ]);
       setPockets(pRes.items || []);
       setIsos(iRes.items || []);
+      setBrochures((bRes.brochures || []).filter((b:any) => b.source === "db").map((b:any) => ({
+        id: b.id,
+        slug: b.slug,
+        title: b.title,
+        heroSrc: b.heroSrc || "",
+        is_pocket_listing: b.is_pocket_listing || 0,
+      })));
     } catch {} finally { setLoading(false); }
   }, []);
 
@@ -72,16 +82,36 @@ export default function OffMarketPage() {
   const inactivePockets = pockets.filter(p => p.status !== "active");
   const activeIsos = isos.filter(i => i.status === "active");
   const inactiveIsos = isos.filter(i => i.status !== "active");
+  const activeBrochures = brochures.filter(b => b.is_pocket_listing === 1);
+
+  const toggleBrochurePocket = async (id: number, current: number) => {
+    setTogglingBrochure(id);
+    try {
+      const isPocket = current === 1 ? false : true;
+      const res = await fetch("/api/brochures", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, vessel: { name: "" }, isPocket }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setBrochures(prev => prev.map(b => b.id === id ? { ...b, is_pocket_listing: isPocket ? 1 : 0 } : b));
+      }
+    } catch {}
+    setTogglingBrochure(null);
+  };
 
   return (
     <PageShell
       title="Off Market"
-      subtitle={`${activePockets.length} pocket listing${activePockets.length !== 1 ? "s" : ""} · ${activeIsos.length} buyer search${activeIsos.length !== 1 ? "es" : ""}`}
+      subtitle={`${activePockets.length} pocket listing${activePockets.length !== 1 ? "s" : ""} · ${activeIsos.length} buyer search${activeIsos.length !== 1 ? "es" : ""} · ${activeBrochures.length} brochure${activeBrochures.length !== 1 ? "s" : ""} on site`}
       actions={
+        tab !== "brochures" ? (
         <button onClick={() => tab === "pocket" ? (setEditPocket(null), setShowPocketModal(true)) : (setEditIso(null), setShowIsoModal(true))}
           className="btn-primary">
           + {tab === "pocket" ? "Pocket Listing" : "Buyer Search"}
         </button>
+        ) : undefined
       }
     >
 
@@ -94,6 +124,10 @@ export default function OffMarketPage() {
         <button onClick={() => setTab("iso")}
           className={`tab-bar-item ${tab === "iso" ? "active" : ""}`}>
           In Search Of ({activeIsos.length})
+        </button>
+        <button onClick={() => setTab("brochures")}
+          className={`tab-bar-item ${tab === "brochures" ? "active" : ""}`}>
+          Brochures on Site ({activeBrochures.length})
         </button>
       </div>
 
@@ -230,6 +264,67 @@ export default function OffMarketPage() {
                 );
               })}
             </>
+          )}
+        </div>
+      )}
+
+      {/* ========== BROCHURES TAB ========== */}
+      {!loading && tab === "brochures" && (
+        <div>
+          <p className="text-xs mb-4" style={{ color: "var(--navy-400)" }}>
+            Toggle the checkmark to show or hide each brochure in the <strong style={{ color: "var(--foreground)" }}>Off-Market section</strong> of the public website. Checked brochures appear as listings with their hero image.
+          </p>
+          {brochures.length === 0 ? (
+            <div className="text-center py-12 rounded-xl" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+              <p className="text-sm" style={{ color: "var(--navy-400)" }}>No published brochures yet — build one in the E-Brochures section first.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {brochures.map(b => {
+                const isOn = b.is_pocket_listing === 1;
+                const toggling = togglingBrochure === b.id;
+                return (
+                  <div key={b.id} className="rounded-xl overflow-hidden flex items-stretch"
+                    style={{ background: "var(--card)", border: `1px solid ${isOn ? "var(--brass-400)" : "var(--border)"}`, transition: "border-color 0.2s" }}>
+                    {/* Hero thumbnail */}
+                    <div className="w-24 flex-shrink-0 relative" style={{ background: "var(--navy-800)" }}>
+                      {b.heroSrc
+                        ? <img src={b.heroSrc} alt={b.title} className="w-full h-full object-cover" style={{ minHeight: 72 }} />
+                        : <div className="w-full h-full flex items-center justify-center" style={{ minHeight: 72, color: "var(--navy-500)", fontSize: 28 }}>⚓</div>}
+                    </div>
+                    {/* Info */}
+                    <div className="flex-1 px-3 py-2.5 flex items-center gap-3 min-w-0">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold truncate" style={{ color: "var(--foreground)" }}>{b.title}</p>
+                        <a href={`/brochures/${b.slug}`} target="_blank" rel="noopener noreferrer"
+                          className="text-[10px]" style={{ color: "var(--brass-400)" }}>View →</a>
+                      </div>
+                      {/* Toggle */}
+                      <button
+                        onClick={() => toggleBrochurePocket(b.id, b.is_pocket_listing)}
+                        disabled={toggling}
+                        title={isOn ? "Remove from Off-Market section" : "Show in Off-Market section"}
+                        className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-all"
+                        style={{
+                          background: isOn ? "var(--brass-400)" : "var(--sand-100)",
+                          color: isOn ? "#fff" : "var(--navy-400)",
+                          opacity: toggling ? 0.5 : 1,
+                          border: `1px solid ${isOn ? "var(--brass-400)" : "var(--border)"}`,
+                        }}>
+                        {toggling
+                          ? <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin block" />
+                          : isOn ? "✓" : "+"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {activeBrochures.length > 0 && (
+            <p className="text-xs mt-4 text-center" style={{ color: "var(--navy-400)" }}>
+              {activeBrochures.length} brochure{activeBrochures.length !== 1 ? "s" : ""} currently showing on the website's Off-Market section.
+            </p>
           )}
         </div>
       )}

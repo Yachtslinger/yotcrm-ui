@@ -309,12 +309,22 @@ export function deleteBrochure(id: number): boolean {
   }
 }
 
-export function updateBrochure(id: number, vessel: VesselData, brokers?: BrokerInfo[], isPocket?: boolean): boolean {
+export function updateBrochure(id: number, vessel: VesselData, brokers?: BrokerInfo[], isPocket?: boolean, pocketOnly = false): boolean {
   const db = getDb();
   try {
     ensureTable(db);
     const existing = db.prepare("SELECT vessel_data, is_pocket_listing FROM brochures WHERE id = ?").get(id) as any;
     if (!existing) return false;
+
+    // Pocket-only toggle — just flip the flag, don't touch vessel data
+    if (pocketOnly) {
+      const pocketVal = isPocket !== undefined ? (isPocket ? 1 : 0) : existing.is_pocket_listing;
+      db.prepare("UPDATE brochures SET is_pocket_listing=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(pocketVal, id);
+
+      // Sync pocket listing if needed
+      return true;
+    }
+
     const parsed = JSON.parse(existing.vessel_data || "{}");
     const updatedData = { ...parsed, vessel };
     if (brokers) updatedData.brokers = brokers;

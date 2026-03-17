@@ -7,7 +7,7 @@ type Listing = {
   description: string; highlights: string; broker: string;
   listingUrls: { label: string; url: string }[];
 };
-type Brochure = { slug: string; title: string; subtitle: string; builder: string; year: string; tag: string };
+type Brochure = { slug: string; title: string; subtitle: string; builder: string; year: string; tag: string; heroSrc?: string };
 
 const GOLD = "#c5a064";
 const DARK = "#080c12";
@@ -302,34 +302,20 @@ export default function YachtCachePage() {
           </div>
 
           {pocketListings.length === 0 ? (
-            /* Empty state — tasteful placeholder */
+            /* Empty state */
             <div style={{ border: "1px solid rgba(197,160,100,0.1)", padding: "72px 40px", textAlign: "center", background: "rgba(197,160,100,0.02)" }}>
               <div style={{ width: 1, height: 60, background: "linear-gradient(to bottom, #c5a064, transparent)", margin: "0 auto 28px" }} />
-              <div style={{ fontFamily: "'Teko',sans-serif", fontSize: 13, letterSpacing: 5, color: GOLD, textTransform: "uppercase", marginBottom: 16 }}>By Invitation Only</div>
+              <div style={{ fontFamily: "'Teko',sans-serif", fontSize: 13, letterSpacing: 5, color: GOLD, textTransform: "uppercase", marginBottom: 16 }}>Available Now</div>
               <p style={{ fontSize: 16, fontWeight: 300, color: MUTED, maxWidth: 460, margin: "0 auto 32px", lineHeight: 1.8 }}>
-                This collection is curated for qualified buyers and is not publicly listed. Contact Will directly to learn what is currently available.
+                These vessels are not publicly listed on any MLS. Contact Will directly for current availability and full details.
               </p>
               <div style={{ display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap" }}>
-                <a href="mailto:WN@DenisonYachting.com?subject=Private Collection Inquiry" className="btn-gold" style={{ fontSize: 11, padding: "13px 36px" }}>Request Access</a>
-                <a href="tel:8504613342" className="btn-ghost" style={{ fontSize: 11, padding: "13px 36px" }}>Call Will Direct</a>
+                <a href="mailto:WN@DenisonYachting.com?subject=Off Market Inquiry" className="btn-gold" style={{ fontSize: 11, padding: "13px 36px" }}>Contact Will</a>
+                <a href="tel:8504613342" className="btn-ghost" style={{ fontSize: 11, padding: "13px 36px" }}>Call Direct</a>
               </div>
             </div>
           ) : (
-            <>
-              {/* Gate header — always shown when listings exist */}
-              <div style={{ border: "1px solid rgba(197,160,100,0.1)", padding: "36px 40px", marginBottom: 32, background: "rgba(197,160,100,0.02)", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 20 }}>
-                <div>
-                  <div style={{ fontFamily: "'Teko',sans-serif", fontSize: 11, letterSpacing: 5, color: GOLD, textTransform: "uppercase", marginBottom: 8 }}>By Invitation Only</div>
-                  <p style={{ fontSize: 14, fontWeight: 300, color: MUTED, maxWidth: 520, lineHeight: 1.7 }}>
-                    This collection is shared privately with qualified buyers. These vessels are not publicly listed on any MLS — available exclusively through Will Noftsinger at Denison Yachting.
-                  </p>
-                </div>
-                <div style={{ display: "flex", gap: 12, flexShrink: 0, flexWrap: "wrap" }}>
-                  <a href="mailto:WN@DenisonYachting.com?subject=Private Collection Inquiry" className="btn-gold" style={{ fontSize: 11, padding: "11px 28px" }}>Enquire</a>
-                  <a href="tel:8504613342" className="btn-ghost" style={{ fontSize: 11, padding: "11px 28px" }}>Call Will</a>
-                </div>
-              </div>
-              <div className="g3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 22 }}>
+            <div className="g3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 22 }}>
               {pocketListings.map((l: any, i: number) => (
                 <div key={l.id} className="lcard fade" style={{ animationDelay: `${i * 0.08}s` }}>
                   {l.heroImage
@@ -362,7 +348,6 @@ export default function YachtCachePage() {
                 </div>
               ))}
             </div>
-            </>
           )}
         </div>
       </section>
@@ -389,9 +374,13 @@ export default function YachtCachePage() {
             <div className="bg2" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 22, position: "relative", zIndex: 1 }}>
               {brochures.map((b) => (
                 <a key={b.slug} href={`/brochures/${b.slug}`} target="_blank" rel="noopener noreferrer" className="bcard">
-                  <div style={{ background: "linear-gradient(135deg,#0a1520,#162535)", height: 160, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", borderBottom: "1px solid rgba(197,160,100,0.1)" }}>
-                    <span style={{ fontFamily: "'Teko',sans-serif", fontSize: 52, color: "rgba(197,160,100,0.25)" }}>⚓</span>
-                    {b.tag && <span style={{ fontFamily: "'Teko',sans-serif", fontSize: 9, letterSpacing: 3, color: GOLD, textTransform: "uppercase", marginTop: 8 }}>{b.tag}</span>}
+                  <div style={{ position: "relative", height: 160, overflow: "hidden", borderBottom: "1px solid rgba(197,160,100,0.1)" }}>
+                    {b.heroSrc
+                      ? <img src={b.heroSrc} alt={b.title} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transition: "transform 0.6s" }} className="cimg" />
+                      : <div style={{ width: "100%", height: "100%", background: "linear-gradient(135deg,#0a1520,#162535)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                          <span style={{ fontFamily: "'Teko',sans-serif", fontSize: 52, color: "rgba(197,160,100,0.25)" }}>⚓</span>
+                        </div>}
+                    {b.tag && <span style={{ position: "absolute", top: 10, left: 10, fontFamily: "'Teko',sans-serif", fontSize: 9, letterSpacing: 3, color: GOLD, textTransform: "uppercase", background: "rgba(8,12,18,0.7)", padding: "3px 8px", backdropFilter: "blur(4px)" }}>{b.tag}</span>}
                   </div>
                   <div style={{ padding: "16px 18px 22px" }}>
                     <div className="label" style={{ fontSize: 9, marginBottom: 6 }}>{[b.builder, b.year].filter(Boolean).join(" · ")}</div>

@@ -98,9 +98,14 @@ export async function PUT(req: NextRequest) {
     const { id, vessel, brokers, isPocket } = body as {
       id: number; vessel: VesselData; brokers?: BrokerInfo[]; isPocket?: boolean;
     };
-    if (!id || !vessel) return NextResponse.json({ error: "id and vessel required" }, { status: 400 });
+    if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-    const ok = updateBrochure(id, vessel, brokers, isPocket);
+    // Pocket-only toggle — if vessel.name is empty, just flip the pocket flag
+    const pocketOnly = !vessel?.name?.trim();
+
+    if (!pocketOnly && !vessel) return NextResponse.json({ error: "vessel required" }, { status: 400 });
+
+    const ok = updateBrochure(id, vessel, pocketOnly ? undefined : brokers, isPocket, pocketOnly);
     if (!ok) return NextResponse.json({ error: "Brochure not found" }, { status: 404 });
 
     // Sync pocket listing — get slug via getBrochureById
