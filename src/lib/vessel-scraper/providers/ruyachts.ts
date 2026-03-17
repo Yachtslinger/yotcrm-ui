@@ -114,7 +114,7 @@ function parseRUYachts(url: string, html: string): VesselData {
     const alt = clean($(img).attr("alt") || "");
 
     if (!src) return;
-    if (/logo|icon|sprite|no-photo|placeholder|\.svg|1x1|pixel/i.test(src)) return;
+    if (/logo|icon|sprite|no-photo|placeholder|\.svg|1x1|pixel|persons?\/|broker|agent|staff|team|farzan|avatar/i.test(src)) return;
 
     // Make relative URLs absolute
     let absSrc = src;

@@ -92,7 +92,7 @@ export function dedupeImages(imgs: VesselImage[]): VesselImage[] {
   const seen = new Set<string>();
   return imgs.filter(({ src }) => {
     if (!src || seen.has(src)) return false;
-    if (/logo|icon|sprite|pixel|placeholder|svg/i.test(src)) return false;
+    if (/logo|icon|sprite|pixel|placeholder|svg|persons?\/|broker|agent|staff|farzan|avatar/i.test(src)) return false;
     if (!/^https?:\/\//i.test(src)) return false;
     seen.add(src);
     return true;
