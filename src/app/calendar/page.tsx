@@ -155,6 +155,9 @@ export default function CalendarPage() {
   const [dealEvents, setDealEvents] = useState<CalEvent[]>([]);
   const [dealLoading, setDealLoading] = useState(false);
 
+  // Refresh key — increment after save/delete to force fetchEvents to fire
+  const [refreshKey, setRefreshKey] = useState(0);
+
   // Subscription / sync
   const [showSubscribe, setShowSubscribe] = useState(false);
   const [bulkPushing, setBulkPushing] = useState(false);
@@ -208,7 +211,7 @@ export default function CalendarPage() {
       setEvents(data.events || []);
     } catch (e) { console.error(e); }
     setLoading(false);
-  }, [fetchRange, userFilter, typeFilter, search]);
+  }, [fetchRange, userFilter, typeFilter, search, refreshKey]);
 
   const fetchLookups = useCallback(async () => {
     try {
@@ -431,7 +434,7 @@ export default function CalendarPage() {
         if ((data.conflicts || []).length === 0) {
           setDrawerOpen(false);
         }
-        fetchEvents();
+        setRefreshKey(k => k + 1);
       } else {
         addToast(data.error || "Failed to save", "error");
       }
@@ -450,7 +453,7 @@ export default function CalendarPage() {
       });
       setDrawerOpen(false);
       addToast("Event deleted", "success");
-      fetchEvents();
+      setRefreshKey(k => k + 1);
     } catch (e) { console.error(e); }
   };
 
@@ -1120,12 +1123,47 @@ export default function CalendarPage() {
                 </div>
                 <div>
                   <label className="text-xs font-semibold" style={{ color: "var(--navy-400)" }}>Vessel</label>
-                  <select value={form.vessel_id ?? ""}
-                    onChange={e => setForm(f => ({ ...f, vessel_id: e.target.value ? Number(e.target.value) : null }))}
-                    className="form-input w-full mt-1" style={{ fontSize: 16, minHeight: 44 }}>
-                    <option value="">None</option>
-                    {vessels.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                  </select>
+                  <datalist id="vessel-list">
+                    {vessels.map(v => <option key={v.id} value={v.name} />)}
+                  </datalist>
+                  <input
+                    list="vessel-list"
+                    value={form.vessel_id
+                      ? (vessels.find(v => v.id === form.vessel_id)?.name ?? "")
+                      : (form as any)._vesselText ?? ""}
+                    onChange={e => {
+                      const text = e.target.value;
+                      const match = vessels.find(v => v.name.toLowerCase() === text.toLowerCase());
+                      if (match) {
+                        setForm(f => ({ ...f, vessel_id: match.id, _vesselText: undefined } as any));
+                      } else {
+                        setForm(f => ({ ...f, vessel_id: null, _vesselText: text } as any));
+                      }
+                    }}
+                    onBlur={async e => {
+                      const text = e.target.value.trim();
+                      if (!text) return;
+                      const match = vessels.find(v => v.name.toLowerCase() === text.toLowerCase());
+                      if (match) return; // already matched
+                      // Save new vessel to DB then link it
+                      try {
+                        const res = await fetch("/api/calendar", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ action: "create_vessel", name: text }),
+                        });
+                        const data = await res.json();
+                        if (data.ok && data.vessel) {
+                          setVessels(prev => [...prev, { id: data.vessel.id, name: data.vessel.name }]);
+                          setForm(f => ({ ...f, vessel_id: data.vessel.id, _vesselText: undefined } as any));
+                          addToast(`Vessel "${text}" added`, "success");
+                        }
+                      } catch { /* ignore */ }
+                    }}
+                    placeholder="Type or pick a vessel…"
+                    className="form-input w-full mt-1"
+                    style={{ fontSize: 16, minHeight: 44 }}
+                  />
                 </div>
               </div>
 

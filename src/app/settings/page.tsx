@@ -126,6 +126,26 @@ export default function SettingsPage(): React.ReactElement {
           </div>
         </form>
       </section>
+
+      {/* Gmail send authorisation */}
+      <section className="card-elevated p-6 mt-4">
+        <h2 className="text-sm font-semibold text-[var(--foreground)] mb-1">Gmail — Send as WN@DenisonYachting.com</h2>
+        <p className="text-xs text-[var(--navy-400)] mb-4">
+          Authorise YotCRM once and every match email will be sent directly from your Denison Gmail — appears in your Sent folder, replies thread back to you normally.
+        </p>
+        <div className="space-y-2 text-xs text-[var(--navy-500)] mb-4">
+          <div>1. Add these three env vars to Railway: <code className="bg-[var(--sand-100)] px-1 rounded">GMAIL_CLIENT_ID</code>, <code className="bg-[var(--sand-100)] px-1 rounded">GMAIL_CLIENT_SECRET</code>, <code className="bg-[var(--sand-100)] px-1 rounded">GMAIL_REDIRECT_URI</code></div>
+          <div>2. Set redirect URI to: <code className="bg-[var(--sand-100)] px-1 rounded">https://your-app.up.railway.app/api/auth/gmail/callback</code></div>
+          <div>3. Click the button below while logged into your Denison Google account — one-time only.</div>
+        </div>
+        <a
+          href="/api/auth/gmail/connect"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
+          style={{ background: "var(--brass-400, #b8933a)" }}
+        >
+          Connect Gmail →
+        </a>
+      </section>
     </PageShell>
   );
 }

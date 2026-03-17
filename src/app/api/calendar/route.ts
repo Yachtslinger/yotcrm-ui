@@ -136,6 +136,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, deal });
     }
 
+    // Vessel (boat) creation — called when user types a new vessel name in the combobox
+    if (action === "create_vessel") {
+      if (!body.name?.trim()) return NextResponse.json({ error: "name required" }, { status: 400 });
+      const vessel = createBoat(body.name.trim());
+      return NextResponse.json({ ok: true, vessel });
+    }
+
     if (action === "update_deal") {
       if (!body.id) return NextResponse.json({ error: "id required" }, { status: 400 });
       const deal = updateDeal(body.id, body);

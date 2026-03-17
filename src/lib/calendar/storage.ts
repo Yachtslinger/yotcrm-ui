@@ -530,8 +530,17 @@ export function getProspects(): { id: number; name: string }[] {
 export function getVessels(): { id: number; name: string }[] {
   const db = getDb();
   try {
-    return db.prepare("SELECT id, TRIM(COALESCE(make,'') || ' ' || COALESCE(model,'') || ' ' || COALESCE(year,'')) AS name FROM boats ORDER BY make")
-      .all() as { id: number; name: string }[];
+    // Year-first display: "2021 Azimut 55" matches the "YYYY Make Model" convention
+    return db.prepare(`
+      SELECT id,
+        TRIM(
+          CASE WHEN year != '' THEN year || ' ' ELSE '' END ||
+          COALESCE(make,'') ||
+          CASE WHEN model != '' THEN ' ' || model ELSE '' END
+        ) AS name
+      FROM boats
+      ORDER BY make
+    `).all() as { id: number; name: string }[];
   } finally { db.close(); }
 }
 
@@ -539,10 +548,11 @@ export function createBoat(name: string): { id: number; name: string } {
   const db = getDb();
   try {
     const now = new Date().toISOString();
+    const trimmed = name.trim();
     // Parse "Year Make Model" or just use name as make
-    const parts = name.trim().split(" ");
+    const parts = trimmed.split(/\s+/);
     const yearCandidate = parts[0];
-    let make = name.trim();
+    let make = trimmed;
     let model = "";
     let year = "";
     if (/^\d{4}$/.test(yearCandidate) && parts.length > 1) {
@@ -554,11 +564,10 @@ export function createBoat(name: string): { id: number; name: string } {
        VALUES (NULL, ?, ?, ?, '', '', '', '', '', ?)`
     ).run(make, model, year, now);
     const id = result.lastInsertRowid as number;
-    return { id, name: TRIM([make, model, year].filter(Boolean).join(" ")) };
+    // Return the name exactly as the user typed it so the combobox value stays consistent
+    return { id, name: trimmed };
   } finally { db.close(); }
 }
-
-function TRIM(s: string) { return s.trim(); }
 
 // ═══ DEALS ══════════════════════════════════════════════
 

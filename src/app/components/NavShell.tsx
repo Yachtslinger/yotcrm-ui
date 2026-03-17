@@ -238,6 +238,11 @@ export default function NavShell({ children }: { children: React.ReactNode }) {
   useEffect(() => { setAppsOpen(false); }, [pathname]);
 
   if (pathname === "/login") return <>{children}</>;
+  // Public website routes — no CRM chrome
+  if (pathname === "/home" || pathname.startsWith("/home/")) return <>{children}</>;
+  if (pathname.startsWith("/listing/")) return <>{children}</>;
+  // Individual brochure view pages (/brochures/[slug]) bypass CRM nav — it's a public luxury brochure
+  if (pathname.match(/^\/brochures\/[^/]+$/)) return <>{children}</>;
 
   return (
     <>

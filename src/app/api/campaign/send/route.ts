@@ -26,7 +26,8 @@ interface SendResult {
 
 // ── Provider: Resend ────────────────────────────────────────────────────
 async function sendViaResend(opts: {
-  from: string; to: Recipient; subject: string; html: string; apiKey: string;
+  from: string; to: Recipient; subject: string; html: string; apiKey: string; cc?: string[]; replyTo?: string;
+  attachments?: { filename: string; content: string; type: string }[];
 }): Promise<string> {
   const toAddress = opts.to.name ? `${opts.to.name} <${opts.to.email}>` : opts.to.email;
   const res = await fetch("https://api.resend.com/emails", {
@@ -38,8 +39,15 @@ async function sendViaResend(opts: {
     body: JSON.stringify({
       from: opts.from,
       to: [toAddress],
+      cc: opts.cc?.length ? opts.cc : undefined,
+      reply_to: opts.replyTo || undefined,
       subject: opts.subject,
       html: opts.html,
+      attachments: opts.attachments?.length ? opts.attachments.map(a => ({
+        filename: a.filename,
+        content: a.content,  // base64 string
+        type: a.type,
+      })) : undefined,
     }),
   });
   if (!res.ok) {
@@ -96,7 +104,8 @@ async function sendViaSendGrid(opts: {
 
 // ── Resolve which provider to use ─────────────────────────────────────
 async function sendOne(opts: {
-  from: string; to: Recipient; subject: string; html: string;
+  from: string; to: Recipient; subject: string; html: string; cc?: string[]; replyTo?: string;
+  attachments?: { filename: string; content: string; type: string }[];
 }): Promise<string> {
   if (process.env.RESEND_API_KEY) {
     return sendViaResend({ ...opts, apiKey: process.env.RESEND_API_KEY });
@@ -113,6 +122,8 @@ async function sendOne(opts: {
 }
 
 // ── Main handler ───────────────────────────────────────────────────────
+const PAOLO_EMAIL = "PGA@DenisonYachting.com";
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json() as {
@@ -121,29 +132,44 @@ export async function POST(req: NextRequest) {
       recipients: Recipient[];
       from?: string;
       testMode?: boolean;
+      templateMode?: string; // "boat-show" triggers Paolo CC
     };
 
-    const { subject, html, recipients, testMode = false } = body;
+    const { subject, html, recipients, testMode = false, templateMode } = body;
 
     if (!subject?.trim()) return NextResponse.json({ ok: false, error: "subject is required" }, { status: 400 });
     if (!html?.trim())    return NextResponse.json({ ok: false, error: "html is required" }, { status: 400 });
     if (!recipients?.length) return NextResponse.json({ ok: false, error: "recipients is required" }, { status: 400 });
 
-    const fromName = body.from || process.env.CAMPAIGN_FROM_NAME || "Will Noftsinger | Denison Yachting";
-    const fromEmail = process.env.CAMPAIGN_FROM_EMAIL || process.env.RESEND_FROM_EMAIL || "will@denisonyachting.com";
-    const from = `${fromName} <${fromEmail}>`;
+    const fromName  = body.from || process.env.CAMPAIGN_FROM_NAME || "Will Noftsinger | Denison Yachting";
+    const fromEmail = process.env.CAMPAIGN_FROM_EMAIL || process.env.RESEND_FROM_EMAIL || "will@mail.theyachtcache.com";
+    const from      = `${fromName} <${fromEmail}>`;
+    // Reply-To always routes back to Will's Denison inbox — recipients who reply
+    // get Will directly even though the technical sending domain is theyachtcache.com
+    const replyTo   = "WN@DenisonYachting.com";
+
+    // Merge client cc (co-brokers toggled on) with auto-cc (Paolo on boat-show)
+    const clientCc: string[] = Array.isArray((body as any).cc) ? (body as any).cc : [];
+    const autoCc: string[]   = templateMode === "boat-show" ? [PAOLO_EMAIL] : [];
+    const cc = [...new Set([...clientCc, ...autoCc])].length > 0 ? [...new Set([...clientCc, ...autoCc])] : undefined;
+
+    // Attachments from client (base64 encoded)
+    const attachments: { filename: string; content: string; type: string }[] | undefined =
+      Array.isArray((body as any).attachments) && (body as any).attachments.length > 0
+        ? (body as any).attachments
+        : undefined;
 
     // In test mode, only send to the first recipient
     const targets = testMode ? [recipients[0]] : recipients;
 
     const results: SendResult[] = [];
-    const BATCH_SIZE = 20; // Pro plan supports higher throughput
+    const BATCH_SIZE = 20;
     const DELAY_MS = 100;
 
     for (let i = 0; i < targets.length; i += BATCH_SIZE) {
       const batch = targets.slice(i, i + BATCH_SIZE);
       const batchResults = await Promise.allSettled(
-        batch.map(to => sendOne({ from, to, subject, html }))
+        batch.map(to => sendOne({ from, to, subject, html, cc, replyTo, attachments }))
       );
       for (let j = 0; j < batch.length; j++) {
         const r = batchResults[j];

@@ -2,7 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 
 const COOKIE_NAME = "yotcrm_session";
 
-const PUBLIC_PATHS = ["/login", "/api/auth", "/api/health", "/api/sync", "/api/clients/recent", "/api/emails", "/api/cards/leads", "/api/cards/views", "/card", "/api/matches/ingest", "/api/public", "/home", "/api/listings/files", "/api/listings/debug"];
+const PUBLIC_PATHS = ["/login", "/api/auth", "/api/health", "/api/sync", "/api/clients/recent", "/api/emails", "/api/cards/leads", "/api/cards/views", "/card", "/api/matches/ingest", "/api/public", "/home", "/listing", "/api/listings/files", "/api/listings/debug", "/api/brochures", "/email/"];
+
+function isPublic(pathname: string): boolean {
+  if (PUBLIC_PATHS.some(p => pathname.startsWith(p))) return true;
+  // Individual brochure pages (/brochures/[slug]) are public; /brochures index requires auth
+  if (pathname.match(/^\/brochures\/[^/]+$/)) return true;
+  return false;
+}
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -10,6 +17,7 @@ export function middleware(req: NextRequest) {
   // Allow public paths and static assets
   if (
     PUBLIC_PATHS.some(p => pathname.startsWith(p)) ||
+    pathname.match(/^\/brochures\/[^/]+$/) ||   // individual brochure pages are public
     pathname.match(/^\/api\/clients\/\d+\/vcard$/) ||
     pathname.match(/^\/api\/cards\/[^/]+/) ||  // all /api/cards/* routes are public
     pathname.startsWith("/_next") ||

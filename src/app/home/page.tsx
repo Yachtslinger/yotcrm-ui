@@ -139,6 +139,7 @@ function ListingModal({ l, onClose }: { l: Listing; onClose: () => void }) {
 export default function YachtCachePage() {
   const [listings, setListings] = useState<Listing[]>([]);
   const [brochures, setBrochures] = useState<Brochure[]>([]);
+  const [pocketListings, setPocketListings] = useState<any[]>([]);
   const [selected, setSelected] = useState<Listing | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", phone: "", interest: "", message: "" });
@@ -149,6 +150,7 @@ export default function YachtCachePage() {
   useEffect(() => {
     fetch("/api/public/listings").then(r => r.json()).then(d => { if (d.ok) setListings(d.listings); }).catch(() => {});
     fetch("/api/brochures").then(r => r.json()).then(d => { if (d.ok) setBrochures(d.brochures); }).catch(() => {});
+    fetch("/api/public/pocket-listings").then(r => r.json()).then(d => { if (d.ok) setPocketListings(d.listings); }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -284,6 +286,87 @@ export default function YachtCachePage() {
         )}
       </section>
 
+      {/* QUIETLY + EXCLUSIVELY OFF MARKET — always shown */}
+      <section id="offmarket" className="sp" style={{ padding: "96px 40px", background: "#060b11", position: "relative", overflow: "hidden" }}>
+        <div className="wm" style={{ top: 40, right: -30, zIndex: 0 }}>PRIVATE</div>
+        <div style={{ maxWidth: 1200, margin: "0 auto", position: "relative", zIndex: 1 }}>
+          <div style={{ marginBottom: 48 }}>
+            <div className="label" style={{ marginBottom: 14 }}>Exclusively Available</div>
+            <h2 style={{ fontSize: 50, fontWeight: 300, fontStyle: "italic", lineHeight: 1.1 }}>
+              Quietly + Exclusively<br /><span style={{ color: GOLD }}>For Sale Off Market</span>
+            </h2>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 14 }}>
+              <div className="gold-line" />
+              <span style={{ fontSize: 13, color: "#4a4035", fontWeight: 300, letterSpacing: 1 }}>Not listed publicly — contact Will directly</span>
+            </div>
+          </div>
+
+          {pocketListings.length === 0 ? (
+            /* Empty state — tasteful placeholder */
+            <div style={{ border: "1px solid rgba(197,160,100,0.1)", padding: "72px 40px", textAlign: "center", background: "rgba(197,160,100,0.02)" }}>
+              <div style={{ width: 1, height: 60, background: "linear-gradient(to bottom, #c5a064, transparent)", margin: "0 auto 28px" }} />
+              <div style={{ fontFamily: "'Teko',sans-serif", fontSize: 13, letterSpacing: 5, color: GOLD, textTransform: "uppercase", marginBottom: 16 }}>By Invitation Only</div>
+              <p style={{ fontSize: 16, fontWeight: 300, color: MUTED, maxWidth: 460, margin: "0 auto 32px", lineHeight: 1.8 }}>
+                This collection is curated for qualified buyers and is not publicly listed. Contact Will directly to learn what is currently available.
+              </p>
+              <div style={{ display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap" }}>
+                <a href="mailto:WN@DenisonYachting.com?subject=Private Collection Inquiry" className="btn-gold" style={{ fontSize: 11, padding: "13px 36px" }}>Request Access</a>
+                <a href="tel:8504613342" className="btn-ghost" style={{ fontSize: 11, padding: "13px 36px" }}>Call Will Direct</a>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Gate header — always shown when listings exist */}
+              <div style={{ border: "1px solid rgba(197,160,100,0.1)", padding: "36px 40px", marginBottom: 32, background: "rgba(197,160,100,0.02)", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 20 }}>
+                <div>
+                  <div style={{ fontFamily: "'Teko',sans-serif", fontSize: 11, letterSpacing: 5, color: GOLD, textTransform: "uppercase", marginBottom: 8 }}>By Invitation Only</div>
+                  <p style={{ fontSize: 14, fontWeight: 300, color: MUTED, maxWidth: 520, lineHeight: 1.7 }}>
+                    This collection is shared privately with qualified buyers. These vessels are not publicly listed on any MLS — available exclusively through Will Noftsinger at Denison Yachting.
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: 12, flexShrink: 0, flexWrap: "wrap" }}>
+                  <a href="mailto:WN@DenisonYachting.com?subject=Private Collection Inquiry" className="btn-gold" style={{ fontSize: 11, padding: "11px 28px" }}>Enquire</a>
+                  <a href="tel:8504613342" className="btn-ghost" style={{ fontSize: 11, padding: "11px 28px" }}>Call Will</a>
+                </div>
+              </div>
+              <div className="g3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 22 }}>
+              {pocketListings.map((l: any, i: number) => (
+                <div key={l.id} className="lcard fade" style={{ animationDelay: `${i * 0.08}s` }}>
+                  {l.heroImage
+                    ? <img src={l.heroImage} alt={l.name} className="cimg" />
+                    : <div className="cimg" style={{ background: "linear-gradient(135deg,#0a1016,#111c28)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <span style={{ fontFamily: "'Teko',sans-serif", fontSize: 44, color: "rgba(197,160,100,0.15)" }}>⚓</span>
+                      </div>}
+                  <div style={{ padding: "16px 18px 22px" }}>
+                    <div className="label" style={{ fontSize: 9, marginBottom: 6 }}>{[l.year, l.length, l.location].filter(Boolean).join(" · ")}</div>
+                    <div style={{ fontSize: 20, fontWeight: 300, fontStyle: "italic", color: "#e8dcc8", lineHeight: 1.2, marginBottom: 6 }}>
+                      {l.name}
+                    </div>
+                    <div style={{ fontFamily: "'Teko',sans-serif", fontSize: 16, color: GOLD, letterSpacing: 1, marginBottom: 8 }}>
+                      {l.price || "Price Upon Request"}
+                    </div>
+                    {l.description && <p style={{ fontSize: 12, color: "#4a4035", lineHeight: 1.65, fontWeight: 300, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", marginBottom: 14 }}>{l.description}</p>}
+                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                      <a href={`mailto:WN@DenisonYachting.com?subject=Enquiry: ${encodeURIComponent(l.name)}`}
+                         className="btn-gold" style={{ padding: "10px 22px", fontSize: 11 }}>
+                        Enquire
+                      </a>
+                      {l.pdfUrl && (
+                        <a href={l.pdfUrl} target="_blank" rel="noopener noreferrer"
+                           className="btn-ghost" style={{ padding: "10px 18px", fontSize: 11 }}>
+                          PDF
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            </>
+          )}
+        </div>
+      </section>
+
       {/* BROCHURES */}
       <section id="brochures" className="sp" style={{ padding: "96px 40px", background: "#0a0f18", position: "relative", overflow: "hidden" }}>
         <div className="wm" style={{ bottom: 0, left: -20 }}>DOCS</div>
@@ -331,10 +414,7 @@ export default function YachtCachePage() {
         <div className="wm" style={{ top: 40, right: -30 }}>CARDS</div>
         <div style={{ marginBottom: 48 }}>
           <div className="label" style={{ marginBottom: 14 }}>Digital Business Cards</div>
-          <h2 style={{ fontSize: 50, fontWeight: 300, fontStyle: "italic", lineHeight: 1.1 }}>
-            Meet the <span style={{ color: GOLD }}>Brokers</span>
-          </h2>
-          <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 6 }}>
             <div className="gold-line" />
             <span style={{ fontSize: 13, color: "#4a4035", fontWeight: 300, letterSpacing: 1 }}>Save contact · Share · Connect</span>
           </div>

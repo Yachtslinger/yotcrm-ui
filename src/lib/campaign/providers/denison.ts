@@ -23,6 +23,14 @@ export type CampaignDraft = {
     engineMake?: string;
     engineModel?: string;
     power?: string;
+    fuel?: string;
+    freshWater?: string;
+    holdingTank?: string;
+    range?: string;
+    maxSpeed?: string;
+    cruiseSpeed?: string;
+    displacement?: string;
+    grossTonnage?: string;
   };
   listingUrl?: string;
 };
@@ -376,6 +384,17 @@ function detectSpecKey(label: string): keyof SpecFields | null {
   if (/stateroom|cabin|berth/.test(normalized)) return "staterooms";
   if (/head/.test(normalized)) return "heads";
   if (/engine|power|horsepower|hp|kw/.test(normalized)) return "engines";
+  // Capacity fields
+  if (/fuel/.test(normalized)) return "fuel";
+  if (/fresh\s*water/.test(normalized)) return "freshWater";
+  if (/hold|black\s*water|grey\s*water|gray\s*water|sewage/.test(normalized)) return "holdingTank";
+  // Performance
+  if (/max.*speed|top.*speed|speed.*max/.test(normalized)) return "maxSpeed";
+  if (/cruis.*speed|cruising/.test(normalized)) return "cruiseSpeed";
+  if (/\brange\b/.test(normalized)) return "range";
+  // Hull
+  if (/displace/.test(normalized)) return "displacement";
+  if (/gross\s*ton|^gt$/.test(normalized)) return "grossTonnage";
   return null;
 }
 

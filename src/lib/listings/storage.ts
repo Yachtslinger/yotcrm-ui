@@ -2,6 +2,17 @@ import Database from "better-sqlite3";
 
 const DB_PATH = process.env.DB_PATH || "/app/data/yotcrm.db";
 
+function parseLoa(s?: string): number {
+  if (!s) return 0;
+  const m = s.match(/([\d.]+)\s*m/i);
+  if (m) return parseFloat(m[1]);
+  const ft = s.match(/([\d.]+)\s*(?:ft|')/i);
+  if (ft) return parseFloat(ft[1]) * 0.3048;
+  const bare = s.match(/^([\d.]+)/);
+  if (bare) return parseFloat(bare[1]);
+  return 0;
+}
+
 function getDb() {
   const db = new Database(DB_PATH, { readonly: false });
   db.pragma("journal_mode = WAL");
@@ -73,7 +84,10 @@ export function readListings(status?: string): MyListing[] {
       ? db.prepare("SELECT * FROM my_listings WHERE status = ? ORDER BY updated_at DESC")
       : db.prepare("SELECT * FROM my_listings ORDER BY updated_at DESC");
     const rows = status ? q.all(status) : q.all();
-    return (rows as any[]).map(parseRow);
+    const parsed = (rows as any[]).map(parseRow);
+    // Sort longest to shortest by LOA
+    parsed.sort((a, b) => parseLoa(b.length) - parseLoa(a.length));
+    return parsed;
   } finally { db.close(); }
 }
 

@@ -28,6 +28,16 @@ function getDb() {
     );
   `);
 
+  // Add new builder columns if missing (safe migration)
+  const cols = (db.prepare("PRAGMA table_info(pocket_listings)").all() as {name:string}[]).map(r=>r.name);
+  if (!cols.includes("name"))         try { db.exec("ALTER TABLE pocket_listings ADD COLUMN name TEXT DEFAULT ''"); } catch {}
+  if (!cols.includes("hero_image"))   try { db.exec("ALTER TABLE pocket_listings ADD COLUMN hero_image TEXT DEFAULT ''"); } catch {}
+  if (!cols.includes("images"))       try { db.exec("ALTER TABLE pocket_listings ADD COLUMN images TEXT DEFAULT '[]'"); } catch {}
+  if (!cols.includes("highlights"))   try { db.exec("ALTER TABLE pocket_listings ADD COLUMN highlights TEXT DEFAULT ''"); } catch {}
+  if (!cols.includes("pdf_url"))      try { db.exec("ALTER TABLE pocket_listings ADD COLUMN pdf_url TEXT DEFAULT ''"); } catch {}
+  if (!cols.includes("listing_type")) try { db.exec("ALTER TABLE pocket_listings ADD COLUMN listing_type TEXT DEFAULT 'pocket'"); } catch {}
+  if (!cols.includes("show_price"))   try { db.exec("ALTER TABLE pocket_listings ADD COLUMN show_price INTEGER DEFAULT 1"); } catch {}
+
   return db;
 }
 
@@ -47,18 +57,29 @@ export async function readPocketListings(): Promise<PocketListing[]> {
   } finally { db.close(); }
 }
 
-export async function createPocketListing(input: Partial<PocketListing>): Promise<PocketListing> {
+export async function createPocketListing(input: Partial<PocketListing> & {
+  name?: string; hero_image?: string; images?: string;
+  highlights?: string; pdf_url?: string; listing_type?: string; show_price?: number;
+}): Promise<PocketListing> {
   const db = getDb();
   try {
     const now = new Date().toISOString();
     const result = db.prepare(
-      `INSERT INTO pocket_listings (make, model, year, length, price, location, description, seller_name, seller_contact, status, notes, listing_url, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO pocket_listings (make, model, year, length, price, location, description, seller_name, seller_contact, status, notes, listing_url, name, hero_image, images, highlights, pdf_url, listing_type, show_price, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       input.make || "", input.model || "", input.year || "", input.length || "",
       input.price || "", input.location || "", input.description || "",
       input.seller_name || "", input.seller_contact || "", input.status || "active",
-      input.notes || "", input.listing_url || "", now, now
+      input.notes || "", input.listing_url || "",
+      input.name || "",
+      input.hero_image || "",
+      typeof input.images === "string" ? input.images : JSON.stringify(input.images || []),
+      input.highlights || "",
+      input.pdf_url || "",
+      input.listing_type || "pocket",
+      input.show_price ?? 1,
+      now, now
     );
     return db.prepare("SELECT * FROM pocket_listings WHERE id = ?").get(result.lastInsertRowid) as PocketListing;
   } finally { db.close(); }
@@ -69,7 +90,7 @@ export async function updatePocketListing(id: number, updates: Partial<PocketLis
   try {
     const fields: string[] = [];
     const values: any[] = [];
-    const allowed = ["make","model","year","length","price","location","description","seller_name","seller_contact","status","notes","listing_url"];
+    const allowed = ["make","model","year","length","price","location","description","seller_name","seller_contact","status","notes","listing_url","name","hero_image","images","highlights","pdf_url","listing_type","show_price"];
     for (const f of allowed) {
       if (f in updates && (updates as any)[f] !== undefined) {
         fields.push(`${f} = ?`);

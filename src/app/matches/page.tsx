@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Zap, Upload, Filter, ChevronDown, ChevronUp,
   MessageSquare, Mail, X, Check, Clock, AlertTriangle,
-  ExternalLink, Phone, Search, RefreshCw, History,
+  ExternalLink, Phone, Search, RefreshCw, History, Send,
+  CheckCircle, Reply,
 } from "lucide-react";
 
 /* ─── Types ─── */
@@ -29,6 +30,15 @@ type Batch = {
   id: number; source: string; subject: string;
   listing_count: number; match_count: number;
   status: string; created_at: string;
+};
+
+type SendTone = "search" | "mls" | "new-listing" | "price-drop";
+
+type SendLog = {
+  id: number; sentAt: string; vesselYear: number | null;
+  vesselMake: string | null; vesselModel: string | null;
+  vesselPrice: string | null; tone: string; subject: string | null;
+  repliedAt: string | null; likedAt: string | null;
 };
 
 /* ─── Helpers ─── */
@@ -60,6 +70,13 @@ function fmtDate(iso: string) {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+const TONE_OPTIONS: { id: SendTone; label: string; desc: string }[] = [
+  { id: "search",       label: "I was searching for you",  desc: "Found this while running a search with your criteria in mind" },
+  { id: "mls",          label: "Caught my eye on the MLS", desc: "Was combing the MLS and this one stood out — thought of you" },
+  { id: "new-listing",  label: "Just listed",              desc: "Just came to market, wanted you to see it first" },
+  { id: "price-drop",   label: "Price reduced",            desc: "Meaningful price adjustment — worth revisiting" },
+];
+
 /* ═══ MAIN COMPONENT ═══ */
 export default function MatchesPage() {
   const [matches, setMatches] = useState<Match[]>([]);
@@ -82,6 +99,20 @@ export default function MatchesPage() {
   const [uploadText, setUploadText] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<any>(null);
+
+  // Send email modal
+  const [sendModal, setSendModal] = useState<{ match: Match } | null>(null);
+  const [sendTone, setSendTone] = useState<SendTone>("search");
+  const [personalNote, setPersonalNote] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendDone, setSendDone] = useState<{ matchId: number } | null>(null);
+
+  // Send history per match
+  const [sendHistory, setSendHistory] = useState<Record<number, SendLog[]>>({});
+  const [replyCheckNote, setReplyCheckNote] = useState("");
+
+  // Throttle reply checks to once per 5 min
+  const lastReplyCheck = useRef<number>(0);
 
   const fetchMatches = useCallback(async () => {
     setLoading(true);
@@ -108,7 +139,34 @@ export default function MatchesPage() {
     } catch (e) { console.error(e); }
   }, []);
 
-  useEffect(() => { fetchMatches(); fetchBatches(); }, [fetchMatches, fetchBatches]);
+  // Check for replies (throttled)
+  const checkReplies = useCallback(async () => {
+    const now = Date.now();
+    if (now - lastReplyCheck.current < 5 * 60 * 1000) return;
+    lastReplyCheck.current = now;
+    try {
+      const res = await fetch("/api/matching/check-replies");
+      const data = await res.json();
+      if (data.newReplies > 0) {
+        setReplyCheckNote(`${data.newReplies} new repl${data.newReplies === 1 ? "y" : "ies"} detected`);
+        fetchMatches();
+      }
+    } catch { /* gmail not configured yet */ }
+  }, [fetchMatches]);
+
+  useEffect(() => { fetchMatches(); fetchBatches(); checkReplies(); }, [fetchMatches, fetchBatches, checkReplies]);
+
+  // Fetch send history for a match when expanded
+  const fetchSendHistory = useCallback(async (leadId: number) => {
+    if (!leadId || sendHistory[leadId]) return;
+    try {
+      const res = await fetch(`/api/matching/send-history?leadId=${leadId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSendHistory(prev => ({ ...prev, [leadId]: data.history || [] }));
+      }
+    } catch { /* not built yet, silent */ }
+  }, [sendHistory]);
 
   /* ── Upload handler ── */
   const handleUpload = async () => {
@@ -123,14 +181,8 @@ export default function MatchesPage() {
       });
       const data = await res.json();
       setUploadResult(data);
-      if (data.ok) {
-        setUploadText("");
-        fetchMatches();
-        fetchBatches();
-      }
-    } catch (e: any) {
-      setUploadResult({ ok: false, error: e.message });
-    }
+      if (data.ok) { setUploadText(""); fetchMatches(); fetchBatches(); }
+    } catch (e: any) { setUploadResult({ ok: false, error: e.message }); }
     setUploading(false);
   };
 
@@ -146,6 +198,84 @@ export default function MatchesPage() {
         m.id === matchId ? { ...m, status, ...(status === "contacted" ? { contacted_at: new Date().toISOString() } : {}) } : m
       ));
     } catch (e) { console.error(e); }
+  };
+
+  /* ── Send email handler — opens via Apple Mail yotcrm:// scheme ── */
+  const handleSendEmail = async () => {
+    if (!sendModal) return;
+    const { match } = sendModal;
+    if (!match.lead_email) { alert("No email address on file for this lead."); return; }
+
+    const l = match.listing;
+    const firstName = (match.lead_name || "").split(" ")[0] || "there";
+    const boatTitle = l ? `${l.year || ""} ${l.make || ""} ${l.model || ""}`.trim() : "vessel";
+
+    // Build subject + body client-side using the selected tone
+    const toneIntros: Record<string, string> = {
+      search: `I was running through my active searches this week and this one immediately stood out as worth putting in front of you —`,
+      mls:    `I was combing the MLS this morning and this one caught my eye — I thought of you right away:`,
+      listed: `This just came to market and I wanted you to see it first:`,
+      value:  `I came across something that I think represents exceptional value for your criteria:`,
+      reduce: `A price reduction just came through on something I've had my eye on for you:`,
+    };
+
+    const intro = toneIntros[sendTone] || toneIntros.search;
+    const specLines = [
+      l?.loa           ? `LOA: ${l.loa}`                     : null,
+      l?.year          ? `Year: ${l.year}`                    : null,
+      l?.asking_price  ? `Asking: ${l.asking_price}`          : null,
+      l?.location      ? `Location: ${l.location}`            : null,
+      (l as any)?.brokerage ? `Listed by: ${(l as any).brokerage}` : null,
+    ].filter(Boolean).join("\n");
+
+    const listingLink = l?.listing_url ? `\n\nView listing: ${l.listing_url}` : "";
+
+    const body = [
+      `Hi ${firstName},`,
+      ``,
+      intro,
+      ``,
+      boatTitle,
+      specLines,
+      listingLink,
+      personalNote.trim() ? `\n${personalNote.trim()}` : "",
+      ``,
+      `Happy to pull together more detail, arrange a showing, or get on a call whenever works for you. Just reply and let me know.`,
+      ``,
+      `Best,`,
+      `Will Noftsinger`,
+      `Denison Yachting`,
+      `850.461.3342 | WN@DenisonYachting.com`,
+    ].filter(l => l !== null).join("\n");
+
+    const subject = `${boatTitle} — Worth a Look`;
+
+    setSending(true);
+    try {
+      // Use yotcrm:// scheme → YotCRM Compose.app → Mail.app with WN@DenisonYachting.com
+      const payload = {
+        to: match.lead_email,
+        subject,
+        body,
+        make: l?.make || "Yacht",
+      };
+      const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+      window.location.href = `yotcrm://compose?data=${encoded}`;
+
+      // Mark contacted after brief delay (give time for scheme to fire)
+      setTimeout(async () => {
+        await updateStatus(match.id, "contacted");
+        setSendDone({ matchId: match.id });
+        setSendModal(null);
+        setPersonalNote("");
+        setSendTone("search");
+        if (match.lead_id) setSendHistory(prev => { const n = {...prev}; delete n[match.lead_id!]; return n; });
+      }, 1500);
+    } catch (err: any) {
+      alert(err.message || "Failed to open Mail");
+    } finally {
+      setSending(false);
+    }
   };
 
   const latestBatch = batches[0];
@@ -165,6 +295,11 @@ export default function MatchesPage() {
             {latestBatch && (
               <p className="text-sm mt-1" style={{ color: "var(--navy-400)" }}>
                 Latest: {fmtDate(latestBatch.created_at)} · {latestBatch.listing_count} listings · {latestBatch.match_count} matches
+              </p>
+            )}
+            {replyCheckNote && (
+              <p className="text-xs mt-1 font-medium" style={{ color: "#059669" }}>
+                <Reply className="w-3 h-3 inline mr-1" />{replyCheckNote}
               </p>
             )}
           </div>
@@ -210,7 +345,6 @@ export default function MatchesPage() {
           <>
             {/* ── Filter Bar ── */}
             <div className="rounded-xl p-3 mb-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-              {/* Search + toggle */}
               <div className="flex items-center gap-2">
                 <div className="flex-1 relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: "var(--navy-400)" }} />
@@ -236,7 +370,6 @@ export default function MatchesPage() {
                 </button>
               </div>
 
-              {/* Confidence chips */}
               <div className="flex flex-wrap gap-2 mt-3">
                 {["", "high", "medium", "low"].map(c => (
                   <button key={c}
@@ -251,8 +384,6 @@ export default function MatchesPage() {
                     {c ? c.charAt(0).toUpperCase() + c.slice(1) : "All"}
                   </button>
                 ))}
-
-                {/* Status chips */}
                 {["", "new", "contacted", "dismissed", "snoozed"].map(s => (
                   <button key={`s-${s}`}
                     onClick={() => setStatusFilter(s)}
@@ -268,7 +399,6 @@ export default function MatchesPage() {
                 ))}
               </div>
 
-              {/* Advanced filters (collapsible) */}
               {showFilters && (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
                   <div>
@@ -311,39 +441,42 @@ export default function MatchesPage() {
                   const sBadge = statusBadge(match.status);
                   const prospectName = match.lead_name || match.iso_name || "Unknown";
                   const boatTitle = l ? `${l.year} ${l.make} ${l.model}`.trim() : "Unknown vessel";
+                  const hasSent = sendDone?.matchId === match.id;
+                  const history = match.lead_id ? sendHistory[match.lead_id] : undefined;
 
                   return (
                     <div key={match.id} className="rounded-xl overflow-hidden transition-shadow"
                       style={{ background: "var(--card)", border: "1px solid var(--border)", boxShadow: expanded ? "var(--shadow-lg)" : "none" }}>
-                      {/* ── Card header (clickable) ── */}
                       <button
-                        onClick={() => setExpandedId(expanded ? null : match.id)}
+                        onClick={() => {
+                          const next = expanded ? null : match.id;
+                          setExpandedId(next);
+                          if (next && match.lead_id) fetchSendHistory(match.lead_id);
+                        }}
                         className="w-full text-left p-4"
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
-                            {/* Prospect name + status */}
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-semibold text-sm" style={{ color: "var(--foreground)" }}>
-                                {prospectName}
-                              </span>
+                              <span className="font-semibold text-sm" style={{ color: "var(--foreground)" }}>{prospectName}</span>
                               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: sBadge.color + "18", color: sBadge.color }}>
                                 {sBadge.label}
                               </span>
                               {match.iso_id && (
                                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: "rgba(139,92,246,0.12)", color: "#7c3aed" }}>ISO</span>
                               )}
+                              {hasSent && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1" style={{ background: "rgba(16,185,129,0.12)", color: "#059669" }}>
+                                  <CheckCircle className="w-2.5 h-2.5" /> Email sent
+                                </span>
+                              )}
                             </div>
-                            {/* Boat summary */}
                             <p className="text-sm mt-1" style={{ color: "var(--navy-500)" }}>
                               {boatTitle}{l?.loa ? ` · ${l.loa}` : ""}{l?.asking_price ? ` · ${l.asking_price}` : ""}{l?.location ? ` · ${l.location}` : ""}
                             </p>
-                            {/* Reason tags */}
                             <div className="flex flex-wrap gap-1 mt-2">
                               {reasons.slice(0, 3).map((r: string, i: number) => (
-                                <span key={i} className="px-2 py-0.5 rounded text-[10px] font-medium" style={{ background: "rgba(16,185,129,0.08)", color: "#059669" }}>
-                                  {r}
-                                </span>
+                                <span key={i} className="px-2 py-0.5 rounded text-[10px] font-medium" style={{ background: "rgba(16,185,129,0.08)", color: "#059669" }}>{r}</span>
                               ))}
                               {conflicts.slice(0, 2).map((c: string, i: number) => (
                                 <span key={`c-${i}`} className="px-2 py-0.5 rounded text-[10px] font-medium flex items-center gap-0.5" style={{ background: "rgba(245,158,11,0.08)", color: "#d97706" }}>
@@ -352,15 +485,12 @@ export default function MatchesPage() {
                               ))}
                             </div>
                           </div>
-                          {/* Score badge */}
                           <div className="flex flex-col items-center shrink-0">
                             <div className="w-12 h-12 rounded-full flex items-center justify-center text-base font-bold"
                               style={{ background: sColor + "18", color: sColor, border: `2px solid ${sColor}40` }}>
                               {match.match_score}
                             </div>
-                            <span className="text-[10px] font-semibold mt-1" style={{ color: cColor.text }}>
-                              {match.confidence}
-                            </span>
+                            <span className="text-[10px] font-semibold mt-1" style={{ color: cColor.text }}>{match.confidence}</span>
                           </div>
                         </div>
                       </button>
@@ -368,7 +498,6 @@ export default function MatchesPage() {
                       {/* ── Expanded Detail Panel ── */}
                       {expanded && (
                         <div className="px-4 pb-4 pt-0" style={{ borderTop: "1px solid var(--border)" }}>
-                          {/* Prospect info */}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-3">
                             <div>
                               <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--navy-400)" }}>Prospect</h4>
@@ -393,7 +522,6 @@ export default function MatchesPage() {
                             </div>
                           </div>
 
-                          {/* Full reasons + conflicts */}
                           {(reasons.length > 0 || conflicts.length > 0) && (
                             <div className="py-3" style={{ borderTop: "1px solid var(--border)" }}>
                               <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--navy-400)" }}>Match Reasoning</h4>
@@ -403,6 +531,34 @@ export default function MatchesPage() {
                                 ))}
                                 {conflicts.map((c: string, i: number) => (
                                   <span key={`c-${i}`} className="px-2 py-1 rounded text-xs" style={{ background: "rgba(245,158,11,0.08)", color: "#d97706" }}>⚠ {c}</span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Send history */}
+                          {history && history.length > 0 && (
+                            <div className="py-3" style={{ borderTop: "1px solid var(--border)" }}>
+                              <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--navy-400)" }}>Email History</h4>
+                              <div className="space-y-1.5">
+                                {history.map(h => (
+                                  <div key={h.id} className="flex items-center justify-between text-xs rounded-lg px-3 py-2"
+                                    style={{ background: h.repliedAt ? "rgba(16,185,129,0.06)" : "var(--sand-50,rgba(0,0,0,0.02))", border: "1px solid var(--border)" }}>
+                                    <div>
+                                      <span className="font-medium" style={{ color: "var(--foreground)" }}>
+                                        {h.vesselYear} {h.vesselMake} {h.vesselModel}
+                                      </span>
+                                      <span className="ml-2" style={{ color: "var(--navy-400)" }}>· {h.tone}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <span style={{ color: "var(--navy-400)" }}>{fmtDate(h.sentAt)}</span>
+                                      {h.repliedAt && (
+                                        <span className="flex items-center gap-0.5 font-semibold" style={{ color: "#059669" }}>
+                                          <Reply className="w-3 h-3" /> Replied
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
                                 ))}
                               </div>
                             </div>
@@ -418,11 +574,12 @@ export default function MatchesPage() {
                               </a>
                             )}
                             {match.lead_email && (
-                              <a href={`mailto:${match.lead_email}?subject=New Listing: ${boatTitle}&body=Hi ${prospectName.split(" ")[0]},%0A%0AI came across a ${boatTitle} that matches what you're looking for.%0A%0AWould you like to schedule a viewing?`}
+                              <button
+                                onClick={() => { setSendModal({ match }); setSendTone("search"); setPersonalNote(""); }}
                                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold"
                                 style={{ background: "rgba(59,130,246,0.1)", color: "#3b82f6", minHeight: 48 }}>
-                                <Mail className="w-4 h-4" /> Email
-                              </a>
+                                <Send className="w-4 h-4" /> Send Email
+                              </button>
                             )}
                             {match.lead_phone && (
                               <a href={`tel:${match.lead_phone}`}
@@ -493,21 +650,107 @@ export default function MatchesPage() {
           </div>
         )}
 
+        {/* ════════════ SEND EMAIL MODAL ════════════ */}
+        {sendModal && (
+          <div className="fixed inset-0" style={{ zIndex: 9999 }}>
+            <div className="absolute inset-0 bg-black/50" onClick={() => !sending && setSendModal(null)} />
+            <div className="relative mx-auto mt-[6vh] w-[92%] max-w-lg rounded-2xl overflow-hidden"
+              style={{ background: "var(--card)", boxShadow: "var(--shadow-modal)" }}>
+              {/* Header */}
+              <div className="flex items-center justify-between p-4" style={{ borderBottom: "1px solid var(--border)" }}>
+                <div>
+                  <h2 className="text-base font-bold" style={{ color: "var(--foreground)" }}>Send Listing Email</h2>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--navy-400)" }}>
+                    To: {sendModal.match.lead_name} · {sendModal.match.lead_email}
+                  </p>
+                </div>
+                <button onClick={() => !sending && setSendModal(null)} className="p-2 rounded-lg" style={{ color: "var(--navy-400)" }}>
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Vessel summary */}
+              {sendModal.match.listing && (
+                <div className="px-4 py-2.5 text-xs" style={{ background: "var(--sand-50, rgba(0,0,0,0.02))", borderBottom: "1px solid var(--border)" }}>
+                  <span className="font-semibold" style={{ color: "var(--foreground)" }}>
+                    {sendModal.match.listing.year} {sendModal.match.listing.make} {sendModal.match.listing.model}
+                  </span>
+                  {sendModal.match.listing.asking_price && (
+                    <span style={{ color: "var(--navy-500)" }}> · {sendModal.match.listing.asking_price}</span>
+                  )}
+                  {sendModal.match.listing.location && (
+                    <span style={{ color: "var(--navy-400)" }}> · {sendModal.match.listing.location}</span>
+                  )}
+                </div>
+              )}
+
+              <div className="p-4 space-y-4 max-h-[60vh] overflow-y-auto">
+                {/* Tone selector */}
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--navy-400)" }}>Opening Tone</p>
+                  <div className="space-y-2">
+                    {TONE_OPTIONS.map(t => (
+                      <button key={t.id} type="button" onClick={() => setSendTone(t.id)}
+                        className="w-full text-left px-3 py-2.5 rounded-xl border-2 transition-all"
+                        style={{
+                          borderColor: sendTone === t.id ? "var(--brass-400)" : "var(--border)",
+                          background: sendTone === t.id ? "rgba(184,147,58,0.06)" : "transparent",
+                        }}>
+                        <div className="text-sm font-semibold" style={{ color: sendTone === t.id ? "var(--brass-500,#9a7730)" : "var(--foreground)" }}>
+                          {t.label}
+                        </div>
+                        <div className="text-xs mt-0.5" style={{ color: "var(--navy-400)" }}>{t.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Personal note */}
+                <div>
+                  <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--navy-400)" }}>
+                    Personal Note <span style={{ color: "var(--navy-300)", fontWeight: 400, textTransform: "none" }}>(optional — 1–2 sentences, your voice)</span>
+                  </label>
+                  <textarea
+                    value={personalNote}
+                    onChange={e => setPersonalNote(e.target.value)}
+                    placeholder="e.g. The range on this one is exceptional for the price point — I think it's worth a serious look."
+                    rows={3}
+                    className="form-input w-full mt-1.5 resize-none"
+                    style={{ fontSize: 14 }}
+                  />
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 flex justify-end gap-2" style={{ borderTop: "1px solid var(--border)" }}>
+                <button onClick={() => !sending && setSendModal(null)}
+                  className="px-4 py-2 rounded-lg text-sm font-medium"
+                  style={{ background: "var(--sand-100)", color: "var(--navy-600)", minHeight: 44 }}>
+                  Cancel
+                </button>
+                <button onClick={handleSendEmail} disabled={sending}
+                  className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-bold text-white"
+                  style={{ background: sending ? "var(--navy-400)" : "var(--brass-400)", minHeight: 44, opacity: sending ? 0.7 : 1 }}>
+                  {sending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  {sending ? "Sending…" : "Send Email"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ════════════ UPLOAD MODAL ════════════ */}
         {showUpload && (
           <div className="fixed inset-0" style={{ zIndex: 9999 }}>
             <div className="absolute inset-0 bg-black/50" onClick={() => { setShowUpload(false); setUploadResult(null); }} />
             <div className="relative mx-auto mt-[10vh] w-[92%] max-w-lg rounded-2xl overflow-hidden"
               style={{ background: "var(--card)", boxShadow: "var(--shadow-modal)" }}>
-              {/* Modal header */}
               <div className="flex items-center justify-between p-4" style={{ borderBottom: "1px solid var(--border)" }}>
                 <h2 className="text-base font-bold" style={{ color: "var(--foreground)" }}>Process New Listings Email</h2>
-                <button onClick={() => { setShowUpload(false); setUploadResult(null); }}
-                  className="p-2 rounded-lg" style={{ color: "var(--navy-400)" }}>
+                <button onClick={() => { setShowUpload(false); setUploadResult(null); }} className="p-2 rounded-lg" style={{ color: "var(--navy-400)" }}>
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              {/* Modal body */}
               <div className="p-4 max-h-[60vh] overflow-y-auto">
                 <p className="text-xs mb-3" style={{ color: "var(--navy-400)" }}>
                   Paste the raw content of a Boats Group &ldquo;New Listings From Your Professional Boat Shopper&rdquo; email.
@@ -522,7 +765,6 @@ export default function MatchesPage() {
                   className="form-input w-full resize-y"
                   style={{ fontSize: 16, minHeight: 120 }}
                 />
-                {/* .eml file upload */}
                 <label className="mt-2 flex items-center gap-2 cursor-pointer text-xs" style={{ color: "var(--brass-400)" }}>
                   <Upload className="w-3.5 h-3.5" />
                   <span>or upload .eml file</span>
@@ -537,7 +779,7 @@ export default function MatchesPage() {
                   />
                 </label>
                 {uploadResult && (
-                  <div className={`mt-3 p-3 rounded-lg text-sm ${uploadResult.ok ? "" : ""}`}
+                  <div className="mt-3 p-3 rounded-lg text-sm"
                     style={{
                       color: uploadResult.ok ? "#059669" : "#dc2626",
                       background: uploadResult.ok ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)",
@@ -567,25 +809,19 @@ export default function MatchesPage() {
                           </details>
                         )}
                       </div>
-                    ) : (
-                      `✗ ${uploadResult.error}`
-                    )}
+                    ) : `✗ ${uploadResult.error}`}
                   </div>
                 )}
               </div>
-              {/* Modal footer */}
               <div className="p-4 flex justify-end gap-2" style={{ borderTop: "1px solid var(--border)" }}>
                 <button onClick={() => { setShowUpload(false); setUploadResult(null); }}
                   className="px-4 py-2 rounded-lg text-sm font-medium"
                   style={{ background: "var(--sand-100)", color: "var(--navy-600)", minHeight: 44 }}>
                   Cancel
                 </button>
-                <button
-                  onClick={handleUpload}
-                  disabled={uploading || !uploadText.trim()}
+                <button onClick={handleUpload} disabled={uploading || !uploadText.trim()}
                   className="btn btn-primary px-4 py-2 text-sm font-medium"
-                  style={{ minHeight: 44, opacity: uploading || !uploadText.trim() ? 0.5 : 1 }}
-                >
+                  style={{ minHeight: 44, opacity: uploading || !uploadText.trim() ? 0.5 : 1 }}>
                   {uploading ? "Processing..." : "Process Email"}
                 </button>
               </div>
