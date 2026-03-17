@@ -1220,7 +1220,7 @@ export default function CampaignsPage(): React.ReactElement {
         {/* ── Sticky Action Bar ── */}
         <div className="fixed bottom-[72px] md:bottom-0 left-0 right-0 z-[110] bg-white border-t border-gray-200 shadow-lg safe-area-pb">
           {/* Action buttons */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 p-2 md:p-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5 p-2 md:p-3">
             {/* Col 1: Preview */}
             <button onClick={()=>setLivePreview(v=>!v)}
               className={`flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${livePreview?"bg-[#e57b2e] text-white":"bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>
@@ -1248,32 +1248,16 @@ export default function CampaignsPage(): React.ReactElement {
                 {savedTemplates.filter(t=>t.mode===mode).length > 0 ? `(${savedTemplates.filter(t=>t.mode===mode).length})` : "Tmpl"}
               </button>
             </div>
-            {/* Col 3: Test buttons */}
-            <div className="flex gap-1">
-              <button onClick={()=>{ if(!subject.trim()){toast("Set a subject first","error");return;} doSend(true); }}
-                disabled={sendStatus==="testing"||sendStatus==="sending"}
-                title="Send test to yourself"
-                className="flex-1 flex items-center justify-center gap-1 px-2 py-2.5 rounded-xl bg-[#16a34a] text-white text-xs font-bold hover:bg-[#15803d] disabled:opacity-50">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-                {sendStatus==="testing" ? "…" : "Test→Me"}
-              </button>
-              <button onClick={()=>{ if(!subject.trim()){toast("Set a subject first","error");return;} doSendToPaolo(); }}
-                disabled={sendStatus==="testing"||sendStatus==="sending"}
-                title="Send test to Paolo"
-                className="flex-1 flex items-center justify-center gap-1 px-2 py-2.5 rounded-xl bg-emerald-700 text-white text-xs font-bold hover:bg-emerald-800 disabled:opacity-50">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-                →Paolo
-              </button>
-            </div>
-            {/* Col 4: Copy HTML for Vertical Response */}
+            {/* Col 3: Copy HTML for Vertical Response */}
             <button onClick={()=>{
-                navigator.clipboard.writeText(html).then(()=>{
-                  toast("HTML copied — paste into Vertical Response","success");
-                },()=>toast("Copy failed","error"));
+                navigator.clipboard.writeText(html).then(
+                  ()=>toast("HTML copied — paste into Vertical Response ✓","success"),
+                  ()=>toast("Copy failed","error")
+                );
               }}
-              className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-[#0e7490] text-white text-xs font-semibold hover:bg-[#0a5f78]">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-              Copy HTML
+              className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-[#0e7490] text-white text-xs font-bold hover:bg-[#0a5f78] col-span-1">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy HTML for Vertical Response
             </button>
           </div>
 
