@@ -278,7 +278,11 @@ export default function CampaignsPage(): React.ReactElement {
       if (!data.ok) throw new Error(data.error||"Send failed");
       setSendResult({ sent:data.sent, failed:data.failed }); setSendStatus("done");
       const ccNote = ccEmails.length > 0 ? ` · CC: ${ccEmails.join(", ")}` : "";
-      toast(testMode?`Test sent to ${recipients[0].email}${ccNote}`:`Sent to ${data.sent} recipients${ccNote}`,"success");
+      if (data.rateLimitHit) {
+        toast(`⚠️ Rate limit hit — only ${data.sent} of ${data.total} sent. Try again or reduce batch size.`, "error");
+      } else {
+        toast(testMode?`Test sent to ${recipients[0].email}${ccNote}`:`Sent to ${data.sent} recipients${ccNote}`,"success");
+      }
     } catch(err) { toast(err instanceof Error?err.message:"Send failed","error"); setSendStatus("idle"); }
   }
 

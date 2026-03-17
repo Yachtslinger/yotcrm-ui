@@ -45,14 +45,18 @@ async function sendViaResend(opts: {
       html: opts.html,
       attachments: opts.attachments?.length ? opts.attachments.map(a => ({
         filename: a.filename,
-        content: a.content,  // base64 string
+        content: a.content,
         type: a.type,
       })) : undefined,
     }),
   });
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Resend error ${res.status}: ${err}`);
+    const errText = await res.text();
+    // Surface rate limit errors explicitly so they're never swallowed silently
+    if (res.status === 429) {
+      throw new Error(`RATE_LIMIT: Resend daily or per-second limit hit. ${errText}`);
+    }
+    throw new Error(`Resend error ${res.status}: ${errText}`);
   }
   const json = await res.json() as { id: string };
   return json.id;
@@ -165,8 +169,10 @@ export async function POST(req: NextRequest) {
     const results: SendResult[] = [];
     const BATCH_SIZE = 20;
     const DELAY_MS = 100;
+    let rateLimitHit = false;
 
     for (let i = 0; i < targets.length; i += BATCH_SIZE) {
+      if (rateLimitHit) break;
       const batch = targets.slice(i, i + BATCH_SIZE);
       const batchResults = await Promise.allSettled(
         batch.map(to => sendOne({ from, to, subject, html, cc, replyTo, attachments }))
@@ -176,10 +182,13 @@ export async function POST(req: NextRequest) {
         if (r.status === "fulfilled") {
           results.push({ email: batch[j].email, ok: true, messageId: r.value });
         } else {
-          results.push({ email: batch[j].email, ok: false, error: r.reason?.message || "Failed" });
+          const msg = r.reason?.message || "Failed";
+          results.push({ email: batch[j].email, ok: false, error: msg });
+          if (msg.startsWith("RATE_LIMIT")) {
+            rateLimitHit = true;
+          }
         }
       }
-      // Throttle between batches
       if (i + BATCH_SIZE < targets.length) {
         await new Promise(r => setTimeout(r, DELAY_MS));
       }
@@ -194,7 +203,8 @@ export async function POST(req: NextRequest) {
       failed,
       total: targets.length,
       testMode,
-      results: failed > 0 ? results : undefined, // only include detail if there were failures
+      rateLimitHit,
+      results: (failed > 0 || rateLimitHit) ? results : undefined,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
