@@ -114,7 +114,7 @@ function parseRUYachts(url: string, html: string): VesselData {
     const alt = clean($(img).attr("alt") || "");
 
     if (!src) return;
-    if (/logo|icon|sprite|no-photo|placeholder|\.svg|1x1|pixel|persons?\/|broker|agent|staff|team|farzan|avatar|\/th\/th-|model\/cover|shipyard\/logo|events\/|yacht-news\/|\/ruy\.png/i.test(src)) return;
+    if (/logo|icon|sprite|no-photo|placeholder|\.svg|1x1|pixel|persons?\/|broker|agent|staff|team|farzan|avatar|\/th\/th-|model\/cover|shipyard\/logo|events\/|yacht-news\/|ruy\.png/i.test(src)) return;
 
     // Make relative URLs absolute
     let absSrc = src;
@@ -127,9 +127,10 @@ function parseRUYachts(url: string, html: string): VesselData {
 
   vessel.images = dedupeImages(vessel.images);
 
-  // OG image as fallback hero
+  // OG image as fallback hero — but skip site brand marks
   const ogImg = $('meta[property="og:image"]').attr("content");
-  if (ogImg && vessel.images.length === 0) {
+  if (ogImg && vessel.images.length === 0
+      && !/logo|icon|ruy\.png|placeholder|no-photo/i.test(ogImg)) {
     vessel.images.push({ src: ogImg, alt: vessel.name });
   }
 

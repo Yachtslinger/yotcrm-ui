@@ -134,7 +134,7 @@ export const SPEC_MAP: { patterns: string[]; field: keyof VesselData }[] = [
   { patterns: ["registry", "port of registry"],                         field: "registryPort" },
   { patterns: ["home port", "homeport", "lying at", "lying"],           field: "homePort" },
   { patterns: ["flag"],                                                  field: "flagState" },
-  { patterns: ["navigation class", "nav class", "navalclass"],          field: "navalClass" },
+  { patterns: ["navigation class", "nav class", "navalclass"],          field: "navClass" },
   { patterns: ["classification society", "class society"],              field: "classification" },
   { patterns: ["classification", "class ", "bureau veritas", "rina", "dnv", "lloyds"], field: "classification" },
   { patterns: ["gross ton", "gross tonnage", "gt ", "g.t.", "gross register", "grt"], field: "grossTonnage" },
@@ -180,8 +180,8 @@ export const SPEC_MAP: { patterns: string[]; field: keyof VesselData }[] = [
   { patterns: ["propeller", "propellor"],                             field: "propellers" },
   { patterns: ["bow thruster"],                                        field: "bowThruster" },
   { patterns: ["stern thruster"],                                      field: "sternThruster" },
-  { patterns: ["stabiliser make", "stabilizer make", "stabiliser brand"], field: "stabiliserMake" },
-  { patterns: ["zero speed stabiliser", "zero speed stabilizer", "zero speed stab"], field: "zeroSpeedStabs" },
+  { patterns: ["stabiliser make", "stabilizer make", "stabiliser brand"], field: "stabilisersMake" },
+  { patterns: ["zero speed stabiliser", "zero speed stabilizer", "zero speed stab"], field: "zeroSpeedStabilisers" },
   { patterns: ["stabiliser", "stabilizer", "fin stabiliser"],          field: "stabilisers" },
 
   // ── Performance ───────────────────────────────────────────────────────────
@@ -189,14 +189,14 @@ export const SPEC_MAP: { patterns: string[]; field: keyof VesselData }[] = [
   { patterns: ["cruise speed", "cruising speed", "service speed", "cruising speed, knots"], field: "cruiseSpeed" },
   { patterns: ["economy speed", "economical speed", "economic speed"], field: "economySpeed" },
   { patterns: ["range (cruise)", "range cruise", "range at cruise", "range, nm", "range (nm)", "range nm", "^range$"], field: "range" },
-  { patterns: ["range (economy)", "range economy", "range at economy"], field: "rangeEconomy" },
+  { patterns: ["range (economy)", "range economy", "range at economy"], field: "transitRange" },
 
   // ── Electrical & Generators ───────────────────────────────────────────────
   { patterns: ["generator set", "genset", "generator brand", "^generator$"], field: "gensets" },
   { patterns: ["generator output", "generator kw", "generator power"],  field: "generatorKW" },
   { patterns: ["shore power"],                                          field: "shorepower" },
   { patterns: ["voltage system", "electrical system", "voltage"],      field: "voltageSystem" },
-  { patterns: ["emergency generator", "emergency gen"],                field: "emergencyGen" },
+  { patterns: ["emergency generator", "emergency gen"],                field: "emergencyGenerator" },
   { patterns: ["air condition", "hvac", "a/c"],                       field: "airCon" },
   { patterns: ["a/c make", "air con make", "hvac make"],               field: "airConMake" },
 

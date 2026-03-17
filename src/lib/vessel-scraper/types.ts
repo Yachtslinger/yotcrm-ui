@@ -90,7 +90,8 @@ export interface VesselData {
   keelType?:       string;
   deckMaterial?:   string;
   deckCount?:      string;
-  navalClass?:     string;
+  navalClass?:     string;     // page key: navClass — alias handled in emptyVessel
+  navClass?:       string;     // page-canonical name
   refitYear?:      string;
   refitDetails?:   string;
   paintSystem?:    string;
@@ -99,12 +100,16 @@ export interface VesselData {
   colorScheme?:    string;
   engineHours?:    string;
   shaftCount?:     string;
-  stabiliserMake?: string;
-  zeroSpeedStabs?: string;
+  stabiliserMake?: string;     // alias
+  stabilisersMake?: string;    // page-canonical name
+  zeroSpeedStabs?: string;     // alias
+  zeroSpeedStabilisers?: string; // page-canonical name
   economySpeed?:   string;
-  rangeEconomy?:   string;
+  rangeEconomy?:   string;     // alias
+  transitRange?:   string;     // page-canonical name
   generatorKW?:    string;
-  emergencyGen?:   string;
+  emergencyGen?:   string;     // alias
+  emergencyGenerator?: string; // page-canonical name
   airConMake?:     string;
   shorepower?:     string;
   voltageSystem?:  string;
