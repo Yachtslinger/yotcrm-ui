@@ -1,8 +1,11 @@
 /**
- * YachtWorld scraper
- * Site: yachtworld.com
- * Rendering: React SPA with Cloudflare — requires Puppeteer stealth
- * YachtWorld has very rich JSON-LD and structured spec blocks
+ * YachtWorld scraper — v2
+ * Strategy (in order):
+ *   1. Plain fetch with realistic headers (fast, works if YW serves SSR)
+ *   2. Stealthy Puppeteer fetch (slower, bypasses Cloudflare JS challenges)
+ *   3. URL-slug fallback — always populates name/year/builder from the URL
+ *
+ * Image upscaling: boatsgroup CDN thumbnails arrive at ?w=200 — we replace to ?w=1200.
  */
 import * as cheerio from "cheerio";
 import type { VesselData } from "../types";
@@ -10,49 +13,153 @@ import { emptyVessel } from "../types";
 import { clean, cleanHeadline, dedupeImages, assignSpec } from "../utils";
 import { stealthFetch } from "../../campaign/providers/stealthFetch";
 
-export async function scrapeYachtWorld(url: string): Promise<VesselData> {
-  const html = await stealthFetch(url);
-  return parseYachtWorld(url, html);
+// ── URL slug parser ───────────────────────────────────────────────────────────
+// URL format: /yacht/YYYY-make-words-model-words-LISTINGID/
+// e.g. /yacht/2017-northern-marine-expedition-9034848/
+function parseSlug(url: string): Partial<VesselData> {
+  const slug = url.split("/").filter(Boolean).pop() || "";
+  const result: Partial<VesselData> = {};
+
+  // Extract listing ID (trailing 7-digit number)
+  const idMatch = slug.match(/[- ](\d{6,8})$/);
+  const listingId = idMatch ? idMatch[1] : null;
+
+  // Extract year (4-digit at start)
+  const yearMatch = slug.match(/^(\d{4})-/);
+  if (yearMatch) result.year = parseInt(yearMatch[1]);
+
+  // Extract make + model from middle portion
+  if (yearMatch && listingId) {
+    const middle = slug
+      .replace(/^\d{4}-/, "")         // remove year
+      .replace(/-?\d{6,8}$/, "")      // remove listing ID
+      .trim();
+
+    // Title-case and space-join
+    const words = middle.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1));
+    // First word is typically the builder — rest is model
+    if (words.length >= 2) {
+      result.builder = words[0];
+      result.name = words.join(" ");   // e.g. "Northern Marine Expedition"
+    } else if (words.length === 1) {
+      result.name = words[0];
+    }
+  }
+
+  // Full display name with year
+  if (result.year && result.name) {
+    result.name = `${result.year} ${result.name}`;
+  }
+
+  return result;
 }
 
+// ── Image URL upscaler ────────────────────────────────────────────────────────
+// boatsgroup CDN: replace small w= param with 1200px for full-res
+function upscaleBoatsgroup(src: string): string {
+  if (!src.includes("boatsgroup.com") && !src.includes("images.boatsgroup")) return src;
+  // Remove all resize/quality params and request full width
+  return src
+    .replace(/[?&]w=\d+/, (m) => m.replace(/\d+/, "1200"))
+    .replace(/[?&]format=webp/, "")
+    .replace(/[?&]exact/, "")
+    .replace(/[?&]ratio=[^&]+/, "")
+    .replace(/&&+/g, "&")
+    .replace(/[?&]$/, "");
+}
+
+// ── Plain fetch (fast path) ───────────────────────────────────────────────────
+async function plainFetch(url: string): Promise<string> {
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Accept-Encoding": "gzip, deflate, br",
+      "Cache-Control": "no-cache",
+      "Pragma": "no-cache",
+    },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.text();
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
+export async function scrapeYachtWorld(url: string): Promise<VesselData> {
+  // 1. Always seed with slug data — guaranteed to have name/year/builder
+  const slugData = parseSlug(url);
+
+  let html = "";
+
+  // 2. Try plain fetch first (cheap, fast)
+  try {
+    html = await plainFetch(url);
+    // Cloudflare challenge check
+    if (html.length < 8000 && /checking your browser|just a moment|challenge-platform/i.test(html)) {
+      html = "";
+    }
+  } catch { /* fall through */ }
+
+  // 3. If plain fetch blocked, try Puppeteer stealth
+  if (!html) {
+    try {
+      html = await stealthFetch(url);
+    } catch { /* fall through */ }
+  }
+
+  // 4. Parse whatever HTML we got
+  const vessel = html ? parseYachtWorld(url, html) : emptyVessel(url);
+
+  // 5. Back-fill with slug data for any missing fields
+  if (!vessel.name  && slugData.name)    vessel.name    = slugData.name;
+  if (!vessel.year  && slugData.year)    vessel.year    = slugData.year;
+  if (!vessel.builder && slugData.builder) vessel.builder = slugData.builder;
+
+  // 6. Upscale boatsgroup thumbnail images to full-res
+  vessel.images = vessel.images.map(img => ({
+    ...img,
+    src: upscaleBoatsgroup(img.src),
+  }));
+
+  return vessel;
+}
+
+// ── HTML parser (shared between plain-fetch and Puppeteer paths) ──────────────
 function parseYachtWorld(url: string, html: string): VesselData {
   const $ = cheerio.load(html);
   const vessel = emptyVessel(url);
 
-  // ── JSON-LD (YachtWorld has very good structured data) ───────────────────
+  // JSON-LD — YachtWorld has very good structured data when rendered
   $('script[type="application/ld+json"]').each((_, el) => {
     try {
       const json = JSON.parse($(el).text());
       const nodes: Record<string, unknown>[] = Array.isArray(json)
-        ? json
-        : json["@graph"] ? json["@graph"] : [json];
+        ? json : json["@graph"] ? json["@graph"] : [json];
 
       for (const node of nodes) {
         if (!node || typeof node !== "object") continue;
         const type = String(node["@type"] || "").toLowerCase();
         if (!/product|boat|vehicle/i.test(type) && !node.offers) continue;
 
-        // Name: YachtWorld puts "2018 Azimut 60" style in name
         if (node.name && !vessel.name) {
-          const brand = (node.brand as Record<string, string>)?.name || "";
+          const brand = (node.brand as Record<string,string>)?.name || "";
           const raw = String(node.name).trim();
           vessel.name = cleanHeadline(brand && !raw.toLowerCase().includes(brand.toLowerCase())
             ? `${brand} ${raw}` : raw);
         }
-
-        if (node.description && !vessel.description) {
+        if (node.description && !vessel.description)
           vessel.description = clean(String(node.description));
-        }
 
         if (node.image) {
           const imgs = Array.isArray(node.image) ? node.image : [node.image];
           for (const img of imgs) {
-            const src = typeof img === "string" ? img : (img as Record<string, string>)?.url || "";
+            const src = typeof img === "string" ? img : (img as Record<string,string>)?.url || "";
             if (src && /^https?:\/\//i.test(src)) vessel.images.push({ src, alt: "" });
           }
         }
 
-        const offers = (node.offers as Record<string, unknown>) || {};
+        const offers = (node.offers as Record<string,unknown>) || {};
         if (offers.price && !vessel.price) {
           const p = offers.price;
           const c = String(offers.priceCurrency || "USD");
@@ -61,14 +168,13 @@ function parseYachtWorld(url: string, html: string): VesselData {
             : String(p);
         }
 
-        const avail = (offers.availableAtOrFrom as Record<string, unknown>) || {};
-        const addr = (avail.address as Record<string, string>) || {};
-        if (!vessel.location) {
+        const avail = (offers.availableAtOrFrom as Record<string,unknown>) || {};
+        const addr  = (avail.address as Record<string,string>) || {};
+        if (!vessel.location)
           vessel.location = [addr.addressLocality, addr.addressRegion, addr.addressCountry]
             .filter(Boolean).join(", ");
-        }
 
-        const brand = (node.brand as Record<string, string>) || (node.manufacturer as Record<string, string>);
+        const brand = (node.brand as Record<string,string>) || (node.manufacturer as Record<string,string>);
         if (brand?.name && !vessel.builder) vessel.builder = clean(brand.name);
 
         if (!vessel.year) {
@@ -77,10 +183,8 @@ function parseYachtWorld(url: string, html: string): VesselData {
           if (y > 1900) vessel.year = y;
         }
 
-        // additionalProperty — YachtWorld stores ALL specs here
         const props = Array.isArray(node.additionalProperty)
-          ? (node.additionalProperty as { name?: string; value?: string }[])
-          : [];
+          ? (node.additionalProperty as { name?: string; value?: string }[]) : [];
         for (const prop of props) {
           if (prop.name && prop.value) assignSpec(vessel, prop.name, String(prop.value));
         }
@@ -88,16 +192,30 @@ function parseYachtWorld(url: string, html: string): VesselData {
     } catch { /* skip */ }
   });
 
-  // ── OG fallbacks ─────────────────────────────────────────────────────────
-  if (!vessel.name) vessel.name = cleanHeadline($('meta[property="og:title"]').attr("content")) || "";
+  // OG meta fallbacks
+  if (!vessel.name)  vessel.name  = cleanHeadline($('meta[property="og:title"]').attr("content")) || "";
   if (!vessel.description) vessel.description = clean($('meta[property="og:description"]').attr("content"));
   const ogImg = $('meta[property="og:image"]').attr("content");
-  if (ogImg && vessel.images.length === 0) vessel.images.push({ src: ogImg, alt: vessel.name });
+  if (ogImg) vessel.images.push({ src: ogImg, alt: vessel.name });
 
-  // ── DOM fallback ──────────────────────────────────────────────────────────
+  // H1 fallback
   if (!vessel.name) vessel.name = cleanHeadline($("h1").first().text()) || "";
 
-  // YachtWorld DOM spec patterns
+  // Price from URL metadata
+  if (!vessel.price) {
+    const priceEl = $('[class*="price" i]').first().text();
+    if (priceEl) vessel.price = clean(priceEl);
+  }
+
+  // Location
+  if (!vessel.location) vessel.location = clean($('[class*="location" i]').first().text());
+
+  // DOM spec tables
+  $("dt").each((_, el) => assignSpec(vessel, $(el).text(), $(el).next("dd").text()));
+  $("table tr").each((_, row) => {
+    const cells = $(row).find("th, td");
+    if (cells.length >= 2) assignSpec(vessel, cells.eq(0).text(), cells.eq(1).text());
+  });
   $("[data-testid]").each((_, el) => {
     const testId = $(el).attr("data-testid") || "";
     if (/spec|detail/i.test(testId)) {
@@ -107,46 +225,29 @@ function parseYachtWorld(url: string, html: string): VesselData {
     }
   });
 
-  $("dt").each((_, el) => assignSpec(vessel, $(el).text(), $(el).next("dd").text()));
-  $("table tr").each((_, row) => {
-    const cells = $(row).find("th, td");
-    if (cells.length >= 2) assignSpec(vessel, cells.eq(0).text(), cells.eq(1).text());
-  });
-
-  // ── Gallery: YachtWorld uses large swiper/carousel images ────────────────
-  $(".swiper-slide img, [class*='gallery'] img, [class*='photo'] img, figure img").each((_, img) => {
+  // Images — boatsgroup CDN thumbnails (upscale later in main export)
+  $("img").each((_, img) => {
     const src =
       $(img).attr("data-src") ||
       $(img).attr("data-lazy-src") ||
+      bestFromSrcset($(img).attr("srcset") || "") ||
       $(img).attr("src") || "";
-    if (src && /\.(jpe?g|png|webp)/i.test(src) && !isJunk(src)) {
+    if (src && /boatsgroup\.com/i.test(src) && !isJunk(src))
       vessel.images.push({ src, alt: clean($(img).attr("alt")) });
-    }
   });
 
-  // YachtWorld also uses next/image with srcset
-  $("img[srcset]").each((_, img) => {
-    const best = bestFromSrcset($(img).attr("srcset") || "");
-    if (best && !isJunk(best)) vessel.images.push({ src: best, alt: clean($(img).attr("alt")) });
+  // Also grab any non-boatsgroup gallery images
+  $(".swiper-slide img, [class*='gallery'] img, figure img").each((_, img) => {
+    const src = $(img).attr("data-src") || $(img).attr("src") || "";
+    if (src && /\.(jpe?g|png|webp)/i.test(src) && !isJunk(src))
+      vessel.images.push({ src, alt: clean($(img).attr("alt")) });
   });
 
   vessel.images = dedupeImages(vessel.images);
-
-  // ── Price / location DOM fallback ─────────────────────────────────────────
-  if (!vessel.price) vessel.price = clean($('[class*="price" i]').first().text());
-  if (!vessel.location) vessel.location = clean($('[class*="location" i]').first().text());
-
-  // ── Features ─────────────────────────────────────────────────────────────
-  const feats: string[] = [];
-  $("[class*='feature' i] li, [class*='amenity' i] li, [class*='highlight' i] li").each((_, li) => {
-    const t = clean($(li).text());
-    if (t.length > 5 && t.length < 200) feats.push(t);
-  });
-  vessel.features = [...new Set(feats)].slice(0, 20);
-
   return vessel;
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function bestFromSrcset(srcset: string): string {
   const parts = srcset.split(",").map(s => s.trim()).filter(Boolean);
   let best = ""; let bestW = 0;
