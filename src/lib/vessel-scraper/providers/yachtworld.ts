@@ -259,10 +259,145 @@ export async function scrapeYachtWorld(url: string): Promise<VesselData> {
     await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
 
     // __REDUX_STATE__ is set by SSR — available immediately without waiting for analytics
-    const reduxData = await page.evaluate(() => (window as any).__REDUX_STATE__?.app?.data || null);
+    // NOTE: We extract ONLY primitives inside evaluate() to avoid Puppeteer JSON
+    // serialization failures caused by large HTML strings (descriptions[78]) and
+    // complex nested objects in the full Redux state.
+    const reduxData = await page.evaluate(() => {
+      const d = (window as any).__REDUX_STATE__?.app?.data;
+      if (!d) return null;
+      const dims    = d.specifications?.dimensions;
+      const spd     = d.specifications?.speedDistance;
+      const acc     = d.specifications?.accommodation;
+      const engines: any[] = d.propulsion?.engines || [];
+      const tanks   = d.tanks || {};
+      const media: any[] = d.media || [];
+      return {
+        // Identity
+        id:          d.id,
+        boatName:    d.boatName || "",
+        make:        d.make || "",
+        year:        d.year || 0,
+        fuelType:    d.fuelType || "",
+        class:       d.class || "",
+        type:        d.type || "",
+        // Description
+        descriptionNoHTML: (d.descriptionNoHTML || "").slice(0, 2000),
+        // Hull
+        hull: { material: d.hull?.material || "", shape: d.hull?.shape || "", hin: d.hull?.hin || "" },
+        // Price
+        price: d.price?.type?.amount?.USD || 0,
+        // Location
+        location: { city: d.location?.address?.city || "", sub: d.location?.address?.subdivision || "", country: d.location?.address?.country || "" },
+        // Dimensions
+        dims: dims ? {
+          loaft: dims.lengths?.nominal?.ft || 0, loam: dims.lengths?.nominal?.m || 0,
+          beamft: dims.beam?.ft || 0, beamm: dims.beam?.m || 0,
+          draftft: dims.maxDraft?.ft || 0, draftm: dims.maxDraft?.m || 0,
+          draftMinft: dims.minDraft?.ft || 0,
+          airDraftft: dims.maxBridge?.ft || 0,
+        } : null,
+        // Performance
+        spd: spd ? {
+          maxKn: spd.maxSpeed?.kn || 0, cruiseKn: spd.cruisingSpeed?.kn || 0, rangeNmi: spd.range?.nmi || 0,
+        } : null,
+        // Accommodation
+        acc: acc ? {
+          cabins: acc.cabins ?? -1, guestCabins: acc.guestCabins ?? -1,
+          crewCabins: acc.crewCabins ?? -1, passengers: acc.passengers ?? -1, crew: acc.crew ?? -1,
+        } : null,
+        // Engines
+        engines: engines.map((e: any) => ({
+          make: e.make || "", model: e.model || "",
+          hp: e.power?.hp || 0, hours: e.hours ?? -1,
+          fuel: e.fuel || "", driveType: e.driveType || "",
+        })),
+        // Tanks
+        tanks: {
+          fuelGal: tanks.fuel?.[0]?.capacity?.gal || 0,  fuelL: tanks.fuel?.[0]?.capacity?.l || 0,
+          freshGal: (tanks.fresh || tanks.freshWater)?.[0]?.capacity?.gal || 0,
+          freshL:   (tanks.fresh || tanks.freshWater)?.[0]?.capacity?.l   || 0,
+          holdGal: tanks.holding?.[0]?.capacity?.gal || 0, holdL: tanks.holding?.[0]?.capacity?.l || 0,
+        },
+        // Media
+        images: media
+          .filter((m: any) => (m.mediaType === "image" || m.originalImageUrl || m.url) && !(/logo|icon|sprite|flag|avatar/i.test(m.url || "")))
+          .map((m: any) => ({ src: m.originalImageUrl || m.url || m.thumbnailUrl || "", title: m.title || "" }))
+          .filter((m: any) => m.src.startsWith("http")),
+        videos: media
+          .filter((m: any) => m.mediaType === "video" || m.videoUrl)
+          .map((m: any) => ({ url: m.videoUrl || m.url || "", thumb: m.thumbnailUrl || "", title: m.title || "" }))
+          .filter((m: any) => m.url),
+      };
+    });
 
     if (reduxData && reduxData.id) {
-      mapReduxToVessel(reduxData, vessel);
+      // Map the extracted primitives to VesselData
+      const d = reduxData;
+      if (d.boatName)  vessel.name    = d.boatName.trim();
+      if (d.make)      vessel.builder = d.make.trim();
+      if (d.year)      vessel.year    = d.year;
+      if (d.hull?.hin)      (vessel as any).hullNumber   = d.hull.hin;
+      if (d.hull?.material) vessel.hullMaterial          = d.hull.material;
+      if (d.hull?.shape)    vessel.hullForm              = d.hull.shape;
+      if (d.fuelType)       (vessel as any).fuelType     = d.fuelType;
+      if (d.class && !vessel.hullForm) vessel.hullForm   = d.class.replace(/-/g," ");
+      if (d.price)     vessel.price   = `$${Number(d.price).toLocaleString("en-US")}`;
+      const loc = d.location;
+      if (loc && (loc.city || loc.sub || loc.country) && !vessel.location)
+        vessel.location = [loc.city, loc.sub, loc.country].filter(Boolean).join(", ");
+      if (d.descriptionNoHTML && !vessel.description) vessel.description = d.descriptionNoHTML.trim();
+      // Dims
+      if (d.dims) {
+        const dim = d.dims;
+        if (dim.loaft   && !vessel.loa)   vessel.loa   = `${dim.loaft} ft / ${dim.loam} m`;
+        if (dim.beamft  && !vessel.beam)  vessel.beam  = `${dim.beamft} ft / ${dim.beamm} m`;
+        if (dim.draftft && !vessel.draft) vessel.draft = `${dim.draftft} ft / ${dim.draftm} m`;
+        if (dim.draftMinft) (vessel as any).draftMin  = `${dim.draftMinft} ft`;
+        if (dim.airDraftft) (vessel as any).airDraft  = `${dim.airDraftft} ft`;
+      }
+      // Perf
+      if (d.spd) {
+        if (d.spd.maxKn    && !vessel.maxSpeed)    vessel.maxSpeed    = `${d.spd.maxKn} kn`;
+        if (d.spd.cruiseKn && !vessel.cruiseSpeed) vessel.cruiseSpeed = `${d.spd.cruiseKn} kn`;
+        if (d.spd.rangeNmi && !vessel.range)       vessel.range       = `${d.spd.rangeNmi} nmi`;
+      }
+      // Acc
+      if (d.acc) {
+        if (d.acc.cabins >= 0      && !vessel.staterooms) vessel.staterooms  = String(d.acc.cabins);
+        if (d.acc.guestCabins >= 0)  (vessel as any).guestCabins            = String(d.acc.guestCabins);
+        if (d.acc.crewCabins >= 0)   vessel.crewCabins                       = String(d.acc.crewCabins);
+        if (d.acc.passengers >= 0  && !vessel.guests)     vessel.guests      = String(d.acc.passengers);
+        if (d.acc.crew >= 0        && !vessel.crew)       vessel.crew        = String(d.acc.crew);
+      }
+      // Engines
+      if (d.engines?.length && !vessel.engines) {
+        const e0 = d.engines[0];
+        const parts = [e0.make, e0.model].filter(Boolean);
+        if (parts.length)         vessel.engines      = parts.join(" ");
+        if (e0.hp)                vessel.power        = `${e0.hp} hp`;
+        if (e0.hours >= 0)        (vessel as any).engineHours = `${e0.hours} hrs`;
+        if (e0.fuel)              (vessel as any).fuelType    = e0.fuel;
+        if (e0.driveType)         vessel.propulsion   = e0.driveType;
+        if (d.engines.length > 1) vessel.engines      = `${d.engines.length}x ${vessel.engines}`;
+      }
+      // Tanks
+      if (d.tanks) {
+        const t = d.tanks;
+        if (t.fuelGal  && !vessel.fuelTank)   vessel.fuelTank   = `${Math.round(t.fuelGal).toLocaleString("en-US")} gal / ${Math.round(t.fuelL).toLocaleString("en-US")} lt`;
+        if (t.freshGal && !vessel.freshWater) vessel.freshWater = `${Math.round(t.freshGal).toLocaleString("en-US")} gal / ${Math.round(t.freshL).toLocaleString("en-US")} lt`;
+        if (t.holdGal  && !vessel.holdingTank) vessel.holdingTank = `${Math.round(t.holdGal)} gal / ${Math.round(t.holdL)} lt`;
+      }
+      // Media
+      if (d.images?.length) {
+        const seen = new Set(vessel.images.map((i: any) => i.src));
+        for (const img of d.images) {
+          const up = upscale(img.src);
+          if (!seen.has(up)) { seen.add(up); vessel.images.push({ src: up, alt: img.title || vessel.name }); }
+        }
+      }
+      if (d.videos?.length) {
+        (vessel as any).videos = d.videos.map((v: any) => ({ url: v.url, type: "other", thumbnail: v.thumb, title: v.title }));
+      }
     }
 
     // Rendered images — pick up anything mapReduxToVessel may have missed
