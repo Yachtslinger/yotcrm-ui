@@ -541,22 +541,27 @@ export default function BrochuresPage() {
       const ogImg = metaP("og:image");
       if (ogImg && !images.some(i => i.src === ogImg)) images.push({ src: _upscale(ogImg), alt: "" });
 
-      // 3. boatsgroup CDN sweep — only if Redux didn't give us images
-      //    (avoids picking up recommended listings / ad images)
+      // 3. boatsgroup CDN sweep — only if Redux didn't give us images.
+      //    Filter by listing ID extracted from the page URL (og:url or canonical)
+      //    so we only grab THIS listing's photos, not recommended/related ones.
       if (!reduxImagesDone) {
+        // Extract listing ID from the page itself (og:url contains the YachtWorld listing ID)
+        const ogUrl = doc.querySelector("meta[property='og:url']")?.getAttribute("content") || "";
+        const listingIdMatch = ogUrl.match(/[-/](\d{7,10})\/?$/) ||
+          raw.match(/yachtworld\.com\/yacht\/[^"']*?[-](\d{7,10})\//);
+        const listingId = listingIdMatch?.[1] || "";
+
         const seen = new Set(images.map(i => i.src));
-        doc.querySelectorAll("img[data-src], img[src]").forEach(img => {
-          const src = img.getAttribute("data-src") || img.getAttribute("src") || "";
-          if (/boatsgroup\.com/i.test(src) && !/logo|icon|sprite/i.test(src)) {
-            const up = _upscale(src);
-            if (!seen.has(up)) { seen.add(up); images.push({ src: up, alt: "" }); }
-          }
-        });
-        const bgRx = /https:\/\/images\.boatsgroup\.com\/resize\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp)[^\s"'<>]*/gi;
+        // Match both https:// and protocol-relative (//images.boatsgroup.com/...) variants
+        const bgRx = /(?:https:)?\/\/images\.boatsgroup\.com\/resize\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp)[^\s"'<>]*/gi;
         let m: RegExpExecArray | null;
         while ((m = bgRx.exec(raw)) !== null) {
-          const up = _upscale(m[0]);
-          if (!seen.has(up) && !/logo|icon|sprite/i.test(up)) { seen.add(up); images.push({ src: up, alt: "" }); }
+          const rawSrc = m[0];
+          // If we have a listing ID, only accept images that contain it in the filename
+          if (listingId && !rawSrc.includes(listingId)) continue;
+          if (/logo|icon|sprite/i.test(rawSrc)) continue;
+          const up = _upscale(rawSrc);
+          if (!seen.has(up)) { seen.add(up); images.push({ src: up, alt: "" }); }
         }
       }
 
