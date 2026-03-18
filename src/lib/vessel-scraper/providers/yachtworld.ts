@@ -136,10 +136,13 @@ export async function scrapeYachtWorld(url: string): Promise<VesselData> {
       const p = extracted.product;
       if (p.manufacturer && !vessel.builder) vessel.builder = clean(String(p.manufacturer));
       if (p.yearBuilt && !vessel.year) vessel.year = parseInt(String(p.yearBuilt));
-      if (p.model && !vessel.name) vessel.name = cleanHeadline(`${p.yearBuilt || ""} ${p.manufacturer || ""} ${p.model}`) || "";
+      if (!vessel.name || vessel.name === slugData.name) {
+        const parts = [p.yearBuilt, p.manufacturer, p.model].filter(Boolean);
+        if (parts.length) vessel.name = cleanHeadline(parts.join(" ")) || vessel.name;
+      }
       if (p.listedPrice && !vessel.price) {
         const n = parseFloat(String(p.listedPrice).replace(/[^0-9.]/g, ""));
-        if (!isNaN(n)) vessel.price = `$${n.toLocaleString("en-US")}`;
+        if (!isNaN(n) && n > 10000) vessel.price = `$${n.toLocaleString("en-US")}`;
       }
       if (p.location && !vessel.location) {
         const loc = p.location;
@@ -158,10 +161,11 @@ export async function scrapeYachtWorld(url: string): Promise<VesselData> {
       vessel.name = cleanHeadline(extracted.h1) || vessel.name;
     }
 
-    // Price from DOM
+    // Price from DOM — only use if digitalData didn't provide it
+    // Target the main listing price, not related listing prices
     if (!vessel.price && extracted.priceText) {
-      const priceMatch = extracted.priceText.match(/US\$([\d,]+)|\$([\d,]+)/);
-      if (priceMatch) vessel.price = `$${(priceMatch[1] || priceMatch[2])}`;
+      const priceMatch = extracted.priceText.match(/US\$([\d,]+)/);
+      if (priceMatch) vessel.price = `$${priceMatch[1]}`;
     }
 
     // Location from DOM
