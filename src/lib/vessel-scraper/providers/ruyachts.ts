@@ -36,11 +36,21 @@ function parseRUYachts(url: string, html: string): VesselData {
     .trim();
 
   // ── Spec grid: div.item > div.wrapper > div.title + div.txt ──────────────
-  // This is ruyachts.com's primary spec structure
+  // The FIRST wrapper often contains a long descriptive text (not a spec).
+  // Subsequent wrappers are proper label:value spec pairs.
   $("div.item div.wrapper").each((_, wrapper) => {
     const label = clean($(".title", wrapper).first().text());
     const value = clean($(".txt", wrapper).first().text());
-    if (label && value) assignSpec(vessel, label, value);
+    if (!label || !value) return;
+
+    // Long values (>80 chars, likely prose) that don't look like spec values
+    // are the vessel description paragraph ruyachts embeds in the spec grid.
+    if (!vessel.description && value.length > 80 && !/^\d/.test(value) && value.split(" ").length > 12) {
+      vessel.description = value;
+      return; // don't pass to assignSpec
+    }
+
+    assignSpec(vessel, label, value);
   });
 
   // ── Fallback: any div pair where first child looks like a label ───────────
@@ -86,9 +96,15 @@ function parseRUYachts(url: string, html: string): VesselData {
   });
 
   // ── Description ──────────────────────────────────────────────────────────
+  // Populated above from spec grid prose block; fallback to page-level selectors.
   if (!vessel.description) {
-    const desc = $(".description, [class*='overview'] p, article p, [class*='about'] p").first().text();
-    if (desc) vessel.description = clean(desc);
+    const desc =
+      clean($(".description, [class*='overview'] p, article p, [class*='about'] p").first().text()) ||
+      clean($('meta[property="og:description"]').attr("content"));
+    // Reject generic SEO meta descriptions (contain "for Sale" and are short)
+    if (desc && !(desc.length < 120 && /for sale/i.test(desc))) {
+      vessel.description = desc;
+    }
   }
 
   // ── Price ─────────────────────────────────────────────────────────────────

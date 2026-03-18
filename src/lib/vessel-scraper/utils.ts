@@ -267,11 +267,47 @@ const DUAL_MEASURE_FIELDS = new Set<keyof VesselData>([
   "waterMakerCapacity","livingSpace"
 ]);
 
+/**
+ * Some sites encode the unit inside the label rather than the value, e.g.:
+ *   ruyachts.com:  "Length, m"  => "24.97"   →  we want value "24.97 m"
+ *                  "Fuel, l"    => "5,900"    →  we want value "5,900 lt"
+ *                  "Top speed, knots" => "33" →  we want value "33 kn"
+ * This map normalises the raw unit token to a standard display suffix.
+ */
+const LABEL_UNIT_NORM: Record<string, string> = {
+  m: "m", metres: "m", meters: "m",
+  ft: "ft", feet: "ft",
+  l: "lt", lt: "lt", litre: "lt", litres: "lt", liter: "lt", liters: "lt",
+  nm: "nm",
+  knot: "kn", knots: "kn", kn: "kn",
+  hp: "HP", mhp: "HP", bhp: "HP",
+  kw: "kW",
+  grt: "GRT", gt: "GT",
+  ton: "t", tons: "t", t: "t",
+};
+
 /** Assign a label:value pair to the correct VesselData field */
 export function assignSpec(vessel: VesselData, label: string, value: string): void {
-  const l = label.toLowerCase().trim();
+  let l = label.toLowerCase().trim();
   const v = clean(value);
   if (!v || v === "—" || v === "-" || v === "n/a" || l.length < 2) return;
+
+  // ── Unit-in-label extraction ─────────────────────────────────────────────
+  // Handles patterns like "Length, m", "Fuel (l)", "Top speed, knots"
+  let enrichedValue = v;
+  const unitSuffixMatch = l.match(/[,\s]+\(?([\w]+)\)?$/);
+  if (unitSuffixMatch) {
+    const rawUnit = unitSuffixMatch[1].toLowerCase();
+    const normUnit = LABEL_UNIT_NORM[rawUnit];
+    if (normUnit) {
+      // Strip the unit from label so SPEC_MAP can match cleanly
+      l = l.slice(0, unitSuffixMatch.index!).trim().replace(/[,\s]+$/, "");
+      // Only append unit if value looks like a bare number (no unit already present)
+      if (/^[\d,.\s×x\-–\/]+$/.test(v) && !/ [a-zA-Z]/.test(v)) {
+        enrichedValue = `${v} ${normUnit}`;
+      }
+    }
+  }
 
   for (const { patterns, field } of SPEC_MAP) {
     if (patterns.some(p => {
@@ -288,7 +324,7 @@ export function assignSpec(vessel: VesselData, label: string, value: string): vo
       } else if (Array.isArray(vessel[field])) {
         // skip
       } else if (!(vessel[field] as string)) {
-        const v2 = DUAL_MEASURE_FIELDS.has(field) ? dualMeasure(v) : v;
+        const v2 = DUAL_MEASURE_FIELDS.has(field) ? dualMeasure(enrichedValue) : enrichedValue;
         (vessel as unknown as Record<string, unknown>)[field] = v2;
       }
       return;
