@@ -12,7 +12,11 @@ import { scrapeDenison }     from "./providers/denison";
 import { scrapeYachtWorld }  from "./providers/yachtworld";
 import { scrapeYachtSlinger } from "./providers/yachtslinger";
 import { scrapeYachtBuyer }  from "./providers/yachtbuyer";
-import { scrapeRUYachts }    from "./providers/ruyachts";
+import { scrapeRUYachts }         from "./providers/ruyachts";
+import { scrapeBoatTrader }       from "./providers/boattrader";
+import { scrapeBoatInternational } from "./providers/boatinternational";
+import { scrapeSuperyachtTimes }  from "./providers/superyachttimes";
+import { scrapeSuperyachtFan }    from "./providers/superyachtfan";
 
 // Provider registry — maps hostname patterns to scraper functions
 type Provider = (url: string) => Promise<VesselData>;
@@ -25,7 +29,11 @@ const PROVIDERS: { pattern: RegExp; fn: Provider }[] = [
   { pattern: /yachtworld\.com/i,         fn: scrapeYachtWorld },
   { pattern: /yachtslinger\.com/i,       fn: scrapeYachtSlinger },
   { pattern: /yachtbuyer\.com/i,         fn: scrapeYachtBuyer },
-  { pattern: /ruyachts\.com/i,           fn: scrapeRUYachts },
+  { pattern: /ruyachts\.com/i,                fn: scrapeRUYachts },
+  { pattern: /boattrader\.com/i,              fn: scrapeBoatTrader },
+  { pattern: /boatinternational\.com/i,       fn: scrapeBoatInternational },
+  { pattern: /superyachttimes\.com/i,         fn: scrapeSuperyachtTimes },
+  { pattern: /superyachtfan\.com/i,           fn: scrapeSuperyachtFan },
 ];
 
 /** Scrape a vessel listing URL and return a full VesselData object */

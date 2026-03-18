@@ -168,8 +168,9 @@ export async function scrapeYachtBuyer(url: string): Promise<VesselData> {
     if (og) imgSet.set("og", og);
   }
 
-  vessel.images = Array.from(imgSet.values()).map(src => ({ src, alt: vessel.name }));
-  vessel.images = dedupeImages(vessel.images);
+  // YachtBuyer images are intentionally excluded per product spec —
+  // only structured spec data is extracted from this source.
+  vessel.images = [];
 
   // ── Videos — scrape Bunny CDN iframes and YouTube from #video section ────
   const videos: VesselVideo[] = [];
