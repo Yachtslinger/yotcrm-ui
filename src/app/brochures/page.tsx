@@ -464,7 +464,7 @@ export default function BrochuresPage() {
     setVessel(prepVessel(merged));
     setPasteText("");
     setShowPasteImport(false);
-    setStep("preview");
+    if (step !== "preview") setStep("preview");
     showToast(`Paste import: ${Object.keys(v).filter(k => (v as Record<string,unknown>)[k]).length} fields extracted${images.length ? ` · ${images.length} images` : ""}`, "success");
   }
 
@@ -780,6 +780,63 @@ export default function BrochuresPage() {
           </div>
         }
       >
+        {/* ── Paste enrichment panel — always available in editor, auto-open when no images ── */}
+        <div className="rounded-xl mb-4 overflow-hidden" style={{ border: `1px solid ${showPasteImport || vessel.images.length === 0 ? "rgba(184,147,58,.5)" : "var(--border)"}`, background: "var(--card)" }}>
+          <button
+            onClick={() => setShowPasteImport(v => !v)}
+            className="w-full flex items-center justify-between px-5 py-3 text-left transition-colors hover:bg-[rgba(184,147,58,.04)]"
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-base">📋</span>
+              <div>
+                <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--brass-400)" }}>
+                  Paste Page Source
+                </span>
+                <span className="text-xs ml-2" style={{ color: "var(--navy-400)" }}>
+                  — for YachtWorld &amp; Cloudflare-blocked sites
+                </span>
+              </div>
+              {vessel.images.length === 0 && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold ml-2" style={{ background: "rgba(245,158,11,.15)", color: "#f59e0b", border: "1px solid rgba(245,158,11,.35)" }}>
+                  No images yet — enrich here
+                </span>
+              )}
+            </div>
+            <span className="text-lg" style={{ color: "var(--navy-400)" }}>{showPasteImport ? "−" : "+"}</span>
+          </button>
+          {(showPasteImport || vessel.images.length === 0) && (
+            <div className="px-5 pb-5">
+              <p className="text-xs mb-3" style={{ color: "var(--navy-400)" }}>
+                1. Open the listing in a new browser tab&nbsp;&nbsp;
+                2. Press <strong>CMD+A</strong> then <strong>CMD+C</strong>&nbsp;&nbsp;
+                3. Click below and press <strong>CMD+V</strong>
+              </p>
+              <textarea
+                className="w-full rounded-lg text-xs p-3 font-mono resize-y mb-3"
+                style={{ background: "var(--input,#1e293b)", border: "1px solid var(--border)", color: "var(--foreground)", height: 120 }}
+                value={pasteText}
+                onChange={e => setPasteText(e.target.value)}
+                placeholder="Paste the full page text here…"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={handlePasteImport}
+                  disabled={!pasteText.trim()}
+                  className="text-sm px-4 py-2 rounded-lg font-semibold transition-all"
+                  style={{ background: pasteText.trim() ? "var(--brass-400)" : "var(--border)", color: pasteText.trim() ? "#fff" : "var(--navy-400)", cursor: pasteText.trim() ? "pointer" : "default" }}>
+                  Extract &amp; Merge Data
+                </button>
+                <button
+                  onClick={() => { setPasteText(""); setShowPasteImport(false); }}
+                  className="text-sm px-4 py-2 rounded-lg border"
+                  style={{ borderColor: "var(--border)", color: "var(--navy-400)" }}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Images */}
         <div className="rounded-xl p-5 mb-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <div className="flex items-center justify-between mb-3">
