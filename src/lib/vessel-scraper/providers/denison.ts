@@ -178,137 +178,97 @@ function parseDenison(url: string, html: string): VesselData {
     .replace(/\r\n|\r|\n/g, " ")   // collapse ALL newlines → spaces
     .replace(/\s{2,}/g, " ");       // collapse multiple spaces → single
 
-  // Format A: "Label: Value" colon pairs — handles tanks with "N x QTY|unit"
-  const colonPairs = specText.match(/([A-Z][A-Za-z\s\/\(\)]{2,40}):\s*([^\n:]{2,120})/g) || [];
-  for (const pair of colonPairs) {
-    const colon = pair.indexOf(":");
-    const label = pair.slice(0, colon).trim();
-    const value = pair.slice(colon + 1).trim();
-    if (label.length >= 50 || !value) continue;
-    // Tank "N x QTY|unit" → convert to readable dual format
-    const tankM = value.match(/^(\d+)\s*x\s*([\d,]+)\s*\|?\s*(gallon|liter|litre|gal|lt)\b/i);
-    if (tankM) {
-      const qty = parseInt(tankM[1]);
-      const amount = parseInt(tankM[2].replace(/,/g, ""));
-      const unit = tankM[3].toLowerCase();
-      const total = qty * amount;
-      let formatted = "";
-      if (/gal/i.test(unit)) {
-        formatted = `${total.toLocaleString("en-US")} gal / ${Math.round(total * 3.78541).toLocaleString("en-US")} lt`;
-      } else {
-        formatted = `${total.toLocaleString("en-US")} lt / ${Math.round(total / 3.78541).toLocaleString("en-US")} gal`;
-      }
-      assignSpec(vessel, label, formatted);
-    } else if (value.length < 150) {
-      assignSpec(vessel, label, value);
+  // ── Helper: parse "N x QTY|unit" tank notation ───────────────────────────
+  function parseTank(value: string): string {
+    const m = value.match(/^(\d+)\s*x\s*([\d,]+)\s*\|?\s*(gallon|liter|litre|gal|lt)\b/i);
+    if (!m) return value;
+    const total = parseInt(m[1]) * parseInt(m[2].replace(/,/g, ""));
+    if (/gal/i.test(m[3])) {
+      return `${total.toLocaleString("en-US")} gal / ${Math.round(total * 3.78541).toLocaleString("en-US")} lt`;
     }
+    return `${total.toLocaleString("en-US")} lt / ${Math.round(total / 3.78541).toLocaleString("en-US")} gal`;
   }
 
-  // Format B: "Label - Value" dash pairs for equipment lists
-  const dashPairs = specText.match(/([A-Za-z][A-Za-z\s&\/\(\)]{2,50})\s+-\s+([^\n\r]{4,200})/g) || [];
-  for (const pair of dashPairs) {
-    const dashIdx = pair.indexOf(" - ");
-    const label = pair.slice(0, dashIdx).trim();
-    const value = pair.slice(dashIdx + 3).trim();
-    if (label.length < 55 && value.length > 2) assignSpec(vessel, label, value);
+  // ── Format A: direct targeted extraction for key fields ──────────────────
+  // Use specific regex per field — more reliable than generic colon parsing
+  // because after whitespace normalization colon-values bleed into adjacent labels
+
+  const directMatch = (pattern: RegExp): string => {
+    const m = specText.match(pattern);
+    return m ? m[1].trim() : "";
+  };
+
+  // Tanks — "Label: N x QTY|unit"
+  if (!vessel.fuelTank) {
+    const raw = directMatch(/(?:Fuel\s*Tank|Fuel)[:\s]+(\d+\s*x\s*[\d,]+\|?\s*(?:gallon|gal|lt|litre|liter)\b)/i);
+    if (raw) vessel.fuelTank = parseTank(raw);
+  }
+  if (!vessel.freshWater) {
+    const raw = directMatch(/Fresh\s*Water[:\s]+(\d+\s*x\s*[\d,]+\|?\s*(?:gallon|gal|lt|litre|liter)\b)/i);
+    if (raw) vessel.freshWater = parseTank(raw);
+  }
+  if (!vessel.holdingTank) {
+    const raw = directMatch(/Holding[:\s]+(\d+\s*x\s*[\d,]+\|?\s*(?:gallon|gal|lt|litre|liter)\b)/i);
+    if (raw) vessel.holdingTank = parseTank(raw);
   }
 
-  // Format C: Named equipment sections — extract by known header names
-  function extractSection(header: string): string {
-    const idx = specText.indexOf(header);
-    if (idx === -1) return "";
-    const tail = specText.slice(idx + header.length);
-    const nextIdx = tail.search(/\b(?:Electrical|Machinery|Electronics|Safety|Navigation|Anchor|Deck|Refit|Galley|Audio|A\/v|Steering|Miscellaneous)\b/);
-    const raw = nextIdx > 0 ? tail.slice(0, nextIdx) : tail.slice(0, 800);
-    return raw.replace(/\s+/g, " ").trim();
+  // Basic specs — "Label: Value" (stop before next capital Label pattern)
+  const colonExtract = (label: RegExp, maxLen = 60): string => {
+    const m = specText.match(label);
+    if (!m) return "";
+    // Grab text after the match, stop at the next "Word Word:" or end of reasonable value
+    const after = specText.slice(m.index! + m[0].length).trim();
+    const stop = after.search(/\s[A-Z][a-z]+\s[A-Z]|\s[A-Z]{2,}[a-z]+:/);
+    return (stop > 0 ? after.slice(0, Math.min(stop, maxLen)) : after.slice(0, maxLen)).trim();
+  };
+
+  if (!vessel.staterooms) {
+    const v = directMatch(/Cabins[:\s]+(\d+)/i);
+    if (v) vessel.staterooms = v;
+  }
+  if (!vessel.guests) {
+    const v = directMatch(/Max\s*Passengers[:\s]+(\d+)/i);
+    if (v) vessel.guests = v;
   }
 
-  // Electronics And Equipment → radar, chartPlotter, aisSystem, autopilot, satcom
-  const navSec = extractSection("Electronics And Equipment");
-  if (navSec) {
-    if (!vessel.radar) {
-      const m = navSec.match(/Radar\s*-\s*([A-Z][A-Za-z0-9\s\-\.]{2,40}?)(?:\s+[A-Z]{3,}|\s+SIMRAD|$)/);
-      if (m) vessel.radar = m[1].trim();
-    }
-    if (!vessel.chartPlotter) {
-      const m = navSec.match(/(?:GPS\s*Plotter|Chart\s*Plotter|Evo\s*Plotter)\s*-\s*([^S][^I][^\n]{4,60}?)(?:\s+SIMRAD|\s+[A-Z]{3,}|$)/i);
-      if (!m) {
-        const m2 = navSec.match(/Plotter[^-]*-\s*([\w\"\s\(\)]{4,50}?)(?=\s+SIMRAD|\s+[A-Z]{4,}|$)/i);
-        if (m2) vessel.chartPlotter = m2[1].trim();
-      } else vessel.chartPlotter = m[1].trim();
-    }
-    if (!vessel.aisSystem && /\bAIS\b/i.test(navSec)) {
-      vessel.aisSystem = navSec.match(/\bAIS\s*-\s*([^\s][^,\n]{4,40})/i)?.[1]?.trim() || "SIMRAD AIS";
-    }
-    if (!vessel.autopilot) {
-      const m = navSec.match(/Autopilot\s+([A-Z][A-Z0-9\-]{2,20})/i);
-      if (m) vessel.autopilot = m[1].trim();
-    }
-    if (!vessel.satcom) {
-      if (/Starlink/i.test(navSec)) vessel.satcom = "Starlink";
-    }
-  }
+  // Equipment — "Label - Value" (stop at next dash-pair item)
+  const dashExtract = (label: RegExp, maxLen = 60): string => {
+    const m = specText.match(label);
+    if (!m) return "";
+    const after = specText.slice(m.index! + m[0].length).trim();
+    // Stop at comma, or at next "Word - " pattern indicating new equipment item
+    const commaStop = after.indexOf(",");
+    const nextItem = after.search(/\b[A-Z][a-zA-Z\s]{2,20}\s+-\s+[A-Z]/);
+    const stop = [commaStop, nextItem].filter(n => n > 4).sort((a,b) => a-b)[0] ?? maxLen;
+    return after.slice(0, Math.min(stop, maxLen)).trim();
+  };
 
-  // Electrical Equipment → gensets, shorepower, voltageSystem, airCon
-  const elecSec = extractSection("Electrical Equipment");
-  if (elecSec) {
-    if (!vessel.gensets) {
-      const m = elecSec.match(/(?:Main\s*)?Generator\s*-\s*([^\n,]{4,60}?)(?=\s+Generator|\s+Shore|\s+Main|$)/i);
-      if (m) vessel.gensets = m[1].trim();
-    }
-    if (!vessel.shorepower) {
-      const m = elecSec.match(/Shore\s*(?:Cable|Power)\s*-\s*([^\n,]{4,40}?)(?=\s+Main|\s+Light|$)/i);
-      if (m) vessel.shorepower = m[1].trim();
-    }
-    if (!vessel.voltageSystem) {
-      const m = elecSec.match(/Main\s*Power\s*System\s*-\s*([A-Za-z0-9\s]{4,30}?)(?=\s+Light|\s+Emerg|\s+Batter|$)/i);
-      if (m) vessel.voltageSystem = m[1].trim();
-    }
-    if (!vessel.airCon) {
-      const m = elecSec.match(/Air\s*Conditioning\s*-\s*([^\n]{4,80}?)(?=\s+Galley|\s+Sanitary|\s+Ventil|\s*$)/i);
-      if (m) vessel.airCon = m[1].trim();
-    }
+  if (!vessel.gensets)       vessel.gensets       = dashExtract(/Main\s*Generator\s*-\s*/i, 50);
+  if (!vessel.shorepower)    vessel.shorepower    = dashExtract(/Shore\s*Cable\s*-\s*/i, 40);
+  if (!vessel.voltageSystem) vessel.voltageSystem = dashExtract(/Main\s*Power\s*System\s*-\s*/i, 30);
+  if (!vessel.airCon)        vessel.airCon        = dashExtract(/Air\s*Conditioning\s*-\s*/i, 80);
+  if (!vessel.bowThruster)   vessel.bowThruster   = dashExtract(/Bow\s*(?:and\s*Stern\s*)?Thruster[s]?\s*-\s*/i, 60);
+  if (!vessel.sternThruster) vessel.sternThruster = dashExtract(/Stern\s*Thruster[s]?\s*-\s*/i, 60) || vessel.bowThruster;
+  if (!vessel.radar)         vessel.radar         = dashExtract(/Radar\s*-\s*/i, 30);
+  if (!vessel.autopilot) {
+    const m = specText.match(/Autopilot\s+([A-Z][A-Z0-9\-]{2,20})/i);
+    if (m) vessel.autopilot = m[1].trim();
   }
-
-  // Auxillary Machinery → bowThruster, sternThruster, propulsion
-  const auxSec = extractSection("Auxillary Machinery");
-  if (auxSec) {
-    if (!vessel.bowThruster || !vessel.sternThruster) {
-      const m = auxSec.match(/Bow and Stern Thruster[^-]*-\s*([^\n,]{4,100})/i);
-      if (m) {
-        if (!vessel.bowThruster) vessel.bowThruster = m[1].trim();
-        if (!vessel.sternThruster) vessel.sternThruster = m[1].trim();
-      }
-    }
-    if (!vessel.bowThruster) {
-      const m = auxSec.match(/Bow\s*Thruster[^-]*-\s*([^\n,]{4,60})/i);
-      if (m) vessel.bowThruster = m[1].trim();
-    }
-    if (!vessel.sternThruster) {
-      const m = auxSec.match(/Stern\s*Thruster[^-]*-\s*([^\n,]{4,60})/i);
-      if (m) vessel.sternThruster = m[1].trim();
-    }
-    if (!vessel.propulsion) {
-      const m = auxSec.match(/Steering[^-]*-\s*([^\n,]{4,80})/i);
-      if (m) vessel.propulsion = m[1].trim();
-    }
+  if (!vessel.aisSystem && /\bAIS\b/.test(specText)) vessel.aisSystem = "SIMRAD AIS";
+  if (!vessel.satcom && /Starlink/i.test(specText)) vessel.satcom = "Starlink";
+  if (!vessel.chartPlotter) {
+    const m = specText.match(/(?:GPS\s*)?Plotter[^-]*-\s*([^,]{4,60}?)(?=\s+SIMRAD|\s*,)/i);
+    if (m) vessel.chartPlotter = m[1].trim();
   }
-
-  // Safety And Security Equipment → fireSuppression, lifeRafts
-  const safetySec = extractSection("Safety And Security Equipment");
-  if (safetySec) {
-    if (!vessel.fireSuppression && /fire suppression/i.test(safetySec)) {
-      vessel.fireSuppression = "Fixed Fire Suppression";
-      const m = safetySec.match(/Fixed\s*Fire\s*Suppression[^,.]*/i);
-      if (m) vessel.fireSuppression = m[0].trim();
-    }
-    if (!vessel.lifeRafts) {
-      const parts: string[] = [];
-      if (/EPIRB/i.test(safetySec)) parts.push("EPIRB");
-      const pfds = safetySec.match(/(\d+)\s*Adult[^,;]*/i);
-      if (pfds) parts.push(pfds[0].trim());
-      if (parts.length) vessel.lifeRafts = parts.join("; ");
-    }
+  if (!vessel.fireSuppression && /Fixed\s*Fire\s*Suppression/i.test(specText)) {
+    vessel.fireSuppression = "Fixed Fire Suppression";
+  }
+  if (!vessel.lifeRafts) {
+    const parts: string[] = [];
+    if (/EPIRB/i.test(specText)) parts.push("EPIRB");
+    const pfds = specText.match(/(\d+)\s*Adult\s*type\s*[12]\s*PFD/i);
+    if (pfds) parts.push(pfds[0].trim());
+    if (parts.length) vessel.lifeRafts = parts.join("; ");
   }
 
   // ── 5. dt/dd and table fallbacks ─────────────────────────────────────────
