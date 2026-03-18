@@ -1,8 +1,15 @@
 /**
  * POST /api/brochures/scrape-pdf
  * Accepts a PDF upload, extracts text with Python/pdfplumber,
- * then maps the extracted text to VesselData fields using the same
- * SPEC_MAP logic as the HTML scrapers.
+ * then maps the extracted text to VesselData fields.
+ *
+ * Handles multiple PDF spec formats:
+ *   Format A: "Label: Value"                         (most sites)
+ *   Format B: "Label    Value"  (2+ spaces)          (Van der Valk style)
+ *   Format C: "Label – (qualifier) VALUE IMPERIAL"   (Sunseeker/builder brochures)
+ *   Format D: "Label VALUE"     (single space)       (Sunseeker principal chars)
+ *   Format E: "Label text"      (trailing word)      (builder/architect credit lines)
+ *   Format F: "Keyword present" (boolean features)   (bow thruster, autopilot, AC...)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { execFile } from "child_process";
@@ -19,15 +26,15 @@ const execFileAsync = promisify(execFile);
 const EXTRACT_SCRIPT = `
 import sys, json, re
 
-# ── Noise signatures from GA drawings, deck plans, scale rulers ───────────────
+# ── Noise filter ──────────────────────────────────────────────────────────────
 NOISE_RE = re.compile(
-    r'^[-\\d\\s]+$'                           # pure number/ruler scale lines
-    r'|^(UP|DN)(\\s+(UP|DN))*\\s*$'           # direction arrows
+    r'^[-\\d\\s]+$'
+    r'|^(UP|DN)(\\s+(UP|DN))*\\s*$'
     r'|^(FLYBRIDGE|BRIDGE DECK|MAIN DECK|LOWER DECK|SUN DECK|UPPER LOUNGE)$'
     r'|^(SUNBED|JACUZZI|LOUNGE BAR|ENGINE ROOM|BEACHCLUB|PULLMAN|AFT LOUNGE)$'
     r'|^(GYM.*LOUNGE|PILOT HOUSE|SALON|DINING|GALLEY|LAUNDRY|CREW MESS)$'
     r'|^(INBOARD PROFILE|ARRANGEMENT|PROFILE|SCALE \\d|SIZE:\\s*A\\d|BN \\d+|FEET)$'
-    r'|^\\d+(\\s+\\d+){4,}',                  # 5+ sequential numbers (ruler)
+    r'|^\\d+(\\s+\\d+){4,}',
     re.IGNORECASE
 )
 
@@ -37,23 +44,17 @@ def is_noise(s):
         return True
     if NOISE_RE.match(s):
         return True
-    # Lines that are 80%+ digits/spaces/hyphens = ruler noise
     noise_chars = sum(1 for c in s if c in '0123456789 -')
     if len(s) > 6 and noise_chars / len(s) > 0.80:
         return True
     return False
 
 def normalize_eu_decimal(s):
-    """34,13m → 34.13m  (only when digits flank the comma)"""
     return re.sub(r'(\\d),(\\d)', r'\\1.\\2', s)
 
-def crop_left_half(page):
-    """Crop to left 55% of page — avoids GA drawings on right side"""
-    try:
-        bbox = (0, 0, page.width * 0.55, page.height)
-        return page.crop(bbox)
-    except Exception:
-        return page
+def decode_em(s):
+    """Normalize em-dash and en-dash variants to simple hyphen for matching"""
+    return s.replace('\\u2013', '-').replace('\\u2014', '-').replace('\\u2012', '-').replace('\\xe2\\x80\\x93', '-')
 
 def extract_pages(pdf_path):
     pages_text = []
@@ -61,14 +62,12 @@ def extract_pages(pdf_path):
         import pdfplumber
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
-                # First try full-page tables (structured spec sheets)
                 tables = page.extract_tables()
                 if tables:
                     ttext = ""
                     for table in tables:
                         for row in (table or []):
-                            if not row:
-                                continue
+                            if not row: continue
                             non_empty = [c.strip() for c in row if c and c.strip()]
                             if len(non_empty) == 2:
                                 ttext += f"{non_empty[0]}: {non_empty[1]}\\n"
@@ -77,22 +76,18 @@ def extract_pages(pdf_path):
                     if ttext.strip():
                         pages_text.append(ttext)
                         continue
-
-                # Crop to left half then full page fallback
-                for crop_fn in [crop_left_half, lambda p: p]:
-                    cropped = crop_fn(page)
-                    t = cropped.extract_text(x_tolerance=3, y_tolerance=3) or ""
-                    if t.strip():
-                        pages_text.append(t)
-                        break
+                # Try full page (some builder PDFs have 2-column layouts that crop badly)
+                t = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
+                if t.strip():
+                    pages_text.append(t)
                 else:
                     pages_text.append("")
     except Exception:
         try:
             from pypdf import PdfReader
             reader = PdfReader(pdf_path)
-            for page in reader.pages:
-                pages_text.append(page.extract_text() or "")
+            for pg in reader.pages:
+                pages_text.append(pg.extract_text() or "")
         except Exception as e:
             sys.exit(f"PDF extraction failed: {e}")
     return pages_text
@@ -102,87 +97,214 @@ def clean(text):
     for line in text.split("\\n"):
         line = line.strip()
         if not is_noise(line):
-            lines.append(normalize_eu_decimal(line))
+            lines.append(normalize_eu_decimal(decode_em(line)))
     return "\\n".join(lines)
 
-# ── Known field extractors: try patterns in order ────────────────────────────
-# Each entry: (field_name, [list of label regex patterns])
-FIELD_DEFS = [
-    ("loa",            [r"length\\s+over\\s+all", r"\\bloa\\b", r"length\\s*overall"]),
-    ("lwl",            [r"length\\s+waterline", r"\\blwl\\b"]),
-    ("beam",           [r"\\bbeam\\b"]),
-    ("draft",          [r"\\bdraft\\b", r"\\bdraught\\b"]),
-    ("displacement",   [r"\\bdisplacement\\b"]),
-    ("grossTonnage",   [r"gross\\s+tons?", r"\\btonnage\\b", r"\\bgt\\b"]),
-    ("classification", [r"\\bclassification\\b"]),
-    ("flagState",      [r"flag\\s+compliance", r"\\bflag\\b"]),
-    ("hullMaterial",   [r"hull\\s+material"]),
-    ("hullForm",       [r"hull\\s+shape", r"hull\\s+form", r"hull\\s+type"]),
-    ("superstructure", [r"superstructure\\s+material", r"\\bsuperstructure\\b"]),
-    ("exteriorDesign", [r"exterior\\s+design"]),
-    ("interiorDesign", [r"interior\\s+design"]),
-    ("navalArchitect", [r"naval\\s+arch"]),
-    ("engines",        [r"engine\\s+brand", r"engine\\s+type", r"\\bengines?\\b"]),
-    ("power",          [r"engine\\s+hp", r"engine\\s+power"]),
-    ("propellers",     [r"shaft\\s*/\\s*propeller", r"\\bpropeller\\b"]),
-    ("gearbox",        [r"gearbox\\s+and", r"\\bgearbox\\b"]),
-    ("maxSpeed",       [r"top\\s+speed", r"max(?:imum)?\\s+speed"]),
-    ("range",          [r"range\\s*@\\s*\\d+", r"\\brange\\b"]),
-    ("fuelTank",       [r"fuel\\s+capacity", r"fuel\\s+tank"]),
-    ("freshWater",     [r"fresh\\s*water\\s+capacity", r"fresh\\s*water"]),
-    ("holdingTank",    [r"holding\\s+tank"]),
-    ("lubeOil",        [r"lube\\s+oil"]),
-    ("guests",         [r"\\baccommodation\\b", r"\\bguests?\\b", r"\\bpassengers?\\b"]),
-    ("crew",           [r"^crew\\b"]),
-    ("staterooms",     [r"\\bstaterooms?\\b", r"\\bcabins?\\b"]),
-    ("price",          [r"\\bprice\\b", r"asking\\s+price"]),
-    ("location",       [r"^location\\b"]),
-    ("builder",        [r"\\bbuilder\\b", r"\\bshipyard\\b"]),
-]
+# ── Multi-format field extraction ─────────────────────────────────────────────
+# Handles:
+#   A) "Label: Value"
+#   B) "Label  Value" (2+ spaces)
+#   C) "Label - (qualifier) value"   (em-dash style, already decoded to -)
+#   D) "Label value"  (label then direct measurement: "Fuel capacity 5900 litres")
 
-def extract_field_value(text, patterns):
+def extract_field(text, label_pats, value_pat=None):
+    """
+    Try to extract a value matching label_pats from each line in text.
+    value_pat: optional regex to validate/capture from the value portion.
+    Returns first match found.
+    """
     lines = text.split("\\n")
     for line in lines:
         line = line.strip()
         if not line:
             continue
-        for pat in patterns:
-            # Format 1: "Label: Value" — colon-separated
-            m = re.match(rf'(?i)(?:{pat})(?:[^:\\n]{{0,40}})?:\\s*(.+)', line)
+        for pat in label_pats:
+            # Format A: "Label: Value"
+            m = re.match(rf'(?i)(?:{pat})(?:[^:\\n]{{0,50}})?:\\s*(.+)', line)
             if m:
                 val = m.group(1).strip()
                 if val and not is_noise(val):
+                    if value_pat:
+                        vm = re.search(value_pat, val, re.IGNORECASE)
+                        return vm.group(0).strip() if vm else val
                     return val
-            # Format 2: "Label    Value" — 2+ spaces, no colon (VDV/space-separated style)
-            m = re.match(rf'(?i)(?:{pat})(?:[^\\d\\n]{{0,35}}?)\\s{{2,}}(\\S.+)', line)
+
+            # Format B: "Label    Value" (2+ spaces)
+            m = re.match(rf'(?i)(?:{pat})(?:[^\\d\\n]{{0,40}}?)\\s{{2,}}(\\S.+)', line)
             if m:
                 val = m.group(1).strip()
                 if val and not is_noise(val):
+                    if value_pat:
+                        vm = re.search(value_pat, val, re.IGNORECASE)
+                        return vm.group(0).strip() if vm else val
                     return val
+
+            # Format C: "Label - (qualifier) value" (already dash-decoded)
+            m = re.match(rf'(?i)(?:{pat})[^-\\n]{{0,50}}?\\s*-\\s*(?:\\([^)]+\\)\\s*)?(\\S.+)', line)
+            if m:
+                val = m.group(1).strip()
+                # Exclude lines like "Label - subheading" that are section headers
+                if val and not is_noise(val) and not re.match(r'^[A-Z][A-Z\\s]{3,}$', val):
+                    if value_pat:
+                        vm = re.search(value_pat, val, re.IGNORECASE)
+                        return vm.group(0).strip() if vm else val
+                    return val
+
+            # Format D: "Label value" (single space, label at start of line)
+            # Only for lines starting with the label pattern followed by a measurement
+            if value_pat:
+                m = re.match(rf'(?i)^(?:{pat})\\s+(\\S.{{2,100}})', line)
+                if m:
+                    val = m.group(1).strip()
+                    vm = re.search(value_pat, val, re.IGNORECASE)
+                    if vm:
+                        return vm.group(0).strip()
+
     return ""
 
-def parse_name(text, pages_text):
-    # Look for "M/Y Name" or "MY Name" or "Vessel Name"
-    for pat in [r"(?i)^M/?Y\\.?\\s+([A-Z][A-Za-z0-9\\s'\\-]{2,40})", r"(?im)^(?:vessel|yacht)\\s+name\\s*:?\\s*([^\\n]+)"]:
-        m = re.search(pat, text)
+# ── MEASUREMENT value patterns ────────────────────────────────────────────────
+# These capture the first measurement unit in a value string
+
+DIM_PAT    = r'[\\d.,]+\\s*(?:m|ft|mm|cm|\\')(?:[\\d\\"]+)?'
+SPEED_PAT  = r'(?:up\\s+to\\s+)?[\\d.,]+\\s*(?:knots?|kn|km/h)'
+RANGE_PAT  = r'(?:up\\s+to\\s+)?[\\d.,]+\\s*(?:nautical\\s*miles?|nm|nmi)'
+WEIGHT_PAT = r'[\\d,]+\\s*(?:kg|lb|tons?|t\\b)'
+VOL_PAT    = r'[\\d.,]+\\s*(?:litres?|liters?|lt|l\\b|gallons?|gal)'
+POWER_PAT  = r'[\\d,]+\\s*(?:hp|kw|ps|bhp|mhp)'
+YEAR_PAT   = r'\\b(19[5-9]\\d|20[0-4]\\d)\\b'
+
+# ── Field definitions ─────────────────────────────────────────────────────────
+# (field_name, [label_patterns], optional_value_pattern)
+# label_patterns matched against start of line (formats A-D)
+
+FIELD_DEFS = [
+    # Dimensions
+    ("loa",          [r"length\\s+overall", r"length\\s+over\\s+all", r"\\bloa\\b"],          DIM_PAT),
+    ("lwl",          [r"length\\s+waterline", r"\\blwl\\b"],                                   DIM_PAT),
+    ("beam",         [r"beam\\s*[-(]"],                                                         DIM_PAT),
+    ("draft",        [r"draft", r"draught"],                                                    DIM_PAT),
+    ("airDraft",     [r"height\\s+above\\s+waterline", r"air\\s+draft", r"air\\s+draught"],    DIM_PAT),
+    ("displacement", [r"displacement"],                                                          WEIGHT_PAT),
+    # Performance
+    ("maxSpeed",     [r"maximum\\s+speed", r"max(?:imum)?\\s+speed", r"top\\s+speed", r"maximum\\s+speed"],   SPEED_PAT),
+    ("cruiseSpeed",  [r"cruising\\s+speed", r"cruise\\s+speed", r"service\\s+speed"],          SPEED_PAT),
+    ("range",        [r"range"],                                                                 RANGE_PAT),
+    # Propulsion
+    ("propulsion",   [r"propulsion"],                                                            None),
+    ("engines",      [r"engine\\s+options?", r"main\\s+engines?", r"engines?\\b"],             None),
+    ("power",        [r"engine\\s+options?", r"total\\s+power", r"engine\\s+power"],           POWER_PAT),
+    ("gensets",      [r"generators?"],                                                           None),
+    ("freshWater",   [r"fresh.?water\\s+capacity", r"fresh.?water"],                            VOL_PAT),
+    ("holdingTank",  [r"holding\\s+tank"],                                                      None),
+    # Identity
+    ("builder",      [r"\\bbuilder\\b"],                                                         None),
+    ("navalArchitect",[r"naval\\s+arch"],                                                        None),
+    ("exteriorDesign",[r"exterior\\s+styl", r"exterior\\s+design"],                             None),
+    ("interiorDesign",[r"interior\\s+design"],                                                   None),
+    ("hullMaterial", [r"hull\\s+material", r"hull\\s+construction", r"construction\\b"],        None),
+    ("hullForm",     [r"hull\\s+form", r"hull\\s+type", r"hull\\s+shape"],                     None),
+    ("grossTonnage", [r"gross\\s+ton", r"\\bgt\\b"],                                            None),
+    ("classification",[r"classification"],                                                        None),
+    ("flagState",    [r"\\bflag\\b"],                                                            None),
+    # Accommodation
+    ("guests",       [r"\\bguests?\\b", r"passengers?", r"accommodation.*up\\s+to"],            r'\\d+'),
+    ("crew",         [r"^crew\\s+members?", r"^crew\\b"],                                        r'\\d+'),
+    ("staterooms",   [r"staterooms?", r"guest\\s+cabins?", r"cabins?"],                         r'\\d+'),
+    ("crewCabins",   [r"crew\\s+cabin", r"crew\\s+quarter"],                                    None),
+    # Other
+    ("price",        [r"asking\\s+price", r"\\bprice\\b"],                                      None),
+    ("location",     [r"^location\\b", r"currently\\s+located"],                               None),
+]
+
+# ── Boolean/presence features ─────────────────────────────────────────────────
+# If pattern found anywhere in text, set field to the matched text
+
+PRESENCE_DEFS = [
+    ("bowThruster",    r"hydraulic\\s+bow\\s+thruster\\s*\\([^)]+\\)",        r"hydraulic\\s+bow\\s+thruster"),
+    ("sternThruster",  r"hydraulic\\s+stern\\s+thruster\\s*\\([^)]+\\)",      r"hydraulic\\s+stern\\s+thruster"),
+    ("autopilot",      r"\\bautopilot\\b",                                     None),
+    ("radar",          r"radar[/\\\\]chartplotter|\\bradar\\b",                 None),
+    ("chartPlotter",   r"radar/chartplotter[^\\n]*gps",                        None),
+    ("aisSystem",      r"\\bais\\b",                                            None),
+    ("satcom",         r"vsat|satcom|satellite\\s+comm",                        None),
+    ("fireSuppression",r"automatic\\s+fire\\s+extinguish[^\\n]*engine",        r"automatic\\s+fire\\s+extinguish\\w+"),
+    ("airCon",         r"all\\s+cabin\\s+air.?conditioning|air.?conditioning", None),
+    ("shorepower",     r"(?:ac\\s+)?shore\\s+power",                           None),
+]
+
+def extract_presence(text, full_pat, short_pat=None):
+    m = re.search(full_pat, text, re.IGNORECASE)
+    if m:
+        return m.group(0).strip()
+    if short_pat:
+        m = re.search(short_pat, text, re.IGNORECASE)
         if m:
-            return m.group(1).strip()
-    # VDV brochures: vessel name often large text near top of page 3+
-    if len(pages_text) >= 3:
-        for line in pages_text[2].split('\\n')[:10]:
+            return m.group(0).strip()
+    return ""
+
+# ── Special parsers for compound values ──────────────────────────────────────
+
+def parse_accommodation(text):
+    """Extract guest count from lines like 'ACCOMMODATION: UP TO 8 GUESTS AND 4 CREW'"""
+    m = re.search(r'accommodation[^\\n]*up\\s+to\\s+(\\d+)\\s+guests?', text, re.IGNORECASE)
+    if m: return m.group(1)
+    m = re.search(r'up\\s+to\\s+(\\d+)\\s+guests?', text, re.IGNORECASE)
+    if m: return m.group(1)
+    return ""
+
+def parse_crew(text):
+    m = re.search(r'(\\d+)\\s+crew\\s+members?', text, re.IGNORECASE)
+    if m: return m.group(1)
+    m = re.search(r'accommodation.*?(\\d+)\\s+crew', text, re.IGNORECASE)
+    if m: return m.group(1)
+    return ""
+
+def parse_builder_name(line):
+    """'Builder Sunseeker International' → 'Sunseeker International'"""
+    m = re.match(r'(?i)^builder\\s+(.{3,50})$', line.strip())
+    return m.group(1).strip() if m else ""
+
+def parse_naval_arch(line):
+    m = re.match(r'(?i)^naval\\s+architects?\\s+(.{3,80})$', line.strip())
+    return m.group(1).strip() if m else ""
+
+def parse_exterior(line):
+    m = re.match(r'(?i)^exterior\\s+styl\\w*\\s+(.{3,80})$', line.strip())
+    return m.group(1).strip() if m else ""
+
+def parse_interior(line):
+    m = re.match(r'(?i)^interior\\s+design\\s+(.{3,80})$', line.strip())
+    return m.group(1).strip() if m else ""
+
+def parse_name_from_pdf(pages_text, full_text):
+    """Try to find vessel or model name"""
+    # MY / M/Y prefix
+    m = re.search(r'(?i)^M/?Y\\.?\\s+([A-Z][A-Za-z0-9\\s\\'\\-]{2,40})', full_text, re.MULTILINE)
+    if m: return m.group(1).strip()
+    # "Vessel Name: X" pattern
+    m = re.search(r'(?im)^(?:vessel|yacht)\\s+name\\s*:?\\s*([^\\n]+)', full_text)
+    if m: return m.group(1).strip()
+    # Builder brochure: model name is often the large heading on page 1
+    # e.g. "PREDATOR 82" — all caps, short
+    if pages_text:
+        for line in pages_text[0].split('\\n')[:8]:
             line = line.strip()
-            if line and len(line) < 30 and re.match(r'^[A-Z][A-Za-z0-9\\s]+$', line):
-                return line
+            if re.match(r'^[A-Z][A-Z0-9\\s]{3,30}$', line) and len(line.split()) <= 4:
+                # Skip generic headings
+                if not re.match(r'^(STYLE|ACCOMMODATION|PERFORMANCE|FEATURES|SPECIFICATION)\\b', line):
+                    return line
     return ""
 
 def parse_description(text):
-    # Find longest paragraph (100+ chars) — skip lines that look like spec tables
     paras = re.split(r'\\n{2,}', text)
     candidates = []
     for p in paras:
         p = p.strip()
-        if len(p) > 150 and not re.search(r'(?i)(displacement|engine|beam|draft|loa|speed|capacity)', p[:50]):
-            candidates.append(p)
+        # Good description: 150+ chars, reads like prose, not pure spec table
+        if len(p) > 150 and p.count('\\n') < 10:
+            if not re.match(r'^\\d+\\s+[A-Z]', p):  # not a numbered spec section
+                if re.search(r'\\b(the|and|with|its|for|has|this|that|offers?)\\b', p, re.IGNORECASE):
+                    candidates.append(p)
     if candidates:
         return max(candidates, key=len)[:1500]
     return ""
@@ -190,28 +312,69 @@ def parse_description(text):
 # ── Main ──────────────────────────────────────────────────────────────────────
 pages_text = extract_pages(sys.argv[1])
 full_text = "\\n\\n".join(pages_text)
-cleaned = clean(full_text)
+cleaned   = clean(full_text)
 
 specs = {}
-for field, patterns in FIELD_DEFS:
-    val = extract_field_value(cleaned, patterns)
+
+# Primary extraction: structured patterns
+for field, label_pats, val_pat in FIELD_DEFS:
+    val = extract_field(cleaned, label_pats, val_pat)
     if val:
         specs[field] = val
 
-# Vessel name from raw (pre-clean) to catch M/Y in early pages
-name = parse_name(full_text, pages_text)
+# Special line-by-line parsers for credit lines that use single-space format
+for line in cleaned.split("\\n"):
+    if not specs.get("builder"):
+        v = parse_builder_name(line)
+        if v: specs["builder"] = v
+    if not specs.get("navalArchitect"):
+        v = parse_naval_arch(line)
+        if v: specs["navalArchitect"] = v
+    if not specs.get("exteriorDesign"):
+        v = parse_exterior(line)
+        if v: specs["exteriorDesign"] = v
+    if not specs.get("interiorDesign"):
+        v = parse_interior(line)
+        if v: specs["interiorDesign"] = v
+
+# Accommodation counts from summary line
+if not specs.get("guests"):
+    v = parse_accommodation(cleaned)
+    if v: specs["guests"] = v
+if not specs.get("crew"):
+    v = parse_crew(cleaned)
+    if v: specs["crew"] = v
+
+# Presence-based boolean/feature extraction
+for field, full_pat, short_pat in PRESENCE_DEFS:
+    if not specs.get(field):
+        v = extract_presence(cleaned, full_pat, short_pat)
+        if v: specs[field] = v
+
+# Name and description
+name = parse_name_from_pdf(pages_text, full_text)
 description = parse_description(cleaned)
 
-# Image URLs if any
-img_urls = re.findall(r'https?://[^\\s"<>\\x27]+\\.(?:jpe?g|png|webp)', full_text, re.IGNORECASE)
+# Hull material from construction section
+if not specs.get("hullMaterial"):
+    m = re.search(r'(?i)hand.?laid\\s+(GRP|FRP|alumin\\w+|steel|fiberglass)', cleaned)
+    if m: specs["hullMaterial"] = f"Hand-laid {m.group(1)}"
+
+# Year
+year_match = re.search(r'\\b(19[5-9]\\d|20[0-4]\\d)\\b', cleaned)
+year = int(year_match.group(1)) if year_match else None
+
+# Images
+img_urls = re.findall(r'https?://[^\\s"<>\\']+\\.(?:jpe?g|png|webp)', full_text, re.IGNORECASE)
 
 result = {
-    "raw_text": cleaned[:12000],
-    "specs": specs,
-    "name": name,
-    "description": description,
-    "images": list(set(img_urls))[:20],
+    "raw_text":   cleaned[:14000],
+    "specs":      specs,
+    "name":       name,
+    "description":description,
+    "images":     list(set(img_urls))[:20],
     "page_count": len(pages_text),
+    "year":       year,
 }
 print(json.dumps(result, ensure_ascii=False))
 `;
@@ -222,10 +385,8 @@ export async function POST(req: NextRequest) {
   let pdfPath = "";
 
   try {
-    // Write extraction script
     fs.writeFileSync(scriptPath, EXTRACT_SCRIPT);
 
-    // Parse multipart form
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
     if (!file) {
@@ -235,23 +396,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "File must be a PDF" }, { status: 400 });
     }
 
-    // Save PDF to temp file
     const ts = Date.now();
     pdfPath = path.join(tmpDir, `brochure_${ts}.pdf`);
     const buffer = Buffer.from(await file.arrayBuffer());
     fs.writeFileSync(pdfPath, buffer);
 
-    // Run extraction
     const { stdout } = await execFileAsync("python3", [scriptPath, pdfPath], {
       timeout: 45_000,
       maxBuffer: 5 * 1024 * 1024,
     });
 
     const extracted = JSON.parse(stdout.trim());
-
-    // The new script returns specs already mapped to VesselData field names
-    // Plus name and description directly
-    const vessel = mapSpecsToVessel(extracted.specs, extracted.description, extracted.raw_text, extracted.name);
+    const vessel = mapSpecsToVessel(
+      extracted.specs,
+      extracted.description,
+      extracted.raw_text,
+      extracted.name,
+      extracted.year,
+    );
 
     return NextResponse.json({
       ok: true,
@@ -269,53 +431,71 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// The new extraction script returns specs keyed by VesselData field names directly.
-// This function just copies them in, filling defaults and doing final cleanup.
 function mapSpecsToVessel(
   specs: Record<string, string>,
   description: string,
   rawText: string,
-  name?: string
+  name?: string,
+  year?: number | null,
 ) {
   const VESSEL_FIELDS = [
-    "loa","lwl","beam","draft","displacement","grossTonnage","classification","flagState",
-    "hullMaterial","hullForm","superstructure","exteriorDesign","interiorDesign","navalArchitect",
-    "engines","power","propellers","gearbox","maxSpeed","range","fuelTank","freshWater",
-    "holdingTank","lubeOil","guests","crew","staterooms","price","location","builder",
-    "stabilisers","waterMaker","bowThruster","sternThruster","gensets","airCon",
+    "loa","lwl","beam","beamMax","draft","airDraft","displacement","grossTonnage",
+    "classification","flagState","hullMaterial","hullForm","superstructure",
+    "exteriorDesign","interiorDesign","navalArchitect",
+    "engines","power","propulsion","propellers","gearbox",
+    "maxSpeed","cruiseSpeed","range",
+    "fuelTank","freshWater","holdingTank","lubeOil",
+    "guests","crew","staterooms","crewCabins","ownersCabin","guestCabins",
+    "price","location","builder",
+    "stabilisers","waterMaker","bowThruster","sternThruster",
+    "gensets","generatorKW","shorepower","voltageSystem","airCon",
+    "radar","chartPlotter","aisSystem","autopilot","satcom",
+    "fireSuppression","lifeRafts","navigation",
+    "tender","toys","jacuzzi","flybridge",
   ];
 
-  const v: Record<string, string | number | null | string[] | {src:string;alt:string}[]> = {
-    name: name || "",
+  const v: Record<string, unknown> = {
+    name:        name || "",
     description: description || "",
-    features: [],
-    images: [],
-    year: null,
-    sourceUrl: "",
+    features:    [],
+    images:      [],
+    year:        year || null,
+    sourceUrl:   "",
     stockNumber: "",
     livingSpace: "",
-    navigation: "",
-    crewCabins: "",
-    tender: "",
+    notes:       "",
   };
 
-  // Copy all extracted fields
   for (const f of VESSEL_FIELDS) {
     v[f] = specs[f] || "";
   }
 
-  // Extract year from price/location context or builder field
+  // Year fallback from raw text
   if (!v.year) {
-    const yearMatch = (specs.year || rawText).match(/\b(19[5-9]\d|20[0-4]\d)\b/);
-    if (yearMatch) {
-      const y = parseInt(yearMatch[1]);
+    const ym = rawText.match(/\b(19[5-9]\d|20[0-4]\d)\b/);
+    if (ym) {
+      const y = parseInt(ym[1]);
       if (y > 1900 && y <= new Date().getFullYear() + 10) v.year = y;
     }
   }
 
-  // Build images from any URLs found in raw text
+  // Images from any URLs embedded in the PDF
   const imgUrls = rawText.match(/https?:\/\/[^\s"'<>]+\.(?:jpe?g|png|webp)/gi) || [];
   v.images = [...new Set(imgUrls)].slice(0, 20).map((src: string) => ({ src, alt: "" }));
+
+  // Build features list from raw text — look for bullet-point style lines
+  const featureLines: string[] = [];
+  for (const line of rawText.split("\n")) {
+    const t = line.trim();
+    // Feature lines: short (8–120 chars), not a section header, not a pure measurement
+    if (t.length >= 8 && t.length <= 120 && /[a-z]/.test(t)) {
+      if (!/^[\d.\s]+$/.test(t) && !/^(page|fig|table|\d+\s+[A-Z])/i.test(t)) {
+        featureLines.push(t);
+      }
+    }
+  }
+  // Deduplicate and cap
+  v.features = [...new Set(featureLines)].slice(0, 30);
 
   return v;
 }

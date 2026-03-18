@@ -666,6 +666,12 @@ export default function BrochuresPage() {
   }
 
   /* ── Update existing brochure ── */
+  const allBrokers = [
+    { name:"Will Noftsinger", title:"Yacht Broker · Build Consultant of The Americas", email:"WN@DenisonYachting.com", mobile:"850.461.3342", office:"Denison Yachting · Fort Lauderdale, FL", photo:"https://cdn.denisonyachtsales.com/images/denison-update/users/photos/69af22d913e91.jpg", instagram:"@yachtslinger" },
+    { name:"Paolo Ameglio",   title:"Yacht Broker · Superyacht Division",              email:"PGA@DenisonYachting.com", mobile:"786.251.2588", office:"Denison Yachting · Fort Lauderdale, FL", photo:"https://cdn.denisonyachtsales.com/images/denison-update/users/photos/699c8a181e92f.jpg" },
+    { name:"Peter Quintal",   title:"Yacht Broker · Superyacht Division",              email:"Peter@DenisonYachting.com", mobile:"954.817.5662", office:"Denison Yachting · Fort Lauderdale, FL", photo:"https://cdn.denisonyachtsales.com/images/denison-update/users/photos/6855b2c3e4f81.jpg" },
+  ];
+
   async function handleUpdate() {
     if (!editingId || !vessel) return;
     setStep("saving");
@@ -827,11 +833,6 @@ export default function BrochuresPage() {
         holdingTank: formatCapacityClient(vessel.holdingTank || ""),
       } : vessel;
 
-      const allBrokers = [
-        { name:"Will Noftsinger", title:"Yacht Broker · Build Consultant of The Americas", email:"WN@DenisonYachting.com", mobile:"850.461.3342", office:"Denison Yachting · Fort Lauderdale, FL", photo:"https://cdn.denisonyachtsales.com/images/denison-update/users/photos/69af22d913e91.jpg", instagram:"@yachtslinger" },
-        { name:"Paolo Ameglio", title:"Yacht Broker · Superyacht Division", email:"PGA@DenisonYachting.com", mobile:"786.251.2588", office:"Denison Yachting · Fort Lauderdale, FL", photo:"https://cdn.denisonyachtsales.com/images/denison-update/users/photos/699c8a181e92f.jpg" },
-        { name:"Peter Quintal", title:"Yacht Broker · Superyacht Division", email:"Peter@DenisonYachting.com", mobile:"954.817.5662", office:"Denison Yachting · Fort Lauderdale, FL", photo:"https://cdn.denisonyachtsales.com/images/denison-update/users/photos/6855b2c3e4f81.jpg" },
-      ];
       const brokers = allBrokers.filter(b => selectedBrokers.has(b.name));
       const res = await fetch("/api/brochures/create", {
         method: "POST", headers: { "Content-Type": "application/json" },
