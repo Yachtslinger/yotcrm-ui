@@ -143,7 +143,7 @@ export const SPEC_MAP: { patterns: string[]; field: keyof VesselData }[] = [
   { patterns: ["refit detail", "refit description", "refit info"],      field: "refitDetails" },
 
   // ── Dimensions ────────────────────────────────────────────────────────────
-  { patterns: ["loa", "length overall", "length (oa)", "hull length", "length over all", "length, m", "length (m)", "length m"], field: "loa" },
+  { patterns: ["loa", "length overall", "length (oa)", "hull length", "length over all", "length, m", "length (m)", "length m", "^length$"], field: "loa" },
   { patterns: ["lwl", "waterline length", "length waterline"],          field: "lwl" },
   { patterns: ["beam max", "maximum beam", "max beam"],                 field: "beamMax" },
   { patterns: ["beam", "breadth", "beam, m", "beam (m)", "beam m"],    field: "beam" },
@@ -201,7 +201,7 @@ export const SPEC_MAP: { patterns: string[]; field: keyof VesselData }[] = [
   { patterns: ["a/c make", "air con make", "hvac make"],               field: "airConMake" },
 
   // ── Tanks ─────────────────────────────────────────────────────────────────
-  { patterns: ["fuel capacity", "fuel tank", "fuel, l", "fuel (l)", "fuel l"],  field: "fuelTank" },
+  { patterns: ["fuel capacity", "fuel tank", "fuel, l", "fuel (l)", "fuel l", "^fuel$"],  field: "fuelTank" },
   { patterns: ["fuel type"],                                            field: "fuelType" },
   { patterns: ["fresh water", "freshwater", "water capacity", "water tank", "fresh water, l", "fresh water (l)"], field: "freshWater" },
   { patterns: ["holding tank", "black water"],                         field: "holdingTank" },

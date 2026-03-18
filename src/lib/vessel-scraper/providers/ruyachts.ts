@@ -78,6 +78,21 @@ function parseRUYachts(url: string, html: string): VesselData {
     assignSpec(vessel, $(el).text(), $(el).next("dd").text());
   });
 
+  // ── Description (DOM) ────────────────────────────────────────────────────
+  // ruyachts prose lives in div.container.mid > div.wrapper > div.txt,
+  // distinct from the spec grid (div.item > div.wrapper). Must run BEFORE
+  // JSON-LD so the SEO "WebPage" description node doesn't clobber it.
+  if (!vessel.description) {
+    $("div.container div.wrapper .txt").each((_, el) => {
+      const txt = clean($(el).text());
+      // Prose: >80 chars, >12 words, doesn't start with a digit (not a spec value)
+      if (txt.length > 80 && txt.split(" ").length > 12 && !/^\d/.test(txt)) {
+        vessel.description = txt;
+        return false; // cheerio: stop iteration
+      }
+    });
+  }
+
   // ── JSON-LD structured data ───────────────────────────────────────────────
   $('script[type="application/ld+json"]').each((_, el) => {
     try {
@@ -86,7 +101,7 @@ function parseRUYachts(url: string, html: string): VesselData {
       for (const node of nodes) {
         if (!node || typeof node !== "object") continue;
         if (node.name && !vessel.name) vessel.name = cleanHeadline(String(node.name));
-        if (node.description && !vessel.description) vessel.description = clean(String(node.description));
+        // Skip JSON-LD description — it's always the generic SEO meta on ruyachts
         const props = Array.isArray(node.additionalProperty) ? node.additionalProperty : [];
         for (const p of props as { name?: string; value?: string }[]) {
           if (p.name && p.value) assignSpec(vessel, p.name, String(p.value));
@@ -94,18 +109,6 @@ function parseRUYachts(url: string, html: string): VesselData {
       }
     } catch { /* skip */ }
   });
-
-  // ── Description ──────────────────────────────────────────────────────────
-  // Populated above from spec grid prose block; fallback to page-level selectors.
-  if (!vessel.description) {
-    const desc =
-      clean($(".description, [class*='overview'] p, article p, [class*='about'] p").first().text()) ||
-      clean($('meta[property="og:description"]').attr("content"));
-    // Reject generic SEO meta descriptions (contain "for Sale" and are short)
-    if (desc && !(desc.length < 120 && /for sale/i.test(desc))) {
-      vessel.description = desc;
-    }
-  }
 
   // ── Price ─────────────────────────────────────────────────────────────────
   if (!vessel.price) {
