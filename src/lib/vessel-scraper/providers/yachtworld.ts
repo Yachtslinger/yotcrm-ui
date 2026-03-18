@@ -250,9 +250,11 @@ export async function scrapeYachtWorld(url: string): Promise<VesselData> {
     console.warn("[YachtWorld] __REDUX_STATE__ found but data.id missing — falling through to Puppeteer");
   }
 
-  // ── Strategy 2: Puppeteer + stealth → window.__REDUX_STATE__ ───────────────
-  // puppeteer-extra-plugin-stealth patches 20+ browser fingerprints so CF
-  // treats the headless browser as a real user — bypasses JS challenge pages.
+  // ── Strategy 2: Puppeteer + stealth → page.content() → extractReduxState ────
+  // After stealth bypasses CF, we grab the rendered HTML via page.content() and
+  // run the same extractReduxState() + mapReduxToVessel() as Strategy 1.
+  // This avoids Puppeteer JSON serialization issues entirely — the SSR-embedded
+  // __REDUX_STATE__ is a text string in the HTML, not a runtime window object.
   puppeteerExtra.use(StealthPlugin());
   let browser = null;
   try {
@@ -264,177 +266,23 @@ export async function scrapeYachtWorld(url: string): Promise<VesselData> {
     const page = await (browser as any).newPage();
     await page.setUserAgent(UA);
     await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" });
-    // Use domcontentloaded then explicitly wait for __REDUX_STATE__ to be set.
-    // networkidle2 fires too early on CF challenge pages — this ensures the real
-    // YachtWorld listing page has SSR-rendered its Redux state before we evaluate.
+    // domcontentloaded is enough — __REDUX_STATE__ is in SSR HTML, not dynamic
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
-    await page.waitForFunction(
-      () => !!(window as any).__REDUX_STATE__?.app?.data?.id,
-      { timeout: 20000 }
-    ).catch(() => {/* CF challenge or listing not found — evaluate will return null */});
 
-    // __REDUX_STATE__ is set by SSR — available immediately without waiting for analytics
-    // NOTE: We extract ONLY primitives inside evaluate() to avoid Puppeteer JSON
-    // serialization failures caused by large HTML strings (descriptions[78]) and
-    // complex nested objects in the full Redux state.
-    const reduxData = await page.evaluate(() => {
-      const d = (window as any).__REDUX_STATE__?.app?.data;
-      if (!d) return null;
-      const dims    = d.specifications?.dimensions;
-      const spd     = d.specifications?.speedDistance;
-      const acc     = d.specifications?.accommodation;
-      const engines: any[] = d.propulsion?.engines || [];
-      const tanks   = d.tanks || {};
-      const media: any[] = d.media || [];
-      return {
-        // Identity
-        id:          d.id,
-        boatName:    d.boatName || "",
-        make:        d.make || "",
-        year:        d.year || 0,
-        fuelType:    d.fuelType || "",
-        class:       d.class || "",
-        type:        d.type || "",
-        // Description
-        descriptionNoHTML: (d.descriptionNoHTML || "").slice(0, 2000),
-        // Hull
-        hull: { material: d.hull?.material || "", shape: d.hull?.shape || "", hin: d.hull?.hin || "" },
-        // Price
-        price: d.price?.type?.amount?.USD || 0,
-        // Location
-        location: { city: d.location?.address?.city || "", sub: d.location?.address?.subdivision || "", country: d.location?.address?.country || "" },
-        // Dimensions
-        dims: dims ? {
-          loaft: dims.lengths?.nominal?.ft || 0, loam: dims.lengths?.nominal?.m || 0,
-          beamft: dims.beam?.ft || 0, beamm: dims.beam?.m || 0,
-          draftft: dims.maxDraft?.ft || 0, draftm: dims.maxDraft?.m || 0,
-          draftMinft: dims.minDraft?.ft || 0,
-          airDraftft: dims.maxBridge?.ft || 0,
-        } : null,
-        // Performance
-        spd: spd ? {
-          maxKn: spd.maxSpeed?.kn || 0, cruiseKn: spd.cruisingSpeed?.kn || 0, rangeNmi: spd.range?.nmi || 0,
-        } : null,
-        // Accommodation
-        acc: acc ? {
-          cabins: acc.cabins ?? -1, guestCabins: acc.guestCabins ?? -1,
-          crewCabins: acc.crewCabins ?? -1, passengers: acc.passengers ?? -1, crew: acc.crew ?? -1,
-        } : null,
-        // Engines
-        engines: engines.map((e: any) => ({
-          make: e.make || "", model: e.model || "",
-          hp: e.power?.hp || 0, hours: e.hours ?? -1,
-          fuel: e.fuel || "", driveType: e.driveType || "",
-        })),
-        // Tanks
-        tanks: {
-          fuelGal: tanks.fuel?.[0]?.capacity?.gal || 0,  fuelL: tanks.fuel?.[0]?.capacity?.l || 0,
-          freshGal: (tanks.fresh || tanks.freshWater)?.[0]?.capacity?.gal || 0,
-          freshL:   (tanks.fresh || tanks.freshWater)?.[0]?.capacity?.l   || 0,
-          holdGal: tanks.holding?.[0]?.capacity?.gal || 0, holdL: tanks.holding?.[0]?.capacity?.l || 0,
-        },
-        // Media — normalise protocol-relative URLs (//images.boatsgroup.com/...) to https:
-        images: media
-          .filter((m: any) => (m.mediaType === "image" || m.originalImageUrl || m.url) && !(/logo|icon|sprite|flag|avatar/i.test(m.url || "")))
-          .map((m: any) => {
-            let src = m.originalImageUrl || m.url || m.thumbnailUrl || "";
-            if (src.startsWith("//")) src = "https:" + src;
-            return { src, title: m.title || "" };
-          })
-          .filter((m: any) => m.src.startsWith("http")),
-        videos: media
-          .filter((m: any) => m.mediaType === "video" || m.videoUrl)
-          .map((m: any) => ({ url: m.videoUrl || m.url || "", thumb: m.thumbnailUrl || "", title: m.title || "" }))
-          .filter((m: any) => m.url),
-      };
-    });
+    // Get rendered HTML from Puppeteer and parse Redux state from it
+    const renderedHtml: string = await page.content();
+    console.log(`[YachtWorld] Puppeteer got ${renderedHtml.length} bytes, hasRedux=${renderedHtml.includes("__REDUX_STATE__")}`);
 
-    if (reduxData && reduxData.id) {
-      // Map the extracted primitives to VesselData
-      const d = reduxData;
-      if (d.boatName)  vessel.name    = d.boatName.trim();
-      if (d.make)      vessel.builder = d.make.trim();
-      if (d.year)      vessel.year    = d.year;
-      if (d.hull?.hin)      (vessel as any).hullNumber   = d.hull.hin;
-      if (d.hull?.material) vessel.hullMaterial          = d.hull.material;
-      if (d.hull?.shape)    vessel.hullForm              = d.hull.shape;
-      if (d.fuelType)       (vessel as any).fuelType     = d.fuelType;
-      if (d.class && !vessel.hullForm) vessel.hullForm   = d.class.replace(/-/g," ");
-      if (d.price)     vessel.price   = `$${Number(d.price).toLocaleString("en-US")}`;
-      const loc = d.location;
-      if (loc && (loc.city || loc.sub || loc.country) && !vessel.location)
-        vessel.location = [loc.city, loc.sub, loc.country].filter(Boolean).join(", ");
-      if (d.descriptionNoHTML && !vessel.description) vessel.description = d.descriptionNoHTML.trim();
-      // Dims
-      if (d.dims) {
-        const dim = d.dims;
-        if (dim.loaft   && !vessel.loa)   vessel.loa   = `${dim.loaft} ft / ${dim.loam} m`;
-        if (dim.beamft  && !vessel.beam)  vessel.beam  = `${dim.beamft} ft / ${dim.beamm} m`;
-        if (dim.draftft && !vessel.draft) vessel.draft = `${dim.draftft} ft / ${dim.draftm} m`;
-        if (dim.draftMinft) (vessel as any).draftMin  = `${dim.draftMinft} ft`;
-        if (dim.airDraftft) (vessel as any).airDraft  = `${dim.airDraftft} ft`;
+    if (renderedHtml.includes("__REDUX_STATE__")) {
+      const redux = extractReduxState(renderedHtml);
+      const data  = (redux as any)?.app?.data;
+      if (data && data.id) {
+        mapReduxToVessel(data, vessel);
+      } else {
+        console.warn("[YachtWorld] Puppeteer: __REDUX_STATE__ found but data.id missing");
       }
-      // Perf
-      if (d.spd) {
-        if (d.spd.maxKn    && !vessel.maxSpeed)    vessel.maxSpeed    = `${d.spd.maxKn} kn`;
-        if (d.spd.cruiseKn && !vessel.cruiseSpeed) vessel.cruiseSpeed = `${d.spd.cruiseKn} kn`;
-        if (d.spd.rangeNmi && !vessel.range)       vessel.range       = `${d.spd.rangeNmi} nmi`;
-      }
-      // Acc
-      if (d.acc) {
-        if (d.acc.cabins >= 0      && !vessel.staterooms) vessel.staterooms  = String(d.acc.cabins);
-        if (d.acc.guestCabins >= 0)  (vessel as any).guestCabins            = String(d.acc.guestCabins);
-        if (d.acc.crewCabins >= 0)   vessel.crewCabins                       = String(d.acc.crewCabins);
-        if (d.acc.passengers >= 0  && !vessel.guests)     vessel.guests      = String(d.acc.passengers);
-        if (d.acc.crew >= 0        && !vessel.crew)       vessel.crew        = String(d.acc.crew);
-      }
-      // Engines
-      if (d.engines?.length && !vessel.engines) {
-        const e0 = d.engines[0];
-        const parts = [e0.make, e0.model].filter(Boolean);
-        if (parts.length)         vessel.engines      = parts.join(" ");
-        if (e0.hp)                vessel.power        = `${e0.hp} hp`;
-        if (e0.hours >= 0)        (vessel as any).engineHours = `${e0.hours} hrs`;
-        if (e0.fuel)              (vessel as any).fuelType    = e0.fuel;
-        if (e0.driveType)         vessel.propulsion   = e0.driveType;
-        if (d.engines.length > 1) vessel.engines      = `${d.engines.length}x ${vessel.engines}`;
-      }
-      // Tanks
-      if (d.tanks) {
-        const t = d.tanks;
-        if (t.fuelGal  && !vessel.fuelTank)   vessel.fuelTank   = `${Math.round(t.fuelGal).toLocaleString("en-US")} gal / ${Math.round(t.fuelL).toLocaleString("en-US")} lt`;
-        if (t.freshGal && !vessel.freshWater) vessel.freshWater = `${Math.round(t.freshGal).toLocaleString("en-US")} gal / ${Math.round(t.freshL).toLocaleString("en-US")} lt`;
-        if (t.holdGal  && !vessel.holdingTank) vessel.holdingTank = `${Math.round(t.holdGal)} gal / ${Math.round(t.holdL)} lt`;
-      }
-      // Media
-      if (d.images?.length) {
-        const seen = new Set(vessel.images.map((i: any) => i.src));
-        for (const img of d.images) {
-          const up = upscale(img.src);
-          if (!seen.has(up)) { seen.add(up); vessel.images.push({ src: up, alt: img.title || vessel.name }); }
-        }
-      }
-      if (d.videos?.length) {
-        (vessel as any).videos = d.videos.map((v: any) => ({ url: v.url, type: "other", thumbnail: v.thumb, title: v.title }));
-      }
-    }
-
-    // NOTE: We rely exclusively on the media[] array from __REDUX_STATE__ for images.
-    // A broad DOM querySelectorAll("img") sweep catches ads, recommended listings,
-    // and duplicate thumbnails — so we skip it entirely.
-
-    // Price fallback from DOM if __REDUX_STATE__ didn't have it
-    if (!vessel.price) {
-      const priceText: string = await page.evaluate(() => {
-        for (const el of Array.from(document.querySelectorAll("*"))) {
-          if ((el as Element).children.length <= 2 && /US\$[\d,]{4,}/.test((el as Element).textContent || "")) {
-            return (el as Element).textContent?.trim() || "";
-          }
-        }
-        return "";
-      });
-      const pm = priceText.match(/US\$([\d,]+)/);
-      if (pm) vessel.price = `$${pm[1]}`;
+    } else {
+      console.warn("[YachtWorld] Puppeteer: __REDUX_STATE__ not in rendered HTML (CF challenge?)");
     }
 
     vessel.images = dedupeImages(vessel.images);
