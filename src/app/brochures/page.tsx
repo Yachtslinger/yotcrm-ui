@@ -366,8 +366,16 @@ export default function BrochuresPage() {
       setVessel(prepVessel(merged));
       setStep("preview");
 
-      const fieldsFilled = Object.values(merged).filter(v => v && v !== "" && v !== null).length;
-      showToast(`Built from ${vessels.length} source${vessels.length > 1 ? "s" : ""} · ${fieldsFilled} fields populated`, "success");
+      // If scrape returned sparse data (no images, no price) — auto-open paste panel
+      const isSparse = merged.images.length === 0 && !merged.price;
+      const hasYW = activeUrls.some(u => /yachtworld\.com|boattrader\.com/i.test(u));
+      if (isSparse && hasYW) {
+        setShowPasteImport(true);
+        showToast("YachtWorld blocked auto-scrape — paste the page source below to complete the brochure", "error");
+      } else {
+        const fieldsFilled = Object.values(merged).filter(v => v && v !== "" && v !== null).length;
+        showToast(`Built from ${vessels.length} source${vessels.length > 1 ? "s" : ""} · ${fieldsFilled} fields populated`, "success");
+      }
     } catch (err) {
       showToast(`Build failed: ${err instanceof Error ? err.message : "unknown error"}`, "error");
       setStep("list");
@@ -382,217 +390,190 @@ export default function BrochuresPage() {
     showToast(`PDF staged: ${file.name} — click Build Brochure to include it`, "success");
   }
 
-  /* ── Paste import — comprehensive parser for any listing page text ── */
+  /* ── Paste import — handles raw HTML (View Source) AND plain text ── */
   function handlePasteImport() {
-    const text = pasteText.trim();
-    if (!text) return;
+    const raw = pasteText.trim();
+    if (!raw) return;
 
+    const isHtml = /^<!doctype\s+html|^<html/i.test(raw) || raw.includes("</head>") || raw.includes("</body>");
     const v: Partial<VesselData> = {};
-
-    // Helper: grab value after "Label: value" anywhere in text (case-insensitive)
-    const grab = (pattern: RegExp): string => {
-      const m = text.match(pattern);
-      return m ? m[1].trim().replace(/\s+/g, " ") : "";
-    };
-
-    // ── Identity ──────────────────────────────────────────────────────────
-    // Name: first substantial ALL-CAPS or Title Case line that isn't a section header
-    const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-    for (const line of lines) {
-      if (line.length > 3 && line.length < 60 &&
-          !/^(SPECIFICATIONS|HIGHLIGHTS|ELECTRICAL|ELECTRONICS|MACHINERY|GALLEY|SAFETY|REFIT|MISC|DECK|ANCHOR|COMMUNICATION|CONTROL|A\/V|AUDIO)/i.test(line) &&
-          !/^(Yacht Details|Location:|Engines:|Last Updated|Asking Price|Maximum Speed|Max Draft|Cruising Speed|Beam:|Hull|Fuel|Fresh|Holding|Max Pass|Cabins|Heads)/i.test(line)) {
-        v.name = line.replace(/\s*HIGHLIGHTS?$/i, "").replace(/\s*ADDITIONAL\s*INFORMATION$/i, "").trim();
-        break;
-      }
-    }
-
-    const yearM = text.match(/\b(19[5-9]\d|20[0-4]\d)\b/);
-    if (yearM) v.year = parseInt(yearM[1]);
-
-    const priceM = text.match(/(?:Asking Price[^$€£\d]*|price[^$€£\d]{0,10})(US\$[\d,]+|\$[\d,]+|€[\d,]+|£[\d,]+)/i);
-    if (priceM) v.price = priceM[1];
-    else {
-      const priceM2 = text.match(/\b(US\$[\d,]+|\$[\d,]+|€[\d,]+)\b/);
-      if (priceM2) v.price = priceM2[1];
-    }
-
-    const locM = text.match(/Location:\s*([^\n]{3,50})/i);
-    if (locM) v.location = locM[1].trim();
-
-    // Builder from "XX' Make YYYY" pattern
-    const builderM = text.match(/\d+['\s]+([\w]+(?:\s+[\w]+)?)\s+\d{4}/);
-    if (builderM && !v.name?.toLowerCase().includes(builderM[1].toLowerCase())) {
-      v.builder = builderM[1];
-    }
-
-    // ── Dimensions ────────────────────────────────────────────────────────
-    const loaM = grab(/(?:LOA|Length[^:\n]{0,20}):\s*([\d.]+\s*(?:m|ft|')(?:\s*[\d"]+)?)/i);
-    if (loaM) v.loa = loaM;
-
-    const beamM = grab(/Beam:\s*([\d'."\s]+(?:ft|m|'|")?)/i);
-    if (beamM) v.beam = beamM;
-
-    const draftM = grab(/(?:Max Draft|Draft|Draught):\s*([\d'."\s]+(?:ft|m|'|")?)/i);
-    if (draftM) v.draft = draftM;
-
-    // ── Hull ──────────────────────────────────────────────────────────────
-    const hullM = grab(/Hull(?:\s+Material)?:\s*([^\n]{2,40})/i);
-    if (hullM) v.hullMaterial = hullM;
-
-    // ── Performance ───────────────────────────────────────────────────────
-    const maxSpdM = grab(/(?:Maximum Speed|Top Speed|Max Speed):\s*([\d.]+\s*kn(?:ots?)?)/i);
-    if (maxSpdM) v.maxSpeed = maxSpdM;
-
-    const cruiseSpdM = grab(/Cruising Speed:\s*([\d.]+\s*kn(?:ots?)?)/i);
-    if (cruiseSpdM) v.cruiseSpeed = cruiseSpdM;
-
-    // ── Engines ───────────────────────────────────────────────────────────
-    const engM = grab(/Engines?:\s*([^\n]{2,80})/i);
-    if (engM) v.engines = engM;
-
-    const engHoursM = text.match(/(?:Port\s+)?(?:Engine\s+)?Hours[^:\n]*:\s*([\d,]+)/i) ||
-                      text.match(/(\d[\d,]+)\s*(?:total\s+)?hours?/i);
-    if (engHoursM) v.engineHours = engHoursM[1];
-
-    // ── Tanks ─────────────────────────────────────────────────────────────
-    // Denison format: "1 x 1347|gallon" or just "1347 gallon"
-    const fuelM = text.match(/Fuel\s*(?:Tank)?:\s*(?:\d+\s*x\s*)?([\d,]+)\s*[|]?\s*(?:gallon|liter|litre|gal|lt)/i) ||
-                  text.match(/Fuel[^:\n]*:\s*(\d[\d,]+)/i);
-    if (fuelM) v.fuelTank = `${fuelM[1].replace(/,/g,"")} gal`;
-
-    const fwM = text.match(/Fresh\s*Water:\s*(?:\d+\s*x\s*)?([\d,]+)\s*[|]?\s*(?:gallon|liter|litre|gal|lt)/i);
-    if (fwM) v.freshWater = `${fwM[1].replace(/,/g,"")} gal`;
-
-    const holdM = text.match(/Holding(?:\s*Tank)?:\s*(?:\d+\s*x\s*)?([\d,]+)\s*[|]?\s*(?:gallon|liter|litre|gal|lt)/i);
-    if (holdM) v.holdingTank = `${holdM[1].replace(/,/g,"")} gal`;
-
-    // ── Accommodation ─────────────────────────────────────────────────────
-    const guestsM = grab(/(?:Max\s+Passengers?|Guests?|Pax):\s*(\d+)/i);
-    if (guestsM) v.guests = guestsM;
-
-    const cabinsM = grab(/(?:Cabins?|Staterooms?):\s*(\d+)/i);
-    if (cabinsM) v.staterooms = cabinsM;
-
-    // ── Electrical & Generators ───────────────────────────────────────────
-    // Main generator line(s) — grab first generator description
-    const genM = grab(/(?:Main\s+Generator|Generator\s+Set|Genset)[^:\n]*-?\s*([^\n]{5,80})/i) ||
-                 grab(/(?:Main\s+Generator|Generator)[^:\n]*:\s*([^\n]{5,80})/i);
-    if (genM) v.gensets = genM;
-
-    const genKwM = grab(/(?:Generator|Genset)[^:\n]*?(\d+(?:\.\d+)?\s*[kK][wW])/);
-    if (genKwM) v.generatorKW = genKwM;
-
-    const shoreM = grab(/Shore\s*(?:Power|Cable)[^:\n]*:\s*([^\n]{3,60})/i);
-    if (shoreM) v.shorepower = shoreM;
-
-    const voltM = grab(/(?:Main\s+Power\s+System|Voltage|Power\s+System)[^:\n]*:\s*([^\n]{2,40})/i);
-    if (voltM) v.voltageSystem = voltM;
-
-    const airConM = grab(/Air\s+Cond[a-z]*[^:\n]*:\s*([^\n]{3,80})/i);
-    if (airConM) v.airCon = airConM;
-
-    // ── Propulsion extras ─────────────────────────────────────────────────
-    const bowM = grab(/Bow\s+(?:and\s+Stern\s+)?Thruster[s]?[^:\n]*-?\s*([^\n]{3,80})/i);
-    if (bowM) v.bowThruster = bowM;
-
-    const sternM = grab(/Stern\s+Thruster[s]?[^:\n]*-?\s*([^\n]{3,80})/i);
-    if (sternM) v.sternThruster = sternM;
-
-    // ── Navigation & Comms ────────────────────────────────────────────────
-    // Collect all navigation equipment lines into one block
-    const navItems: string[] = [];
-    const radarM = text.match(/Radar[^:\n]*[-:]\s*([^\n]{3,60})/i);
-    if (radarM) { v.radar = radarM[1].trim(); navItems.push(radarM[1].trim()); }
-
-    const plotterM = text.match(/Plotter[^:\n]*[-:]\s*([^\n]{3,60})/i);
-    if (plotterM) v.chartPlotter = plotterM[1].trim();
-
-    const aisM = text.match(/AIS[^:\n]*[-:]\s*([^\n]{3,60})/i) ||
-                 text.match(/\bAIS\b[^\n]*/i);
-    if (aisM) v.aisSystem = aisM[1]?.trim() || "SIMRAD AIS";
-
-    const autopilotM = text.match(/Autopilot[^:\n]*[-:]\s*([^\n]{3,60})/i);
-    if (autopilotM) v.autopilot = autopilotM[1].trim();
-
-    const satcomM = text.match(/(?:Satellite\s+Comm|VSAT|Satcom|Starlink)[^:\n]*[-:]\s*([^\n]{3,60})/i) ||
-                    text.match(/Starlink/i);
-    if (satcomM) v.satcom = satcomM[1]?.trim() || "Starlink";
-
-    // GPS/plotter block → navigation field
-    const gpsM = text.match(/GPS[^:\n]*[-:]\s*([^\n]{3,60})/i);
-    if (gpsM) navItems.push(gpsM[1].trim());
-    const echoM = text.match(/Echosounder[^:\n]*[-:]\s*([^\n]{3,60})/i);
-    if (echoM) navItems.push(echoM[1].trim());
-    if (navItems.length) v.navigation = navItems.join("; ");
-
-    const anchorM = grab(/Anchor\s*Winch[^:\n]*[-:]\s*([^\n]{3,80})/i);
-    if (anchorM) v.anchoring = anchorM;
-
-    const windlassM = grab(/(?:Anchor\s*Winch|Windlass)[^:\n]*[-:]\s*([^\n]{3,80})/i);
-    if (windlassM) v.windlass = windlassM;
-
-    // ── Safety ────────────────────────────────────────────────────────────
-    const fireM = grab(/(?:Fire\s+Suppression|Fixed\s+Fire|Fire\s+Pump)[^:\n]*[-:?\s]\s*([^\n]{3,60})/i);
-    if (fireM) v.fireSuppression = fireM;
-
-    // ── Refit details ─────────────────────────────────────────────────────
-    // Collect refit/upgrade info into refitDetails
-    const refitSection = text.match(/REFIT\s+UPGRADES?([\s\S]*?)(?:\n[A-Z\s]{5,}\n|$)/i);
-    if (refitSection) {
-      const refitLines = refitSection[1].trim().split("\n")
-        .map(l => l.trim()).filter(l => l.length > 3).slice(0, 10);
-      if (refitLines.length) v.refitDetails = refitLines.join(" · ");
-    }
-
-    // Refit year: "Full Paint 2023" or "New TDS Teak Decks 2025"
-    const refitYrM = text.match(/(?:Full Paint|Refit|New Teak|Major Refit)\s+(20\d\d|19\d\d)/i);
-    if (refitYrM) v.refitYear = refitYrM[1];
-
-    // ── Images: boatsgroup CDN ────────────────────────────────────────────
-    const imgRegex = /https:\/\/images\.boatsgroup\.com\/[^\s"')]+\.(?:jpg|jpeg|png|webp)/gi;
-    const imgMatches = text.match(imgRegex) || [];
-    const seen = new Set<string>();
     const images: { src: string; alt: string }[] = [];
-    for (const src of imgMatches) {
-      const big = src.replace(/[?&]w=\d+/, m => m.replace(/\d+/, "1200"))
-                     .replace(/[?&]format=webp/, "").replace(/[?&]exact/, "");
-      if (!seen.has(big) && !/logo|icon|sprite/i.test(big)) {
-        seen.add(big);
-        images.push({ src: big, alt: "" });
+
+    if (isHtml) {
+      // ── HTML path: use DOMParser to extract everything ──────────────────
+      const doc = new DOMParser().parseFromString(raw, "text/html");
+
+      // 1. JSON-LD (richest source — YachtWorld, BoatTrader embed everything here)
+      doc.querySelectorAll('script[type="application/ld+json"]').forEach(el => {
+        try {
+          const json = JSON.parse(el.textContent || "");
+          const nodes = Array.isArray(json) ? json : json["@graph"] ? json["@graph"] : [json];
+          for (const node of nodes) {
+            if (!node) continue;
+            if ((node["@type"] || "").match(/Product|Vehicle|Boat/i)) {
+              if (!v.name && node.name) v.name = String(node.name).trim();
+              if (!v.description && node.description) v.description = String(node.description).trim();
+              if (!v.year && (node.productionDate || node.vehicleModelDate)) {
+                const yr = parseInt(node.productionDate || node.vehicleModelDate);
+                if (yr > 1900) v.year = yr;
+              }
+              if (!v.builder && node.brand?.name) v.builder = String(node.brand.name).trim();
+              if (!v.builder && node.manufacturer?.name) v.builder = String(node.manufacturer.name).trim();
+              const offers = node.offers;
+              if (offers?.price && !v.price) {
+                const p = Number(offers.price);
+                const c = String(offers.priceCurrency || "USD");
+                v.price = c === "EUR" ? `€${p.toLocaleString("en-US")}` : `$${p.toLocaleString("en-US")}`;
+              }
+              // Location from offer
+              const addr = offers?.availableAtOrFrom?.address;
+              if (addr && !v.location) {
+                v.location = [addr.addressLocality, addr.addressRegion, addr.addressCountry].filter(Boolean).join(", ");
+              }
+              // additionalProperty specs
+              const props = Array.isArray(node.additionalProperty) ? node.additionalProperty : [];
+              for (const prop of props) {
+                if (prop.name && prop.value) _assignFromProp(v, prop.name, String(prop.value));
+              }
+              // Images from JSON-LD
+              const imgs = Array.isArray(node.image) ? node.image : node.image ? [node.image] : [];
+              for (const img of imgs) {
+                const src = typeof img === "string" ? img : img?.url || "";
+                if (src && src.startsWith("http") && !/logo|icon|sprite/i.test(src))
+                  images.push({ src: _upscale(src), alt: "" });
+              }
+            }
+          }
+        } catch { /* skip malformed */ }
+      });
+
+      // 2. Meta tags fallback
+      const metaP = (n: string) => doc.querySelector(`meta[property="${n}"]`)?.getAttribute("content") || "";
+      const metaN = (n: string) => doc.querySelector(`meta[name="${n}"]`)?.getAttribute("content") || "";
+      if (!v.name)     v.name        = metaP("og:title")       || metaN("title")       || "";
+      if (!v.description) v.description = metaP("og:description") || metaN("description") || "";
+      if (!v.price) {
+        const ogPrice = metaP("product:price:amount") || metaP("og:price:amount");
+        if (ogPrice) {
+          const c = metaP("product:price:currency") || "USD";
+          v.price = c === "EUR" ? `€${Number(ogPrice).toLocaleString("en-US")}` : `$${Number(ogPrice).toLocaleString("en-US")}`;
+        }
+      }
+      const ogImg = metaP("og:image");
+      if (ogImg && !images.some(i => i.src === ogImg)) images.push({ src: _upscale(ogImg), alt: "" });
+
+      // 3. All boatsgroup CDN image tags (data-src, src, srcset)
+      const seen = new Set(images.map(i => i.src));
+      doc.querySelectorAll("img[data-src], img[src]").forEach(img => {
+        const src = img.getAttribute("data-src") || img.getAttribute("src") || "";
+        if (/boatsgroup\.com/i.test(src) && !/logo|icon|sprite/i.test(src)) {
+          const up = _upscale(src);
+          if (!seen.has(up)) { seen.add(up); images.push({ src: up, alt: "" }); }
+        }
+      });
+      // Also sweep raw HTML for any missed boatsgroup URLs (they may be in JS/next data)
+      const bgRx = /https:\/\/images\.boatsgroup\.com\/resize\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp)[^\s"'<>]*/gi;
+      let m: RegExpExecArray | null;
+      while ((m = bgRx.exec(raw)) !== null) {
+        const up = _upscale(m[0]);
+        if (!seen.has(up) && !/logo|icon|sprite/i.test(up)) { seen.add(up); images.push({ src: up, alt: "" }); }
+      }
+
+      // 4. DOM spec tables
+      doc.querySelectorAll("dt").forEach(dt => {
+        const dd = dt.nextElementSibling;
+        if (dd?.tagName === "DD") _assignFromProp(v, dt.textContent || "", dd.textContent || "");
+      });
+      doc.querySelectorAll("table tr").forEach(row => {
+        const cells = row.querySelectorAll("th, td");
+        if (cells.length >= 2) _assignFromProp(v, cells[0].textContent || "", cells[1].textContent || "");
+      });
+
+      // 5. Location from URL or page
+      if (!v.location) {
+        const locEl = doc.querySelector("[class*='location'], [data-testid*='location']");
+        if (locEl) v.location = (locEl.textContent || "").trim();
+      }
+
+      // 6. Year from name or page title if not yet found
+      if (!v.year) {
+        const yearM = (v.name || "").match(/\b(19[5-9]\d|20[0-4]\d)\b/);
+        if (yearM) v.year = parseInt(yearM[1]);
+      }
+
+    } else {
+      // ── Plain text path: enhanced regex extraction ──────────────────────
+      const text = raw;
+      const grab = (p: RegExp) => { const m = text.match(p); return m ? m[1].trim().replace(/\s+/g, " ") : ""; };
+      const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+
+      // Name: first short non-header line
+      for (const line of lines) {
+        if (line.length > 3 && line.length < 60 &&
+            !/^(SPECIFICATIONS|HIGHLIGHTS|ELECTRICAL|ELECTRONICS|MACHINERY|GALLEY|SAFETY|REFIT|MISC|DECK|ANCHOR|COMMUNICATION)/i.test(line) &&
+            !/^(Yacht Details|Location:|Engines:|Last Updated|Asking Price|Maximum Speed|Max Draft|Cruising|Beam:|Hull|Fuel|Fresh|Holding)/i.test(line)) {
+          v.name = line.trim(); break;
+        }
+      }
+
+      const yearM = text.match(/\b(19[5-9]\d|20[0-4]\d)\b/); if (yearM) v.year = parseInt(yearM[1]);
+      const priceM = text.match(/(?:Asking Price[^$€£\d]*)(US\$[\d,]+|\$[\d,]+|€[\d,]+)/i) || text.match(/\b(US\$[\d,]+|\$[\d,]+|€[\d,]+)\b/);
+      if (priceM) v.price = priceM[1];
+      const locM = text.match(/Location:\s*([^\n]{3,50})/i); if (locM) v.location = locM[1].trim();
+
+      const loaM = grab(/(?:LOA|Length[^:\n]{0,20}):\s*([\d.]+\s*(?:m|ft|')(?:\s*[\d"]+)?)/i); if (loaM) v.loa = loaM;
+      const beamM = grab(/Beam:\s*([\d'."\s]+(?:ft|m)?)/i); if (beamM) v.beam = beamM;
+      const draftM = grab(/(?:Max Draft|Draft|Draught):\s*([\d'."\s]+(?:ft|m)?)/i); if (draftM) v.draft = draftM;
+      const hullM = grab(/Hull(?:\s+Material)?:\s*([^\n]{2,40})/i); if (hullM) v.hullMaterial = hullM;
+      const maxSpdM = grab(/(?:Maximum|Max)\s+Speed:\s*([\d.]+\s*kn(?:ots?)?)/i); if (maxSpdM) v.maxSpeed = maxSpdM;
+      const cSpdM = grab(/Cruising\s+Speed:\s*([\d.]+\s*kn(?:ots?)?)/i); if (cSpdM) v.cruiseSpeed = cSpdM;
+      const engM = grab(/Engines?:\s*([^\n]{2,80})/i); if (engM) v.engines = engM;
+      const hrM = text.match(/Engine\s+Hours[^:\n]*:\s*([\d,]+)/i); if (hrM) v.engineHours = hrM[1];
+      const guestsM = grab(/(?:Max\s+Passengers?|Guests?):\s*(\d+)/i); if (guestsM) v.guests = guestsM;
+      const cabinsM = grab(/(?:Cabins?|Staterooms?):\s*(\d+)/i); if (cabinsM) v.staterooms = cabinsM;
+
+      // Tanks
+      const fuelM = text.match(/Fuel\s*(?:Tank)?:\s*(?:\d+\s*x\s*)?([\d,]+)\s*[|]?\s*(?:gallon|gal|lt|litre)/i);
+      if (fuelM) v.fuelTank = `${fuelM[1].replace(/,/g,"")} gal`;
+      const fwM = text.match(/Fresh\s*Water:\s*(?:\d+\s*x\s*)?([\d,]+)\s*[|]?\s*(?:gallon|gal|lt)/i);
+      if (fwM) v.freshWater = `${fwM[1].replace(/,/g,"")} gal`;
+      const holdM = text.match(/Holding(?:\s*Tank)?:\s*(?:\d+\s*x\s*)?([\d,]+)\s*[|]?\s*(?:gallon|gal|lt)/i);
+      if (holdM) v.holdingTank = `${holdM[1].replace(/,/g,"")} gal`;
+
+      // Nav/safety
+      const radarM = text.match(/Radar[^:\n]*[-:]\s*([^\n]{3,60})/i); if (radarM) v.radar = radarM[1].trim();
+      const apM = text.match(/Autopilot[^:\n]*[-:]\s*([^\n]{3,60})/i); if (apM) v.autopilot = apM[1].trim();
+      if (/Starlink/i.test(text)) v.satcom = "Starlink";
+      const bowM = grab(/Bow\s+(?:and\s+Stern\s+)?Thruster[s]?[^:\n]*-?\s*([^\n]{3,80})/i); if (bowM) v.bowThruster = bowM;
+
+      // Description: longest prose paragraph
+      const paras = text.split(/\n{2,}/).map(p => p.trim()).filter(p => p.length > 80 && /\b(the|and|with|its)\b/i.test(p));
+      if (paras.length) v.description = paras[0].slice(0, 800);
+
+      // boatsgroup images from plain text
+      const bgRx = /https:\/\/images\.boatsgroup\.com\/[^\s"')]+\.(?:jpg|jpeg|png|webp)/gi;
+      const seen = new Set<string>();
+      let m: RegExpExecArray | null;
+      while ((m = bgRx.exec(text)) !== null) {
+        const up = _upscale(m[0]);
+        if (!seen.has(up) && !/logo|icon|sprite/i.test(up)) { seen.add(up); images.push({ src: up, alt: "" }); }
       }
     }
-    if (images.length) v.images = images;
 
-    // ── Description ───────────────────────────────────────────────────────
-    const paras = text.split(/\n{2,}/).map(p => p.trim())
-      .filter(p => p.length > 80 && !/^[A-Z\s]+$/.test(p) && !/^[A-Z][A-Z\s]+$/.test(p.split("\n")[0]));
-    if (paras.length) v.description = paras[0].slice(0, 800);
-
-    // ── Validation ────────────────────────────────────────────────────────
     const fieldCount = Object.keys(v).filter(k => (v as Record<string,unknown>)[k]).length;
-    if (fieldCount === 0) {
-      showToast("Couldn't extract data — try selecting all text on the listing page (CMD+A, CMD+C)", "error");
+    if (fieldCount === 0 && images.length === 0) {
+      showToast("Couldn't extract data. For best results: open the listing → Right-click → View Page Source → CMD+A → CMD+C → paste here", "error");
       return;
     }
 
-    const base = vessel || ({
-      name: "", builder: "", year: null, location: "", price: "",
-      loa: "", beam: "", draft: "", description: "", images: [],
-      features: [], sourceUrl: url || "",
-    } as unknown as VesselData);
-
+    const base = vessel || ({ name: "", builder: "", year: null, location: "", price: "", loa: "", beam: "", draft: "", description: "", images: [], features: [], sourceUrl: url || "" } as unknown as VesselData);
     const merged: VesselData = { ...base };
-    // Merge: only fill fields that are currently empty
     for (const [k, val] of Object.entries(v)) {
-      const key = k as keyof VesselData;
-      if (key === "images") continue;
+      if (k === "images") continue;
       const existing = (merged as Record<string,unknown>)[k];
-      if (!existing || existing === "" || existing === null || existing === 0) {
+      if (!existing || existing === "" || existing === null || existing === 0)
         (merged as Record<string,unknown>)[k] = val;
-      }
     }
-    // Always merge images (append, don't overwrite)
     if (images.length) {
       const existingSrcs = new Set(merged.images.map(i => i.src));
       merged.images = [...merged.images, ...images.filter(i => !existingSrcs.has(i.src))];
@@ -602,7 +583,56 @@ export default function BrochuresPage() {
     setPasteText("");
     setShowPasteImport(false);
     if (step !== "preview") setStep("preview");
-    showToast(`Paste import: ${fieldCount} fields extracted${images.length ? ` · ${images.length} images` : ""}`, "success");
+    showToast(`Extracted ${fieldCount} fields${images.length ? ` · ${images.length} images` : ""}`, "success");
+  }
+
+  // ── Paste helpers ────────────────────────────────────────────────────────────
+  function _upscale(src: string): string {
+    return src
+      .replace(/[?&]w=\d+/, m => m.replace(/\d+/, "1200"))
+      .replace(/[?&]format=webp/, "").replace(/[?&]exact/, "")
+      .replace(/&&+/g, "&").replace(/[?&]$/, "");
+  }
+
+  function _assignFromProp(v: Partial<VesselData>, rawLabel: string, rawVal: string) {
+    const label = rawLabel.replace(/\s+/g, " ").trim().toLowerCase();
+    const val = rawVal.replace(/\s+/g, " ").trim();
+    if (!val || val.length > 200) return;
+    const map: [RegExp, keyof VesselData][] = [
+      [/\bloa\b|length\s+overall/i,           "loa"],
+      [/\blwl\b|waterline\s+length/i,         "lwl"],
+      [/\bbeam\b/i,                           "beam"],
+      [/\bdraft\b|\bdraught\b/i,              "draft"],
+      [/displacement/i,                       "displacement"],
+      [/max\s*speed|maximum\s*speed|top\s*speed/i, "maxSpeed"],
+      [/cruise\s*speed|cruising\s*speed/i,   "cruiseSpeed"],
+      [/\brange\b/i,                          "range"],
+      [/fuel\s*capacity|fuel\s*tank/i,       "fuelTank"],
+      [/fresh\s*water/i,                      "freshWater"],
+      [/holding\s*tank/i,                     "holdingTank"],
+      [/hull\s*material|hull\s*type/i,       "hullMaterial"],
+      [/\bstaterooms?\b|\bcabins?\b/i,        "staterooms"],
+      [/\bguests?\b|passengers?/i,            "guests"],
+      [/\bcrew\b/i,                           "crew"],
+      [/gross\s*tonnage/i,                    "grossTonnage"],
+      [/\bengines?\b/i,                       "engines"],
+      [/bow\s*thruster/i,                     "bowThruster"],
+      [/stern\s*thruster/i,                   "sternThruster"],
+      [/generators?|gensets?/i,               "gensets"],
+      [/shore\s*power/i,                      "shorepower"],
+      [/air\s*condit/i,                       "airCon"],
+      [/\blocation\b/i,                       "location"],
+      [/\bprice\b|asking\s*price/i,           "price"],
+      [/hull\s*form|hull\s*type/i,            "hullForm"],
+      [/\bpropulsion\b/i,                     "propulsion"],
+    ];
+    for (const [pat, field] of map) {
+      if (pat.test(label)) {
+        const existing = (v as Record<string,unknown>)[field as string];
+        if (!existing) (v as Record<string,unknown>)[field as string] = val;
+        break;
+      }
+    }
   }
 
   /* ── Hidden fields ── */
@@ -944,17 +974,26 @@ export default function BrochuresPage() {
           </button>
           {(showPasteImport || vessel.images.length === 0) && (
             <div className="px-5 pb-5">
-              <p className="text-xs mb-3" style={{ color: "var(--navy-400)" }}>
-                1. Open the listing in a new browser tab&nbsp;&nbsp;
-                2. Press <strong>CMD+A</strong> then <strong>CMD+C</strong>&nbsp;&nbsp;
-                3. Click below and press <strong>CMD+V</strong>
-              </p>
+              <div className="rounded-lg p-3 mb-3" style={{ background: "rgba(14,165,233,.08)", border: "1px solid rgba(14,165,233,.25)" }}>
+                <p className="text-xs font-bold mb-1" style={{ color: "#38bdf8" }}>🏆 Best method — View Page Source (gets images + all specs)</p>
+                <p className="text-xs" style={{ color: "var(--navy-400)" }}>
+                  1. Open the listing in your browser &nbsp;→&nbsp;
+                  2. <strong>Right-click → View Page Source</strong> (or <strong>CMD+OPT+U</strong>) &nbsp;→&nbsp;
+                  3. <strong>CMD+A → CMD+C</strong> &nbsp;→&nbsp; paste below
+                </p>
+              </div>
+              <div className="rounded-lg p-3 mb-3" style={{ background: "rgba(100,116,139,.08)", border: "1px solid rgba(100,116,139,.2)" }}>
+                <p className="text-xs font-bold mb-1" style={{ color: "var(--navy-300)" }}>Alternative — Select All Text (specs + price, no images)</p>
+                <p className="text-xs" style={{ color: "var(--navy-400)" }}>
+                  Open the listing in your browser &nbsp;→&nbsp; <strong>CMD+A → CMD+C</strong> &nbsp;→&nbsp; paste below
+                </p>
+              </div>
               <textarea
                 className="w-full rounded-lg text-xs p-3 font-mono resize-y mb-3"
                 style={{ background: "var(--input,#1e293b)", border: "1px solid var(--border)", color: "var(--foreground)", height: 120 }}
                 value={pasteText}
                 onChange={e => setPasteText(e.target.value)}
-                placeholder="Paste the full page text here…"
+                placeholder="Paste raw HTML (from View Source) or plain page text here…"
               />
               <div className="flex gap-2">
                 <button
@@ -962,7 +1001,7 @@ export default function BrochuresPage() {
                   disabled={!pasteText.trim()}
                   className="text-sm px-4 py-2 rounded-lg font-semibold transition-all"
                   style={{ background: pasteText.trim() ? "var(--brass-400)" : "var(--border)", color: pasteText.trim() ? "#fff" : "var(--navy-400)", cursor: pasteText.trim() ? "pointer" : "default" }}>
-                  Extract &amp; Merge Data
+                  Extract &amp; Merge
                 </button>
                 <button
                   onClick={() => { setPasteText(""); setShowPasteImport(false); }}
