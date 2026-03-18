@@ -167,31 +167,145 @@ function parseDenison(url: string, html: string): VesselData {
     vessel.description = clean($('meta[property="og:description"]').attr("content"));
   }
 
-  // ── 4. Flat "Label: Value" spec text under .specifications ───────────────
-  // Denison renders specs as: "Cruising Speed: 18 kn Maximum Speed: 12 kn Beam: 27' 11'' ..."
-  // Tank format: "Fuel Tank: 1 x 7526|gallon" → convert pipe-qty to readable
+  // ── 4. Spec text extraction — THREE formats Denison uses ─────────────────
   const specContainer = $(".specifications, [class*='spec'], [class*='detail']").first();
   const rawSpecText = specContainer.length
     ? specContainer.text()
-    : $("body").text().slice(0, 30000);
+    : $("body").text().slice(0, 40000);
 
-  // Normalise Denison's "N x QUANTITY|unit" tank notation before parsing
-  const normSpecText = rawSpecText.replace(
-    /(\d+)\s*x\s*([\d,]+)\s*\|\s*(gallon|liter|litre|gal|lt)/gi,
-    (_, _count, qty, unit) => {
-      const n = parseInt(qty.replace(/,/g, ""));
-      const isGal = /gal/i.test(unit);
-      return isGal ? `${n.toLocaleString("en-US")} gal` : `${n.toLocaleString("en-US")} lt`;
-    }
-  );
+  const specText = rawSpecText
+    .replace(/&#039;/g, "'").replace(/&amp;/g, "&").replace(/&quot;/g, '"');
 
-  const specPairs = normSpecText.match(/([A-Z][A-Za-z\s\/\(\)]+?):\s*([^\n:]{2,80})/g) || [];
-  for (const pair of specPairs) {
+  // Format A: "Label: Value" colon pairs — handles tanks with "N x QTY|unit"
+  const colonPairs = specText.match(/([A-Z][A-Za-z\s\/\(\)]{2,40}):\s*([^\n:]{2,120})/g) || [];
+  for (const pair of colonPairs) {
     const colon = pair.indexOf(":");
     const label = pair.slice(0, colon).trim();
     const value = pair.slice(colon + 1).trim();
-    if (label.length < 50 && value.length > 0 && value.length < 150) {
+    if (label.length >= 50 || !value) continue;
+    // Tank "N x QTY|unit" → convert to readable dual format
+    const tankM = value.match(/^(\d+)\s*x\s*([\d,]+)\s*\|?\s*(gallon|liter|litre|gal|lt)\b/i);
+    if (tankM) {
+      const qty = parseInt(tankM[1]);
+      const amount = parseInt(tankM[2].replace(/,/g, ""));
+      const unit = tankM[3].toLowerCase();
+      const total = qty * amount;
+      let formatted = "";
+      if (/gal/i.test(unit)) {
+        formatted = `${total.toLocaleString("en-US")} gal / ${Math.round(total * 3.78541).toLocaleString("en-US")} lt`;
+      } else {
+        formatted = `${total.toLocaleString("en-US")} lt / ${Math.round(total / 3.78541).toLocaleString("en-US")} gal`;
+      }
+      assignSpec(vessel, label, formatted);
+    } else if (value.length < 150) {
       assignSpec(vessel, label, value);
+    }
+  }
+
+  // Format B: "Label - Value" dash pairs for equipment lists
+  const dashPairs = specText.match(/([A-Za-z][A-Za-z\s&\/\(\)]{2,50})\s+-\s+([^\n\r]{4,200})/g) || [];
+  for (const pair of dashPairs) {
+    const dashIdx = pair.indexOf(" - ");
+    const label = pair.slice(0, dashIdx).trim();
+    const value = pair.slice(dashIdx + 3).trim();
+    if (label.length < 55 && value.length > 2) assignSpec(vessel, label, value);
+  }
+
+  // Format C: Named equipment sections — extract by known header names
+  function extractSection(header: string): string {
+    const idx = specText.indexOf(header);
+    if (idx === -1) return "";
+    const tail = specText.slice(idx + header.length);
+    const nextIdx = tail.search(/\b(?:Electrical|Machinery|Electronics|Safety|Navigation|Anchor|Deck|Refit|Galley|Audio|A\/v|Steering|Miscellaneous)\b/);
+    const raw = nextIdx > 0 ? tail.slice(0, nextIdx) : tail.slice(0, 800);
+    return raw.replace(/\s+/g, " ").trim();
+  }
+
+  // Electronics And Equipment → radar, chartPlotter, aisSystem, autopilot, satcom
+  const navSec = extractSection("Electronics And Equipment");
+  if (navSec) {
+    if (!vessel.radar) {
+      const m = navSec.match(/Radar\s*-\s*([^-\n,]{4,60})/i);
+      if (m) vessel.radar = m[1].trim();
+    }
+    if (!vessel.chartPlotter) {
+      const m = navSec.match(/(?:GPS\s*Plotter|Chart\s*Plotter|Evo\s*Plotter)\s*-\s*([^-\n,]{4,80})/i);
+      if (m) vessel.chartPlotter = m[1].trim();
+    }
+    if (!vessel.aisSystem && /AIS/i.test(navSec)) {
+      const m = navSec.match(/AIS\s*(?:-\s*([^-\n,]{4,40}))?/i);
+      vessel.aisSystem = m?.[1]?.trim() || "SIMRAD AIS";
+    }
+    if (!vessel.autopilot) {
+      const m = navSec.match(/Autopilot\s*(?:AP)?\s*-?\s*([^-\n,]{4,40})/i);
+      if (m) vessel.autopilot = m[1].trim();
+    }
+    if (!vessel.satcom) {
+      if (/Starlink/i.test(navSec)) vessel.satcom = "Starlink";
+      const m = navSec.match(/(?:Satellite|VSAT|Satcom)\s*Comm[^-]*-\s*([^-\n,]{4,80})/i);
+      if (m) vessel.satcom = m[1].trim();
+    }
+  }
+
+  // Electrical Equipment → gensets, shorepower, voltageSystem, airCon
+  const elecSec = extractSection("Electrical Equipment");
+  if (elecSec) {
+    if (!vessel.gensets) {
+      const m = elecSec.match(/(?:Main\s*)?Generator\s*-\s*([^\n,]{4,80})/i);
+      if (m) vessel.gensets = m[1].trim();
+    }
+    if (!vessel.shorepower) {
+      const m = elecSec.match(/Shore\s*(?:Cable|Power)\s*-\s*([^\n,]{4,60})/i);
+      if (m) vessel.shorepower = m[1].trim();
+    }
+    if (!vessel.voltageSystem) {
+      const m = elecSec.match(/Main\s*Power\s*System\s*-\s*([^\n,]{4,60})/i);
+      if (m) vessel.voltageSystem = m[1].trim();
+    }
+    if (!vessel.airCon) {
+      const m = elecSec.match(/Air\s*Conditioning\s*-\s*([^\n]{4,120})/i);
+      if (m) vessel.airCon = m[1].trim();
+    }
+  }
+
+  // Auxillary Machinery → bowThruster, sternThruster, propulsion
+  const auxSec = extractSection("Auxillary Machinery");
+  if (auxSec) {
+    if (!vessel.bowThruster || !vessel.sternThruster) {
+      const m = auxSec.match(/Bow and Stern Thruster[^-]*-\s*([^\n,]{4,100})/i);
+      if (m) {
+        if (!vessel.bowThruster) vessel.bowThruster = m[1].trim();
+        if (!vessel.sternThruster) vessel.sternThruster = m[1].trim();
+      }
+    }
+    if (!vessel.bowThruster) {
+      const m = auxSec.match(/Bow\s*Thruster[^-]*-\s*([^\n,]{4,60})/i);
+      if (m) vessel.bowThruster = m[1].trim();
+    }
+    if (!vessel.sternThruster) {
+      const m = auxSec.match(/Stern\s*Thruster[^-]*-\s*([^\n,]{4,60})/i);
+      if (m) vessel.sternThruster = m[1].trim();
+    }
+    if (!vessel.propulsion) {
+      const m = auxSec.match(/Steering[^-]*-\s*([^\n,]{4,80})/i);
+      if (m) vessel.propulsion = m[1].trim();
+    }
+  }
+
+  // Safety And Security Equipment → fireSuppression, lifeRafts
+  const safetySec = extractSection("Safety And Security Equipment");
+  if (safetySec) {
+    if (!vessel.fireSuppression && /fire suppression/i.test(safetySec)) {
+      vessel.fireSuppression = "Fixed Fire Suppression";
+      const m = safetySec.match(/Fixed\s*Fire\s*Suppression[^,.]*/i);
+      if (m) vessel.fireSuppression = m[0].trim();
+    }
+    if (!vessel.lifeRafts) {
+      const parts: string[] = [];
+      if (/EPIRB/i.test(safetySec)) parts.push("EPIRB");
+      const pfds = safetySec.match(/(\d+)\s*Adult[^,;]*/i);
+      if (pfds) parts.push(pfds[0].trim());
+      if (parts.length) vessel.lifeRafts = parts.join("; ");
     }
   }
 
