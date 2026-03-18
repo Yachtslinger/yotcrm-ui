@@ -218,9 +218,11 @@ type Step = "list" | "scraping" | "preview" | "saving";
 
 export default function BrochuresPage() {
   const [step, setStep]           = React.useState<Step>("list");
-  const [url, setUrl]             = React.useState("");
-  const [url2, setUrl2]           = React.useState("");
+  const [urls, setUrls]           = React.useState<string[]>(["", ""]);
   const [url2Warning, setUrl2Warning] = React.useState<string | null>(null);
+  // Convenience aliases so the rest of the code keeps working
+  const url  = urls[0] ?? "";
+  const url2 = urls[1] ?? "";
   const [pendingPdf, setPendingPdf]   = React.useState<File | null>(null);
   const [pdfFileName, setPdfFileName] = React.useState("");
   const [vessel, setVessel]       = React.useState<VesselData | null>(null);
@@ -253,7 +255,7 @@ export default function BrochuresPage() {
   const gaInputRef  = React.useRef<HTMLInputElement>(null);
 
   const isOceanKing = /oceanking\.it/i.test(url);
-  const hasAnySources = url.trim() || url2.trim() || pendingPdf;
+  const hasAnySources = urls.some(u => u.trim()) || !!pendingPdf;
 
   function showToast(msg: string, type: "success" | "error" = "success") {
     setToast({ msg, type });
@@ -306,7 +308,7 @@ export default function BrochuresPage() {
     return cleaned;
   }
 
-  /** Unified build — scrapes URL1, URL2, and PDF simultaneously, merges all */
+  /** Unified build — scrapes all URLs and PDF simultaneously, merges all */
   async function handleBuild(e?: React.FormEvent) {
     if (e) e.preventDefault();
     if (!hasAnySources) return;
@@ -314,55 +316,40 @@ export default function BrochuresPage() {
     setNewSlug(null);
     setUrl2Warning(null);
 
-    const sources: string[] = [];
-    if (url.trim())  sources.push(`URL 1: ${url.trim()}`);
-    if (url2.trim()) sources.push(`URL 2: ${url2.trim()}`);
-    if (pendingPdf)  sources.push(`PDF: ${pdfFileName}`);
-    setBuildStatus(`Scraping ${sources.length} source${sources.length > 1 ? "s" : ""}…`);
+    const activeUrls = urls.map(u => u.trim()).filter(Boolean);
+    const sourceLabels = [
+      ...activeUrls.map((u, i) => `URL ${i + 1}: ${u}`),
+      ...(pendingPdf ? [`PDF: ${pdfFileName}`] : []),
+    ];
+    setBuildStatus(`Scraping ${sourceLabels.length} source${sourceLabels.length > 1 ? "s" : ""}…`);
 
     try {
-      // Run all sources in parallel
-      const results = await Promise.allSettled([
-        // URL 1
-        url.trim() ? (async () => {
-          setBuildStatus("Scraping URL 1…");
-          const r = await fetch("/api/brochures/preview", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: url.trim() }),
-          });
-          const d = await r.json();
-          if (!r.ok) throw new Error(d.error || "URL 1 failed");
-          return d.vessel as VesselData;
-        })() : Promise.resolve(null),
+      const urlPromises = activeUrls.map((u, i) => (async () => {
+        setBuildStatus(`Scraping URL ${i + 1}…`);
+        const r = await fetch("/api/brochures/preview", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: u }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || `URL ${i + 1} failed`);
+        return d.vessel as VesselData;
+      })());
 
-        // URL 2
-        url2.trim() ? (async () => {
-          setBuildStatus("Scraping URL 2…");
-          const r = await fetch("/api/brochures/preview", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: url2.trim() }),
-          });
-          const d = await r.json();
-          if (!r.ok) throw new Error(d.error || "URL 2 failed");
-          return d.vessel as VesselData;
-        })() : Promise.resolve(null),
+      const pdfPromise = pendingPdf ? (async () => {
+        setBuildStatus("Extracting PDF…");
+        const form = new FormData();
+        form.append("file", pendingPdf);
+        const r = await fetch("/api/brochures/scrape-pdf", { method: "POST", body: form });
+        const d = await r.json();
+        if (!r.ok || !d.ok) throw new Error(d.error || "PDF failed");
+        return d.vessel as VesselData;
+      })() : Promise.resolve(null);
 
-        // PDF
-        pendingPdf ? (async () => {
-          setBuildStatus("Extracting PDF…");
-          const form = new FormData();
-          form.append("file", pendingPdf);
-          const r = await fetch("/api/brochures/scrape-pdf", { method: "POST", body: form });
-          const d = await r.json();
-          if (!r.ok || !d.ok) throw new Error(d.error || "PDF failed");
-          return d.vessel as VesselData;
-        })() : Promise.resolve(null),
-      ]);
+      const results = await Promise.allSettled([...urlPromises, pdfPromise]);
 
-      // Collect successful results
       const vessels: VesselData[] = [];
       const failures: string[] = [];
-      const labels = ["URL 1", "URL 2", "PDF"];
+      const labels = [...activeUrls.map((_, i) => `URL ${i + 1}`), "PDF"];
       results.forEach((r, i) => {
         if (r.status === "fulfilled" && r.value) vessels.push(r.value);
         else if (r.status === "rejected") failures.push(`${labels[i]}: ${r.reason?.message || "failed"}`);
@@ -370,7 +357,6 @@ export default function BrochuresPage() {
 
       if (!vessels.length) throw new Error("All sources failed — nothing to build from");
 
-      // Merge: first source wins, others backfill empties
       let merged = vessels[0];
       for (let i = 1; i < vessels.length; i++) merged = mergeVessels(merged, vessels[i]);
 
@@ -380,9 +366,8 @@ export default function BrochuresPage() {
       setVessel(prepVessel(merged));
       setStep("preview");
 
-      const sourceCount = vessels.length;
       const fieldsFilled = Object.values(merged).filter(v => v && v !== "" && v !== null).length;
-      showToast(`Built from ${sourceCount} source${sourceCount > 1 ? "s" : ""} · ${fieldsFilled} fields populated`, "success");
+      showToast(`Built from ${vessels.length} source${vessels.length > 1 ? "s" : ""} · ${fieldsFilled} fields populated`, "success");
     } catch (err) {
       showToast(`Build failed: ${err instanceof Error ? err.message : "unknown error"}`, "error");
       setStep("list");
@@ -703,7 +688,7 @@ export default function BrochuresPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Save failed");
       setNewSlug(data.slug);
-      setUrl(""); setVessel(null);
+      setUrls(["", ""]); setVessel(null);
       await fetchBrochures();
       setStep("list");
       showToast(`Brochure published for "${data.vesselName}"`);
@@ -1146,22 +1131,28 @@ export default function BrochuresPage() {
         <p className="text-xs mb-4" style={{ color: "var(--navy-400)" }}>Add any combination of URLs and/or a PDF — the scraper pulls from ALL sources and merges for maximum completeness.</p>
 
         <form onSubmit={handleBuild} className="flex flex-col gap-2 mb-3">
-          {/* URL 1 */}
-          <div className="flex gap-2 items-center">
-            <div className="text-[10px] font-bold uppercase tracking-widest shrink-0 w-10" style={{ color: "var(--brass-400)" }}>URL 1</div>
-            <input type="url" className="flex-1 rounded-lg text-sm px-3 py-2.5"
-              style={{ background: "var(--input,#1e293b)", border: "1px solid var(--border)", color: "var(--foreground)" }}
-              placeholder="Primary listing URL — Denison, YachtWorld, Van der Valk…"
-              value={url} onChange={e => setUrl(e.target.value)} />
+          {/* URL inputs — dynamic list */}
+          <div className="flex flex-col gap-2 mb-2">
+            {urls.map((u, i) => (
+              <div key={i} className="flex gap-2 items-center">
+                <div className="text-[10px] font-bold uppercase tracking-widest shrink-0 w-10" style={{ color: i === 0 ? "var(--brass-400)" : "var(--navy-400)" }}>URL {i + 1}</div>
+                <input type="url" className="flex-1 rounded-lg text-sm px-3 py-2.5"
+                  style={{ background: "var(--input,#1e293b)", border: "1px solid var(--border)", color: "var(--foreground)", opacity: i === 0 ? 1 : 0.8 }}
+                  placeholder={i === 0 ? "Primary listing URL — Denison, YachtWorld, BoatTrader…" : "Additional URL — cross-reference for more specs & images (optional)"}
+                  value={u} onChange={e => setUrls(prev => prev.map((v, j) => j === i ? e.target.value : v))} />
+                {urls.length > 2 && (
+                  <button onClick={() => setUrls(prev => prev.filter((_, j) => j !== i))}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg text-xs flex-shrink-0"
+                    style={{ background: "rgba(180,0,0,.15)", color: "#f87171" }}>✕</button>
+                )}
+              </div>
+            ))}
           </div>
-          {/* URL 2 */}
-          <div className="flex gap-2 items-center">
-            <div className="text-[10px] font-bold uppercase tracking-widest shrink-0 w-10" style={{ color: "var(--navy-400)" }}>URL 2</div>
-            <input type="url" className="flex-1 rounded-lg text-sm px-3 py-2.5"
-              style={{ background: "var(--input,#1e293b)", border: "1px solid var(--border)", color: "var(--foreground)", opacity: 0.8 }}
-              placeholder="Second URL — adds more images & fills any missing specs (optional)"
-              value={url2} onChange={e => setUrl2(e.target.value)} />
-          </div>
+          <button onClick={() => setUrls(prev => [...prev, ""])}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg mb-3 transition-all"
+            style={{ background: "rgba(184,147,58,.08)", border: "1px solid rgba(184,147,58,.25)", color: "var(--brass-400)" }}>
+            <Plus className="w-3 h-3" /> Add another URL
+          </button>
           {/* PDF drop zone */}
           <div className="flex gap-2 items-center">
             <div className="text-[10px] font-bold uppercase tracking-widest shrink-0 w-10" style={{ color: "var(--navy-400)" }}>PDF</div>
@@ -1194,7 +1185,7 @@ export default function BrochuresPage() {
             disabled={!hasAnySources || step === "scraping"}>
             {step === "scraping"
               ? <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />{buildStatus || "Building…"}</>
-              : <><Plus className="w-4 h-4" />Build Brochure {[url.trim()&&"URL 1", url2.trim()&&"URL 2", pendingPdf&&"PDF"].filter(Boolean).length > 0 ? `(${[url.trim()&&"URL 1", url2.trim()&&"URL 2", pendingPdf&&"PDF"].filter(Boolean).join(" + ")})` : ""}</>}
+              : <><Plus className="w-4 h-4" />Build Brochure</>}
           </button>
         </form>
 
