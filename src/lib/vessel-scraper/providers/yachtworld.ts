@@ -40,12 +40,22 @@ function parseSlug(url: string): Partial<VesselData> {
 
 // ── Image helpers ─────────────────────────────────────────────────────────────
 function upscale(src: string): string {
-  return src
+  let out = src
     .replace(/[?&]w=\d+/, m => m.replace(/\d+/, "1200"))
     .replace(/[?&]format=webp/g, "").replace(/[?&]exact/g, "")
     .replace(/[?&]ratio=[^&]+/g, "").replace(/&&+/g, "&").replace(/[?&]$/, "");
+  // boatsgroup.com resize URLs: add ?w=1200 if no size param yet
+  // e.g. https://images.boatsgroup.com/resize/1/48/48/9034848_...jpg
+  if (out.includes("boatsgroup.com/resize/") && !/[?&]w=/.test(out)) {
+    out = out + (out.includes("?") ? "&" : "?") + "w=1200";
+  }
+  return out;
 }
-function isJunk(src: string) { return /logo|icon|sprite|flag|avatar|favicon/i.test(src); }
+function isJunk(src: string) {
+  return /logo|icon|sprite|flag|avatar|favicon/i.test(src)
+    || src.includes("servedby.boatsgroup.com")  // ad network
+    || /youtube\.com|youtu\.be|vimeo\.com/i.test(src);  // video URLs
+}
 
 // ── Parse __REDUX_STATE__ from HTML ──────────────────────────────────────────
 function extractReduxState(html: string): Record<string, unknown> | null {
@@ -226,16 +236,7 @@ export async function scrapeYachtWorld(url: string): Promise<VesselData> {
     const data = (redux as any)?.app?.data;
     if (data && data.id) {
       mapReduxToVessel(data, vessel);
-      if (vessel.images.length < 5) {
-        // Supplement with raw HTML boatsgroup URLs
-        const bgRx = /https:\/\/images\.boatsgroup\.com\/resize\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp)[^\s"'<>]*/gi;
-        let m: RegExpExecArray | null;
-        const seen = new Set(vessel.images.map(i => i.src));
-        while ((m = bgRx.exec(html)) !== null) {
-          const up = upscale(m[0]);
-          if (!seen.has(up) && !isJunk(up)) { seen.add(up); vessel.images.push({ src: up, alt: vessel.name }); }
-        }
-      }
+      // media[] from Redux contains all listing images — no DOM sweep needed
       vessel.images = dedupeImages(vessel.images);
       return vessel;
     }
@@ -400,17 +401,9 @@ export async function scrapeYachtWorld(url: string): Promise<VesselData> {
       }
     }
 
-    // Rendered images — pick up anything mapReduxToVessel may have missed
-    const imgSrcs: string[] = await page.evaluate(() =>
-      Array.from(document.querySelectorAll("img"))
-        .map((img: any) => img.getAttribute("data-src") || img.src || "")
-        .filter((src: string) => src.includes("boatsgroup.com") && !/logo|icon|sprite|flag|avatar/i.test(src))
-    );
-    const seen = new Set(vessel.images.map(i => i.src));
-    for (const src of imgSrcs) {
-      const up = upscale(src);
-      if (!seen.has(up)) { seen.add(up); vessel.images.push({ src: up, alt: vessel.name }); }
-    }
+    // NOTE: We rely exclusively on the media[] array from __REDUX_STATE__ for images.
+    // A broad DOM querySelectorAll("img") sweep catches ads, recommended listings,
+    // and duplicate thumbnails — so we skip it entirely.
 
     // Price fallback from DOM if __REDUX_STATE__ didn't have it
     if (!vessel.price) {
