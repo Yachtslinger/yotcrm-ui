@@ -246,22 +246,23 @@ function parseDenison(url: string, html: string): VesselData {
   if (!vessel.gensets)       vessel.gensets       = dashExtract(/(?:Main\s*)?Generator\s*-\s*/i, 50);
   if (!vessel.shorepower)    vessel.shorepower    = dashExtract(/Shore\s*(?:Cable|Power)\s*-\s*/i, 40);
   if (!vessel.voltageSystem) {
-    const raw = dashExtract(/Main\s*Power\s*System\s*-\s*/i, 60);
-    // Strip trailing "Lighting - ..." bleed
-    vessel.voltageSystem = raw.replace(/\s+Lighting.*$/i, "").replace(/\s+-.*$/i, "").trim();
+    // Stop before "Lighting", "Emergency", or "Battery" which are adjacent line items
+    const m = specText.match(/Main\s*Power\s*System\s*-\s*([A-Za-z0-9\/\s]+?)(?=\s+Lighting\b|\s+Emergency\b|\s+Battery\b)/i);
+    if (m) vessel.voltageSystem = m[1].trim();
   }
   if (!vessel.airCon)        vessel.airCon        = dashExtract(/Air\s*Conditioning\s*-\s*/i, 80);
   if (!vessel.bowThruster) {
-    // Denison writes "Bow and Stern Thrusters - ..." as one item — capture then share
-    const combined = dashExtract(/Bow\s*and\s*Stern\s*Thruster[s]?\s*-\s*/i, 70);
-    if (combined) {
-      vessel.bowThruster   = combined;
-      vessel.sternThruster = combined;
+    // "Bow and Stern Thrusters - Upgraded..." → the value is a refit note; just confirm presence
+    const hasBowStern = /Bow\s*and\s*Stern\s*Thruster[s]?/i.test(specText);
+    if (hasBowStern) {
+      vessel.bowThruster   = "Hydraulic (Bow & Stern)";
+      vessel.sternThruster = "Hydraulic (Bow & Stern)";
     } else {
       vessel.bowThruster   = dashExtract(/Bow\s*Thruster[s]?\s*-\s*/i, 60);
+      vessel.sternThruster = dashExtract(/Stern\s*Thruster[s]?\s*-\s*/i, 60);
     }
   }
-  if (!vessel.sternThruster) vessel.sternThruster = dashExtract(/Stern\s*Thruster[s]?\s*-\s*/i, 60) || vessel.bowThruster;
+  if (!vessel.sternThruster && vessel.bowThruster) vessel.sternThruster = vessel.bowThruster;
   if (!vessel.radar)         vessel.radar         = dashExtract(/Radar\s*-\s*/i, 30);
   if (!vessel.autopilot) {
     const m = specText.match(/Autopilot\s+([A-Z][A-Z0-9\-]{2,20})/i);
@@ -270,9 +271,9 @@ function parseDenison(url: string, html: string): VesselData {
   if (!vessel.aisSystem && /\bAIS\b/.test(specText)) vessel.aisSystem = "SIMRAD AIS";
   if (!vessel.satcom && /Starlink/i.test(specText)) vessel.satcom = "Starlink";
   if (!vessel.chartPlotter) {
-    // Match "(2) 15" SIMRAD Evo Plotter" — stop before a brand name sequence
-    const m = specText.match(/(?:GPS\s*)?Plotter[^-]*-\s*(.{4,60}?)(?=\s+SIMRAD\s+[A-Z]|\s+Ritchie|\s+[A-Z]{3,}\s+[A-Z][a-z]|$)/i);
-    if (m) vessel.chartPlotter = m[1].trim().replace(/["']+\s*$/, "").trim();
+    // Stop specifically before "SIMRAD AIS" or "SIMRAD Aut" to avoid bleeding into next items
+    const m = specText.match(/Plotter\s*-\s*(.+?)(?=\s+SIMRAD\s+AIS|\s+SIMRAD\s+Aut|\s+Ritchie)/i);
+    if (m) vessel.chartPlotter = m[1].trim();
   }
   if (!vessel.fireSuppression && /Fixed\s*Fire\s*Suppression/i.test(specText)) {
     vessel.fireSuppression = "Fixed Fire Suppression";
