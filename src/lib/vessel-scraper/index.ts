@@ -39,13 +39,22 @@ const PROVIDERS: { pattern: RegExp; fn: Provider }[] = [
 /** Scrape a vessel listing URL and return a full VesselData object */
 export async function scrapeVessel(url: string): Promise<VesselData> {
   const normalised = normaliseUrl(url);
-  const { hostname } = new URL(normalised);
+
+  // YachtWorld is Cloudflare-blocked on Railway. Both YW and BoatTrader are
+  // owned by Boats Group and share identical listing IDs and slug formats.
+  // Silently rewrite: yachtworld.com/yacht/SLUG → boattrader.com/boat/SLUG
+  const rewritten = normalised.replace(
+    /^https?:\/\/(?:www\.)?yachtworld\.com\/yacht\//i,
+    "https://www.boattrader.com/boat/"
+  );
+
+  const { hostname } = new URL(rewritten);
   const provider = PROVIDERS.find(p => p.pattern.test(hostname));
   if (provider) {
-    return provider.fn(normalised);
+    return provider.fn(rewritten);
   }
   // Generic fallback — attempts cheerio + JSON-LD extraction
-  return genericScrape(normalised);
+  return genericScrape(rewritten);
 }
 
 /** Convert VesselData to the CampaignDraft shape used by the campaign builder */
