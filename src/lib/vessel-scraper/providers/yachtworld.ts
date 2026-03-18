@@ -78,8 +78,16 @@ export async function scrapeYachtWorld(url: string): Promise<VesselData> {
     await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" });
 
     await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
-    // Give analytics scripts (digitalData) extra time to populate after network idle
-    await new Promise(r => setTimeout(r, 2000));
+
+    // Wait explicitly for window.digitalData.product to be set by YachtWorld's analytics
+    try {
+      await page.waitForFunction(
+        () => !!(window as any).digitalData?.product?.[0]?.productInfo?.productID,
+        { timeout: 8000 }
+      );
+    } catch {
+      // digitalData didn't populate — continue anyway with DOM fallback
+    }
 
     // ── Extract everything via page.evaluate() ────────────────────────────
     const extracted = await page.evaluate(() => {
@@ -95,14 +103,27 @@ export async function scrapeYachtWorld(url: string): Promise<VesselData> {
 
       // 3. DOM fallbacks
       const h1 = document.querySelector("h1")?.textContent?.trim() || "";
-      const priceEl = (
-        document.querySelector('[data-testid="listing-price"]') ||
-        document.querySelector('[class*="listingPrice"]') ||
-        document.querySelector('[class*="price-display"]') ||
-        Array.from(document.querySelectorAll('[class*="price" i]'))
-          .find(el => /US\$|\$[\d,]{4}/.test(el.textContent || ""))
-      );
-      const priceText = priceEl?.textContent?.trim() || "";
+
+      // Price: target the main listing price specifically — avoid "similar listings" sections
+      // Walk up from a US$ price element and reject if it's inside a related/similar card
+      let priceText = "";
+      const allPriceEls = Array.from(document.querySelectorAll("*"))
+        .filter(el => /US\$[\d,]{4,}/.test(el.textContent || "") && (el.children.length === 0 || el.children.length <= 2));
+      for (const el of allPriceEls.slice(0, 5)) {
+        // Skip if inside a "similar" / "related" / "sponsored" section
+        let parent: Element | null = el;
+        let inRelated = false;
+        for (let i = 0; i < 8; i++) {
+          parent = parent?.parentElement || null;
+          if (!parent) break;
+          const cls = (parent.className || "").toLowerCase();
+          const testid = (parent.getAttribute("data-testid") || "").toLowerCase();
+          if (/similar|related|recommend|carousel|sponsored|other-listing/i.test(cls + testid)) {
+            inRelated = true; break;
+          }
+        }
+        if (!inRelated) { priceText = el.textContent?.trim() || ""; break; }
+      }
 
       const locationEl = (
         document.querySelector('[data-testid*="location"]') ||
