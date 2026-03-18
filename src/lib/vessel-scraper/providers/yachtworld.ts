@@ -231,15 +231,21 @@ export async function scrapeYachtWorld(url: string): Promise<VesselData> {
     if (res.ok) html = await res.text();
   } catch { /* fall through */ }
 
-  if (html && !html.includes("checking your browser") && !html.includes("cf-browser-verification")) {
+  // Only attempt Redux parse if the page actually contains the key.
+  // A real YachtWorld listing page ALWAYS has __REDUX_STATE__.
+  // If it's absent, the response is a CF challenge / redirect — fall through to Puppeteer.
+  if (html && html.includes("__REDUX_STATE__")) {
     const redux = extractReduxState(html);
     const data = (redux as any)?.app?.data;
     if (data && data.id) {
       mapReduxToVessel(data, vessel);
       // media[] from Redux contains all listing images — no DOM sweep needed
       vessel.images = dedupeImages(vessel.images);
+      console.log(`[YachtWorld] Strategy 1 (plain fetch) succeeded: ${vessel.images.length} images`);
       return vessel;
     }
+    // Redux key present but parse/data failed — still fall through to Puppeteer
+    console.warn("[YachtWorld] __REDUX_STATE__ found but data.id missing — falling through to Puppeteer");
   }
 
   // ── Strategy 2: Puppeteer → window.__REDUX_STATE__ via evaluate ───────────
@@ -420,8 +426,14 @@ export async function scrapeYachtWorld(url: string): Promise<VesselData> {
     }
 
     vessel.images = dedupeImages(vessel.images);
+    console.log(`[YachtWorld] Puppeteer succeeded: ${vessel.images.length} images`);
   } catch (err) {
-    console.error("[YachtWorld] Puppeteer failed:", err instanceof Error ? err.message : err);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[YachtWorld] Puppeteer failed:", msg);
+    // If we have nothing useful from Strategy 1, surface the error so callers know
+    if (!vessel.loa && !vessel.beam && !vessel.engines && vessel.images.length === 0) {
+      throw new Error(`YachtWorld scrape failed (Puppeteer): ${msg}`);
+    }
   } finally {
     if (browser) { try { await (browser as any).close(); } catch { /**/ } }
   }
