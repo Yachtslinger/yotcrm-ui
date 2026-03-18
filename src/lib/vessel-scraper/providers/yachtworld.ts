@@ -78,6 +78,8 @@ export async function scrapeYachtWorld(url: string): Promise<VesselData> {
     await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" });
 
     await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
+    // Give analytics scripts (digitalData) extra time to populate after network idle
+    await new Promise(r => setTimeout(r, 2000));
 
     // ── Extract everything via page.evaluate() ────────────────────────────
     const extracted = await page.evaluate(() => {
@@ -131,19 +133,18 @@ export async function scrapeYachtWorld(url: string): Promise<VesselData> {
 
     // ── Map extracted data to vessel ──────────────────────────────────────
 
-    // From window.digitalData.product
+    // From window.digitalData.product — always overrides slug (more authoritative)
     if (extracted.product) {
       const p = extracted.product;
-      if (p.manufacturer && !vessel.builder) vessel.builder = clean(String(p.manufacturer));
-      if (p.yearBuilt && !vessel.year) vessel.year = parseInt(String(p.yearBuilt));
-      if (!vessel.name || vessel.name === slugData.name) {
-        const parts = [p.yearBuilt, p.manufacturer, p.model].filter(Boolean);
-        if (parts.length) vessel.name = cleanHeadline(parts.join(" ")) || vessel.name;
-      }
-      if (p.listedPrice && !vessel.price) {
+      // Always overwrite slug data with real product data
+      if (p.manufacturer) vessel.builder = clean(String(p.manufacturer));
+      if (p.yearBuilt)    vessel.year    = parseInt(String(p.yearBuilt));
+      if (p.listedPrice) {
         const n = parseFloat(String(p.listedPrice).replace(/[^0-9.]/g, ""));
         if (!isNaN(n) && n > 10000) vessel.price = `$${n.toLocaleString("en-US")}`;
       }
+      const nameParts = [p.yearBuilt, p.manufacturer, p.model].filter(Boolean);
+      if (nameParts.length) vessel.name = cleanHeadline(nameParts.join(" ")) || vessel.name;
       if (p.location && !vessel.location) {
         const loc = p.location;
         vessel.location = [loc.city, loc.stateProvince, loc.country]
@@ -152,8 +153,6 @@ export async function scrapeYachtWorld(url: string): Promise<VesselData> {
           .join(", ");
       }
       if (p.boatLength && !vessel.loa) vessel.loa = `${p.boatLength} ft`;
-      if (p.type)     assignSpec(vessel, "hull form",  String(p.type));
-      if (p.category?.boatClass) assignSpec(vessel, "hull type", String(p.category?.boatClass || p.boatClass || ""));
     }
 
     // Title from H1
