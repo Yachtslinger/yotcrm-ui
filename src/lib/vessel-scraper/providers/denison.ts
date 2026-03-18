@@ -243,11 +243,24 @@ function parseDenison(url: string, html: string): VesselData {
     return after.slice(0, Math.min(stop, maxLen)).trim();
   };
 
-  if (!vessel.gensets)       vessel.gensets       = dashExtract(/Main\s*Generator\s*-\s*/i, 50);
-  if (!vessel.shorepower)    vessel.shorepower    = dashExtract(/Shore\s*Cable\s*-\s*/i, 40);
-  if (!vessel.voltageSystem) vessel.voltageSystem = dashExtract(/Main\s*Power\s*System\s*-\s*/i, 30);
+  if (!vessel.gensets)       vessel.gensets       = dashExtract(/(?:Main\s*)?Generator\s*-\s*/i, 50);
+  if (!vessel.shorepower)    vessel.shorepower    = dashExtract(/Shore\s*(?:Cable|Power)\s*-\s*/i, 40);
+  if (!vessel.voltageSystem) {
+    const raw = dashExtract(/Main\s*Power\s*System\s*-\s*/i, 60);
+    // Strip trailing "Lighting - ..." bleed
+    vessel.voltageSystem = raw.replace(/\s+Lighting.*$/i, "").replace(/\s+-.*$/i, "").trim();
+  }
   if (!vessel.airCon)        vessel.airCon        = dashExtract(/Air\s*Conditioning\s*-\s*/i, 80);
-  if (!vessel.bowThruster)   vessel.bowThruster   = dashExtract(/Bow\s*(?:and\s*Stern\s*)?Thruster[s]?\s*-\s*/i, 60);
+  if (!vessel.bowThruster) {
+    // Denison writes "Bow and Stern Thrusters - ..." as one item — capture then share
+    const combined = dashExtract(/Bow\s*and\s*Stern\s*Thruster[s]?\s*-\s*/i, 70);
+    if (combined) {
+      vessel.bowThruster   = combined;
+      vessel.sternThruster = combined;
+    } else {
+      vessel.bowThruster   = dashExtract(/Bow\s*Thruster[s]?\s*-\s*/i, 60);
+    }
+  }
   if (!vessel.sternThruster) vessel.sternThruster = dashExtract(/Stern\s*Thruster[s]?\s*-\s*/i, 60) || vessel.bowThruster;
   if (!vessel.radar)         vessel.radar         = dashExtract(/Radar\s*-\s*/i, 30);
   if (!vessel.autopilot) {
@@ -257,8 +270,9 @@ function parseDenison(url: string, html: string): VesselData {
   if (!vessel.aisSystem && /\bAIS\b/.test(specText)) vessel.aisSystem = "SIMRAD AIS";
   if (!vessel.satcom && /Starlink/i.test(specText)) vessel.satcom = "Starlink";
   if (!vessel.chartPlotter) {
-    const m = specText.match(/(?:GPS\s*)?Plotter[^-]*-\s*([^,]{4,60}?)(?=\s+SIMRAD|\s*,)/i);
-    if (m) vessel.chartPlotter = m[1].trim();
+    // Match "(2) 15" SIMRAD Evo Plotter" — stop before a brand name sequence
+    const m = specText.match(/(?:GPS\s*)?Plotter[^-]*-\s*(.{4,60}?)(?=\s+SIMRAD\s+[A-Z]|\s+Ritchie|\s+[A-Z]{3,}\s+[A-Z][a-z]|$)/i);
+    if (m) vessel.chartPlotter = m[1].trim().replace(/["']+\s*$/, "").trim();
   }
   if (!vessel.fireSuppression && /Fixed\s*Fire\s*Suppression/i.test(specText)) {
     vessel.fireSuppression = "Fixed Fire Suppression";
