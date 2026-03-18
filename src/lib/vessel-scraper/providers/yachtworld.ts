@@ -197,7 +197,8 @@ function mapReduxToVessel(data: Record<string, unknown>, vessel: VesselData): vo
   // Images from media array (full resolution)
   const imgMedia = media.filter((m: any) => m.mediaType === "image" || m.originalImageUrl || m.url);
   for (const m of imgMedia) {
-    const src = m.originalImageUrl || m.url || m.thumbnailUrl || "";
+    let src = m.originalImageUrl || m.url || m.thumbnailUrl || "";
+    if (src.startsWith("//")) src = "https:" + src;   // normalise protocol-relative
     if (src && src.startsWith("http") && !isJunk(src)) {
       vessel.images.push({ src: upscale(src), alt: m.title || vessel.name });
     }

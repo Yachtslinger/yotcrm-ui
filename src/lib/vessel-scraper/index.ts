@@ -48,8 +48,9 @@ export async function scrapeVessel(url: string): Promise<VesselData> {
     if (ywProvider) {
       try {
         const result = await ywProvider.fn(normalised);
-        // If we got real data, return it
-        if (result.images.length > 0 || result.price) return result;
+        // If we got real data (images, price, OR any spec field), return it
+        const hasData = result.images.length > 0 || !!result.price || !!result.loa || !!result.beam || !!result.engines;
+        if (hasData) return result;
         // Sparse — try BoatTrader cross-reference to fill gaps
         const btUrl = normalised.replace(
           /^https?:\/\/(?:www\.)?yachtworld\.com\/yacht\//i,
