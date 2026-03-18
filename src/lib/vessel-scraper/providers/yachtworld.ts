@@ -22,8 +22,20 @@ function parseSlug(url: string): Partial<VesselData> {
   if (yearMatch && listingId) {
     const middle = slug.replace(/^\d{4}-/, "").replace(/-?\d{6,8}$/, "");
     const words = middle.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1));
-    result.builder = words[0] || "";
-    result.name = `${result.year} ${words.join(" ")}`;
+    // Heuristic: last word is usually model, rest is builder
+    // e.g. "northern-marine-expedition" → builder="Northern Marine", model="Expedition"
+    // e.g. "sunseeker-predator-82" → builder="Sunseeker", model="Predator 82"
+    // Known single-word builders: sunseeker, azimut, ferretti, benetti, princess, cranchi
+    const SINGLE_WORD_BUILDERS = new Set(["sunseeker","azimut","ferretti","benetti","princess","cranchi","riva","pershing","fairline","jeanneau","beneteau","hatteras","viking","formula","chaparral"]);
+    const firstWord = words[0]?.toLowerCase() || "";
+    if (SINGLE_WORD_BUILDERS.has(firstWord) || words.length <= 2) {
+      result.builder = words[0];
+      result.name = `${result.year} ${words.join(" ")}`;
+    } else {
+      // Multi-word: assume last word is model suffix, rest is builder
+      result.builder = words.slice(0, -1).join(" ");
+      result.name = `${result.year} ${words.join(" ")}`;
+    }
   }
   return result;
 }
@@ -176,9 +188,17 @@ export async function scrapeYachtWorld(url: string): Promise<VesselData> {
       if (p.boatLength && !vessel.loa) vessel.loa = `${p.boatLength} ft`;
     }
 
-    // Title from H1
-    if (extracted.h1 && (!vessel.name || vessel.name === slugData.name)) {
-      vessel.name = cleanHeadline(extracted.h1) || vessel.name;
+    // Title + LOA from H1 — e.g. "2017 Northern Marine Expedition | 80ft"
+    if (extracted.h1) {
+      const pipeIdx = extracted.h1.indexOf(" | ");
+      if (pipeIdx > 0) {
+        const titlePart = extracted.h1.slice(0, pipeIdx).trim();
+        const loaPart   = extracted.h1.slice(pipeIdx + 3).trim(); // "80ft"
+        if (!vessel.name || vessel.name === slugData.name) vessel.name = cleanHeadline(titlePart) || vessel.name;
+        if (!vessel.loa && /\d/.test(loaPart)) vessel.loa = loaPart;
+      } else if (!vessel.name || vessel.name === slugData.name) {
+        vessel.name = cleanHeadline(extracted.h1) || vessel.name;
+      }
     }
 
     // Price from DOM — only use if digitalData didn't provide it
