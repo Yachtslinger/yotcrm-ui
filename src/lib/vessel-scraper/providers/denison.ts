@@ -41,22 +41,33 @@ export async function scrapeDenison(url: string): Promise<VesselData> {
   return parseDenison(url, html);
 }
 
-/** Decode HTML entities AND sanitize literal newlines inside JSON string values */
+/** Decode HTML entities AND sanitize ALL control characters inside JSON string values.
+ *  Denison embeds raw \n, \r, \t, and other control chars (0x00–0x1F) directly
+ *  inside JSON string values, making the entire block invalid JSON.
+ *  Strategy: walk char-by-char, track string context, replace any control char with space. */
 function decodeEntities(s: string): string {
   // 1. Decode HTML entities
-  let out = s
+  const decoded = s
     .replace(/&#039;/g, "'")
     .replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"')
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&apos;/g, "'");
-  // 2. Replace literal newlines/tabs inside JSON string values with spaces
-  //    (Denison embeds raw newlines in description values — invalid JSON)
-  out = out.replace(/"(?:[^"\\]|\\.)*"/g, (match) =>
-    match.replace(/\n/g, " ").replace(/\r/g, "").replace(/\t/g, " ")
-  );
-  return out;
+
+  // 2. Walk char-by-char: replace all control chars inside string literals with space
+  const out: string[] = [];
+  let inString = false;
+  let escapeNext = false;
+  for (let i = 0; i < decoded.length; i++) {
+    const ch = decoded[i];
+    if (escapeNext) { out.push(ch); escapeNext = false; continue; }
+    if (ch === "\\" && inString) { out.push(ch); escapeNext = true; continue; }
+    if (ch === '"') { inString = !inString; out.push(ch); continue; }
+    if (inString && ch.charCodeAt(0) < 32) { out.push(" "); continue; }
+    out.push(ch);
+  }
+  return out.join("");
 }
 
 /** Upscale a boatsgroup CDN thumbnail to full resolution */
@@ -190,35 +201,44 @@ function parseDenison(url: string, html: string): VesselData {
     vessel.location = clean($('[class*="location" i], .location').first().text());
   }
 
-  // ── 7. Gallery — collect ALL XLARGE boatsgroup images from img tags ──────
+  // ── 7. Gallery — collect ALL boatsgroup images from img tags ─────────────
   const imgSet = new Map<string, string>(); // base path → best URL
 
-  $("img").each((_, img) => {
-    const raw =
-      $(img).attr("data-src") ||
-      $(img).attr("data-lazy-src") ||
-      $(img).attr("src") || "";
+  // Prefer full-res /images/ path over /resize/ thumbnails
+  // Both patterns appear: data-src="/resize/...?w=800" and href="/images/..."
+  const addImg = (raw: string) => {
     if (!raw || !/boatsgroup\.com/i.test(raw)) return;
-    if (isJunk(raw)) return;
-
     const decoded = raw.replace(/&amp;/g, "&");
-    const upscaled = upscaleBoatsgroup(decoded);
-    // Key on base path (without params) to deduplicate same image at diff sizes
-    const key = upscaled.split("?")[0];
-    if (!imgSet.has(key)) imgSet.set(key, upscaled);
+    if (isJunk(decoded)) return;
+    // Prefer /images/ (full res) over /resize/ (thumbnail)
+    const fullRes = decoded
+      .replace(/\/resize\/(\d+\/\d+\/\d+\/)/, "/images/$1")  // /resize/X/Y/Z/ → /images/X/Y/Z/
+      .split("?")[0];                                          // strip all query params
+    const key = fullRes;
+    if (!imgSet.has(key)) imgSet.set(key, fullRes);
+  };
+
+  $("img").each((_, img) => {
+    addImg($(img).attr("data-src") || "");
+    addImg($(img).attr("data-lazy-src") || "");
+    addImg($(img).attr("src") || "");
   });
 
-  // Also scan raw HTML for boatsgroup XLARGE URLs missed by cheerio
-  const bgRegex = /https:\/\/images\.boatsgroup\.com\/resize\/[^\s"'&<>]+XLARGE[^\s"'&<>]*/gi;
-  let m: RegExpExecArray | null;
-  while ((m = bgRegex.exec(html)) !== null) {
-    const src = m[0].replace(/&amp;/g, "&");
-    const upscaled = upscaleBoatsgroup(src);
-    const key = upscaled.split("?")[0];
-    if (!imgSet.has(key) && !isJunk(src)) imgSet.set(key, upscaled);
-  }
+  // Anchor tags often hold full-res /images/ links (lightbox pattern)
+  $("a[href]").each((_, a) => {
+    const href = $(a).attr("href") || "";
+    if (/boatsgroup\.com\/images\//i.test(href)) addImg(href);
+  });
 
-  // Merge with any existing images (e.g. from JSON-LD), XLARGE set wins
+  // Regex sweep of raw HTML for any /images/ boatsgroup URLs missed by cheerio
+  const bgFullRegex = /https:\/\/images\.boatsgroup\.com\/images\/[^\s"'&<>]+\.(?:jpg|jpeg|png|webp)/gi;
+  // Also catch /resize/ ones we might have missed
+  const bgResizeRegex = /https:\/\/images\.boatsgroup\.com\/resize\/[^\s"'&<>]+\.(?:jpg|jpeg|png|webp)[^\s"'&<>]*/gi;
+  let m: RegExpExecArray | null;
+  while ((m = bgFullRegex.exec(html)) !== null)   addImg(m[0]);
+  while ((m = bgResizeRegex.exec(html)) !== null)  addImg(m[0]);
+
+  // Merge with any existing images (e.g. from JSON-LD)
   const existingKeys = new Set(vessel.images.map(i => i.src.split("?")[0]));
   for (const [key, src] of imgSet) {
     if (!existingKeys.has(key)) vessel.images.push({ src, alt: vessel.name });
