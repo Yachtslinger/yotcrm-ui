@@ -174,7 +174,9 @@ function parseDenison(url: string, html: string): VesselData {
     : $("body").text().slice(0, 40000);
 
   const specText = rawSpecText
-    .replace(/&#039;/g, "'").replace(/&amp;/g, "&").replace(/&quot;/g, '"');
+    .replace(/&#039;/g, "'").replace(/&amp;/g, "&").replace(/&quot;/g, '"')
+    .replace(/\r\n|\r|\n/g, " ")   // collapse ALL newlines → spaces
+    .replace(/\s{2,}/g, " ");       // collapse multiple spaces → single
 
   // Format A: "Label: Value" colon pairs — handles tanks with "N x QTY|unit"
   const colonPairs = specText.match(/([A-Z][A-Za-z\s\/\(\)]{2,40}):\s*([^\n:]{2,120})/g) || [];
@@ -225,25 +227,25 @@ function parseDenison(url: string, html: string): VesselData {
   const navSec = extractSection("Electronics And Equipment");
   if (navSec) {
     if (!vessel.radar) {
-      const m = navSec.match(/Radar\s*-\s*([^-\n,]{4,60})/i);
+      const m = navSec.match(/Radar\s*-\s*([A-Z][A-Za-z0-9\s\-\.]{2,40}?)(?:\s+[A-Z]{3,}|\s+SIMRAD|$)/);
       if (m) vessel.radar = m[1].trim();
     }
     if (!vessel.chartPlotter) {
-      const m = navSec.match(/(?:GPS\s*Plotter|Chart\s*Plotter|Evo\s*Plotter)\s*-\s*([^-\n,]{4,80})/i);
-      if (m) vessel.chartPlotter = m[1].trim();
+      const m = navSec.match(/(?:GPS\s*Plotter|Chart\s*Plotter|Evo\s*Plotter)\s*-\s*([^S][^I][^\n]{4,60}?)(?:\s+SIMRAD|\s+[A-Z]{3,}|$)/i);
+      if (!m) {
+        const m2 = navSec.match(/Plotter[^-]*-\s*([\w\"\s\(\)]{4,50}?)(?=\s+SIMRAD|\s+[A-Z]{4,}|$)/i);
+        if (m2) vessel.chartPlotter = m2[1].trim();
+      } else vessel.chartPlotter = m[1].trim();
     }
-    if (!vessel.aisSystem && /AIS/i.test(navSec)) {
-      const m = navSec.match(/AIS\s*(?:-\s*([^-\n,]{4,40}))?/i);
-      vessel.aisSystem = m?.[1]?.trim() || "SIMRAD AIS";
+    if (!vessel.aisSystem && /\bAIS\b/i.test(navSec)) {
+      vessel.aisSystem = navSec.match(/\bAIS\s*-\s*([^\s][^,\n]{4,40})/i)?.[1]?.trim() || "SIMRAD AIS";
     }
     if (!vessel.autopilot) {
-      const m = navSec.match(/Autopilot\s*(?:AP)?\s*-?\s*([^-\n,]{4,40})/i);
+      const m = navSec.match(/Autopilot\s+([A-Z][A-Z0-9\-]{2,20})/i);
       if (m) vessel.autopilot = m[1].trim();
     }
     if (!vessel.satcom) {
       if (/Starlink/i.test(navSec)) vessel.satcom = "Starlink";
-      const m = navSec.match(/(?:Satellite|VSAT|Satcom)\s*Comm[^-]*-\s*([^-\n,]{4,80})/i);
-      if (m) vessel.satcom = m[1].trim();
     }
   }
 
@@ -251,19 +253,19 @@ function parseDenison(url: string, html: string): VesselData {
   const elecSec = extractSection("Electrical Equipment");
   if (elecSec) {
     if (!vessel.gensets) {
-      const m = elecSec.match(/(?:Main\s*)?Generator\s*-\s*([^\n,]{4,80})/i);
+      const m = elecSec.match(/(?:Main\s*)?Generator\s*-\s*([^\n,]{4,60}?)(?=\s+Generator|\s+Shore|\s+Main|$)/i);
       if (m) vessel.gensets = m[1].trim();
     }
     if (!vessel.shorepower) {
-      const m = elecSec.match(/Shore\s*(?:Cable|Power)\s*-\s*([^\n,]{4,60})/i);
+      const m = elecSec.match(/Shore\s*(?:Cable|Power)\s*-\s*([^\n,]{4,40}?)(?=\s+Main|\s+Light|$)/i);
       if (m) vessel.shorepower = m[1].trim();
     }
     if (!vessel.voltageSystem) {
-      const m = elecSec.match(/Main\s*Power\s*System\s*-\s*([^\n,]{4,60})/i);
+      const m = elecSec.match(/Main\s*Power\s*System\s*-\s*([A-Za-z0-9\s]{4,30}?)(?=\s+Light|\s+Emerg|\s+Batter|$)/i);
       if (m) vessel.voltageSystem = m[1].trim();
     }
     if (!vessel.airCon) {
-      const m = elecSec.match(/Air\s*Conditioning\s*-\s*([^\n]{4,120})/i);
+      const m = elecSec.match(/Air\s*Conditioning\s*-\s*([^\n]{4,80}?)(?=\s+Galley|\s+Sanitary|\s+Ventil|\s*$)/i);
       if (m) vessel.airCon = m[1].trim();
     }
   }
