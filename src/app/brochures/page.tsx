@@ -403,6 +403,85 @@ export default function BrochuresPage() {
       // ── HTML path: use DOMParser to extract everything ──────────────────
       const doc = new DOMParser().parseFromString(raw, "text/html");
 
+      // 0. __REDUX_STATE__ (YachtWorld SSR) — highest fidelity source.
+      //    media[] contains ONLY the listing's own photos; no ads, no recommendations.
+      //    If we get images from here we skip the broad DOM/boatsgroup sweep below.
+      let reduxImagesDone = false;
+      const reduxMarker = "var __REDUX_STATE__=";
+      const rIdx = raw.indexOf(reduxMarker);
+      if (rIdx !== -1) {
+        try {
+          const jsonStart = rIdx + reduxMarker.length;
+          let depth = 0, ri = jsonStart, inStr = false, esc = false;
+          for (; ri < Math.min(raw.length, jsonStart + 3_000_000); ri++) {
+            const c = raw[ri];
+            if (esc)            { esc = false; continue; }
+            if (c === "\\" && inStr) { esc = true; continue; }
+            if (c === '"')      { inStr = !inStr; continue; }
+            if (inStr)          continue;
+            if (c === "{")      depth++;
+            else if (c === "}") { depth--; if (depth === 0) break; }
+          }
+          const redux = JSON.parse(raw.slice(jsonStart, ri + 1));
+          const d = redux?.app?.data;
+          if (d?.id) {
+            // Map specs
+            if (!v.name && d.boatName) v.name = String(d.boatName).trim();
+            if (!v.builder && d.make)  v.builder = String(d.make).trim();
+            if (!v.year && d.year)     v.year = parseInt(String(d.year));
+            const usd = d.price?.type?.amount?.USD;
+            if (!v.price && usd) v.price = `$${Number(usd).toLocaleString("en-US")}`;
+            const loc = d.location?.address;
+            if (!v.location && loc) v.location = [loc.city, loc.subdivision, loc.country].filter(Boolean).join(", ");
+            if (!v.description && d.descriptionNoHTML) v.description = String(d.descriptionNoHTML).slice(0, 2000);
+            const dims = d.specifications?.dimensions;
+            if (dims) {
+              if (!v.loa  && dims.lengths?.nominal?.ft) v.loa  = `${dims.lengths.nominal.ft} ft / ${dims.lengths.nominal.m} m`;
+              if (!v.beam && dims.beam?.ft)             v.beam = `${dims.beam.ft} ft / ${dims.beam.m} m`;
+              if (!v.draft && dims.maxDraft?.ft)        v.draft = `${dims.maxDraft.ft} ft / ${dims.maxDraft.m} m`;
+            }
+            const spd = d.specifications?.speedDistance;
+            if (spd) {
+              if (!v.maxSpeed    && spd.maxSpeed?.kn)      v.maxSpeed    = `${spd.maxSpeed.kn} kn`;
+              if (!v.cruiseSpeed && spd.cruisingSpeed?.kn) v.cruiseSpeed = `${spd.cruisingSpeed.kn} kn`;
+              if (!v.range       && spd.range?.nmi)        v.range       = `${spd.range.nmi} nmi`;
+            }
+            const acc = d.specifications?.accommodation;
+            if (acc) {
+              if (!v.staterooms && acc.cabins != null) v.staterooms = String(acc.cabins);
+              if (!v.guests     && acc.passengers != null) v.guests = String(acc.passengers);
+              if (!v.crew       && acc.crew != null)   v.crew = String(acc.crew);
+            }
+            const engs: any[] = d.propulsion?.engines || [];
+            if (!v.engines && engs.length) {
+              const e0 = engs[0];
+              const parts = [e0.make, e0.model].filter(Boolean);
+              if (parts.length) v.engines = (engs.length > 1 ? `${engs.length}x ` : "") + parts.join(" ");
+              if (!v.power && e0.power?.hp) v.power = `${e0.power.hp} hp`;
+            }
+            const tanks = d.tanks || {};
+            const fuel = tanks.fuel?.[0]?.capacity;
+            if (!v.fuelTank && fuel) v.fuelTank = `${Math.round(fuel.gal).toLocaleString("en-US")} gal / ${Math.round(fuel.l).toLocaleString("en-US")} lt`;
+            const fresh = tanks.fresh?.[0]?.capacity || tanks.freshWater?.[0]?.capacity;
+            if (!v.freshWater && fresh) v.freshWater = `${Math.round(fresh.gal).toLocaleString("en-US")} gal / ${Math.round(fresh.l).toLocaleString("en-US")} lt`;
+
+            // Images — media[] only; normalise protocol-relative URLs
+            const media: any[] = d.media || [];
+            const seen = new Set<string>();
+            for (const m of media) {
+              if (m.mediaType === "video" || m.videoUrl) continue;
+              let src: string = m.originalImageUrl || m.url || m.thumbnailUrl || "";
+              if (!src) continue;
+              if (src.startsWith("//")) src = "https:" + src;
+              if (!src.startsWith("http") || /logo|icon|sprite|flag|avatar|servedby/i.test(src)) continue;
+              const up = _upscale(src);
+              if (!seen.has(up)) { seen.add(up); images.push({ src: up, alt: m.title || "" }); }
+            }
+            if (images.length > 0) reduxImagesDone = true;
+          }
+        } catch { /* malformed Redux — fall through to JSON-LD */ }
+      }
+
       // 1. JSON-LD (richest source — YachtWorld, BoatTrader embed everything here)
       doc.querySelectorAll('script[type="application/ld+json"]').forEach(el => {
         try {
@@ -462,21 +541,23 @@ export default function BrochuresPage() {
       const ogImg = metaP("og:image");
       if (ogImg && !images.some(i => i.src === ogImg)) images.push({ src: _upscale(ogImg), alt: "" });
 
-      // 3. All boatsgroup CDN image tags (data-src, src, srcset)
-      const seen = new Set(images.map(i => i.src));
-      doc.querySelectorAll("img[data-src], img[src]").forEach(img => {
-        const src = img.getAttribute("data-src") || img.getAttribute("src") || "";
-        if (/boatsgroup\.com/i.test(src) && !/logo|icon|sprite/i.test(src)) {
-          const up = _upscale(src);
-          if (!seen.has(up)) { seen.add(up); images.push({ src: up, alt: "" }); }
+      // 3. boatsgroup CDN sweep — only if Redux didn't give us images
+      //    (avoids picking up recommended listings / ad images)
+      if (!reduxImagesDone) {
+        const seen = new Set(images.map(i => i.src));
+        doc.querySelectorAll("img[data-src], img[src]").forEach(img => {
+          const src = img.getAttribute("data-src") || img.getAttribute("src") || "";
+          if (/boatsgroup\.com/i.test(src) && !/logo|icon|sprite/i.test(src)) {
+            const up = _upscale(src);
+            if (!seen.has(up)) { seen.add(up); images.push({ src: up, alt: "" }); }
+          }
+        });
+        const bgRx = /https:\/\/images\.boatsgroup\.com\/resize\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp)[^\s"'<>]*/gi;
+        let m: RegExpExecArray | null;
+        while ((m = bgRx.exec(raw)) !== null) {
+          const up = _upscale(m[0]);
+          if (!seen.has(up) && !/logo|icon|sprite/i.test(up)) { seen.add(up); images.push({ src: up, alt: "" }); }
         }
-      });
-      // Also sweep raw HTML for any missed boatsgroup URLs (they may be in JS/next data)
-      const bgRx = /https:\/\/images\.boatsgroup\.com\/resize\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp)[^\s"'<>]*/gi;
-      let m: RegExpExecArray | null;
-      while ((m = bgRx.exec(raw)) !== null) {
-        const up = _upscale(m[0]);
-        if (!seen.has(up) && !/logo|icon|sprite/i.test(up)) { seen.add(up); images.push({ src: up, alt: "" }); }
       }
 
       // 4. DOM spec tables
@@ -588,10 +669,14 @@ export default function BrochuresPage() {
 
   // ── Paste helpers ────────────────────────────────────────────────────────────
   function _upscale(src: string): string {
-    return src
+    if (src.startsWith("//")) src = "https:" + src;
+    let out = src
       .replace(/[?&]w=\d+/, m => m.replace(/\d+/, "1200"))
-      .replace(/[?&]format=webp/, "").replace(/[?&]exact/, "")
+      .replace(/[?&]format=webp/g, "").replace(/[?&]exact/g, "")
       .replace(/&&+/g, "&").replace(/[?&]$/, "");
+    if (out.includes("boatsgroup.com/resize/") && !/[?&]w=/.test(out))
+      out += (out.includes("?") ? "&" : "?") + "w=1200";
+    return out;
   }
 
   function _assignFromProp(v: Partial<VesselData>, rawLabel: string, rawVal: string) {
