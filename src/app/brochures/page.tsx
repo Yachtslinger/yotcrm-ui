@@ -382,47 +382,181 @@ export default function BrochuresPage() {
     showToast(`PDF staged: ${file.name} — click Build Brochure to include it`, "success");
   }
 
-  /* ── Paste import — parse YachtWorld / any listing page text client-side ── */
+  /* ── Paste import — comprehensive parser for any listing page text ── */
   function handlePasteImport() {
     const text = pasteText.trim();
     if (!text) return;
 
     const v: Partial<VesselData> = {};
 
-    // Name: first line that looks like "YYYY Make Model" or a title
-    const titleMatch = text.match(/^([A-Z][^\n]{5,60})\n/m);
-    if (titleMatch) v.name = titleMatch[1].trim();
+    // Helper: grab value after "Label: value" anywhere in text (case-insensitive)
+    const grab = (pattern: RegExp): string => {
+      const m = text.match(pattern);
+      return m ? m[1].trim().replace(/\s+/g, " ") : "";
+    };
 
-    // Year from title or standalone
-    const yearMatch = text.match(/\b(19[5-9]\d|20[0-4]\d)\b/);
-    if (yearMatch) v.year = parseInt(yearMatch[1]);
+    // ── Identity ──────────────────────────────────────────────────────────
+    // Name: first substantial ALL-CAPS or Title Case line that isn't a section header
+    const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+    for (const line of lines) {
+      if (line.length > 3 && line.length < 60 &&
+          !/^(SPECIFICATIONS|HIGHLIGHTS|ELECTRICAL|ELECTRONICS|MACHINERY|GALLEY|SAFETY|REFIT|MISC|DECK|ANCHOR|COMMUNICATION|CONTROL|A\/V|AUDIO)/i.test(line) &&
+          !/^(Yacht Details|Location:|Engines:|Last Updated|Asking Price|Maximum Speed|Max Draft|Cruising Speed|Beam:|Hull|Fuel|Fresh|Holding|Max Pass|Cabins|Heads)/i.test(line)) {
+        v.name = line.replace(/\s*HIGHLIGHTS?$/i, "").replace(/\s*ADDITIONAL\s*INFORMATION$/i, "").trim();
+        break;
+      }
+    }
 
-    // Price: US$X,XXX,XXX or $X,XXX,XXX
-    const priceMatch = text.match(/\b(US\$[\d,]+|USD\s*[\d,]+|\$[\d,]+|€[\d,]+)\b/);
-    if (priceMatch) v.price = priceMatch[1];
+    const yearM = text.match(/\b(19[5-9]\d|20[0-4]\d)\b/);
+    if (yearM) v.year = parseInt(yearM[1]);
 
-    // Location: "City, State" or "City, Country"
-    const locMatch = text.match(/\n([A-Z][a-zA-Z\s]{2,30},\s+[A-Z][a-zA-Z\s]{2,20})\n/);
-    if (locMatch) v.location = locMatch[1].trim();
+    const priceM = text.match(/(?:Asking Price[^$€£\d]*|price[^$€£\d]{0,10})(US\$[\d,]+|\$[\d,]+|€[\d,]+|£[\d,]+)/i);
+    if (priceM) v.price = priceM[1];
+    else {
+      const priceM2 = text.match(/\b(US\$[\d,]+|\$[\d,]+|€[\d,]+)\b/);
+      if (priceM2) v.price = priceM2[1];
+    }
 
-    // LOA: "65'" or "20.5 m" or "LOA: 65'"
-    const loaMatch = text.match(/(?:LOA|Length[^:]*?):?\s*([\d.]+\s*(?:m|ft|'))/i);
-    if (loaMatch) v.loa = loaMatch[1].trim();
+    const locM = text.match(/Location:\s*([^\n]{3,50})/i);
+    if (locM) v.location = locM[1].trim();
 
-    // Beam
-    const beamMatch = text.match(/(?:Beam)[^:]*?:?\s*([\d.]+\s*(?:m|ft|'))/i);
-    if (beamMatch) v.beam = beamMatch[1].trim();
+    // Builder from "XX' Make YYYY" pattern
+    const builderM = text.match(/\d+['\s]+([\w]+(?:\s+[\w]+)?)\s+\d{4}/);
+    if (builderM && !v.name?.toLowerCase().includes(builderM[1].toLowerCase())) {
+      v.builder = builderM[1];
+    }
 
-    // Images: boatsgroup CDN URLs
+    // ── Dimensions ────────────────────────────────────────────────────────
+    const loaM = grab(/(?:LOA|Length[^:\n]{0,20}):\s*([\d.]+\s*(?:m|ft|')(?:\s*[\d"]+)?)/i);
+    if (loaM) v.loa = loaM;
+
+    const beamM = grab(/Beam:\s*([\d'."\s]+(?:ft|m|'|")?)/i);
+    if (beamM) v.beam = beamM;
+
+    const draftM = grab(/(?:Max Draft|Draft|Draught):\s*([\d'."\s]+(?:ft|m|'|")?)/i);
+    if (draftM) v.draft = draftM;
+
+    // ── Hull ──────────────────────────────────────────────────────────────
+    const hullM = grab(/Hull(?:\s+Material)?:\s*([^\n]{2,40})/i);
+    if (hullM) v.hullMaterial = hullM;
+
+    // ── Performance ───────────────────────────────────────────────────────
+    const maxSpdM = grab(/(?:Maximum Speed|Top Speed|Max Speed):\s*([\d.]+\s*kn(?:ots?)?)/i);
+    if (maxSpdM) v.maxSpeed = maxSpdM;
+
+    const cruiseSpdM = grab(/Cruising Speed:\s*([\d.]+\s*kn(?:ots?)?)/i);
+    if (cruiseSpdM) v.cruiseSpeed = cruiseSpdM;
+
+    // ── Engines ───────────────────────────────────────────────────────────
+    const engM = grab(/Engines?:\s*([^\n]{2,80})/i);
+    if (engM) v.engines = engM;
+
+    const engHoursM = text.match(/(?:Port\s+)?(?:Engine\s+)?Hours[^:\n]*:\s*([\d,]+)/i) ||
+                      text.match(/(\d[\d,]+)\s*(?:total\s+)?hours?/i);
+    if (engHoursM) v.engineHours = engHoursM[1];
+
+    // ── Tanks ─────────────────────────────────────────────────────────────
+    // Denison format: "1 x 1347|gallon" or just "1347 gallon"
+    const fuelM = text.match(/Fuel\s*(?:Tank)?:\s*(?:\d+\s*x\s*)?([\d,]+)\s*[|]?\s*(?:gallon|liter|litre|gal|lt)/i) ||
+                  text.match(/Fuel[^:\n]*:\s*(\d[\d,]+)/i);
+    if (fuelM) v.fuelTank = `${fuelM[1].replace(/,/g,"")} gal`;
+
+    const fwM = text.match(/Fresh\s*Water:\s*(?:\d+\s*x\s*)?([\d,]+)\s*[|]?\s*(?:gallon|liter|litre|gal|lt)/i);
+    if (fwM) v.freshWater = `${fwM[1].replace(/,/g,"")} gal`;
+
+    const holdM = text.match(/Holding(?:\s*Tank)?:\s*(?:\d+\s*x\s*)?([\d,]+)\s*[|]?\s*(?:gallon|liter|litre|gal|lt)/i);
+    if (holdM) v.holdingTank = `${holdM[1].replace(/,/g,"")} gal`;
+
+    // ── Accommodation ─────────────────────────────────────────────────────
+    const guestsM = grab(/(?:Max\s+Passengers?|Guests?|Pax):\s*(\d+)/i);
+    if (guestsM) v.guests = guestsM;
+
+    const cabinsM = grab(/(?:Cabins?|Staterooms?):\s*(\d+)/i);
+    if (cabinsM) v.staterooms = cabinsM;
+
+    // ── Electrical & Generators ───────────────────────────────────────────
+    // Main generator line(s) — grab first generator description
+    const genM = grab(/(?:Main\s+Generator|Generator\s+Set|Genset)[^:\n]*-?\s*([^\n]{5,80})/i) ||
+                 grab(/(?:Main\s+Generator|Generator)[^:\n]*:\s*([^\n]{5,80})/i);
+    if (genM) v.gensets = genM;
+
+    const genKwM = grab(/(?:Generator|Genset)[^:\n]*?(\d+(?:\.\d+)?\s*[kK][wW])/);
+    if (genKwM) v.generatorKW = genKwM;
+
+    const shoreM = grab(/Shore\s*(?:Power|Cable)[^:\n]*:\s*([^\n]{3,60})/i);
+    if (shoreM) v.shorepower = shoreM;
+
+    const voltM = grab(/(?:Main\s+Power\s+System|Voltage|Power\s+System)[^:\n]*:\s*([^\n]{2,40})/i);
+    if (voltM) v.voltageSystem = voltM;
+
+    const airConM = grab(/Air\s+Cond[a-z]*[^:\n]*:\s*([^\n]{3,80})/i);
+    if (airConM) v.airCon = airConM;
+
+    // ── Propulsion extras ─────────────────────────────────────────────────
+    const bowM = grab(/Bow\s+(?:and\s+Stern\s+)?Thruster[s]?[^:\n]*-?\s*([^\n]{3,80})/i);
+    if (bowM) v.bowThruster = bowM;
+
+    const sternM = grab(/Stern\s+Thruster[s]?[^:\n]*-?\s*([^\n]{3,80})/i);
+    if (sternM) v.sternThruster = sternM;
+
+    // ── Navigation & Comms ────────────────────────────────────────────────
+    // Collect all navigation equipment lines into one block
+    const navItems: string[] = [];
+    const radarM = text.match(/Radar[^:\n]*[-:]\s*([^\n]{3,60})/i);
+    if (radarM) { v.radar = radarM[1].trim(); navItems.push(radarM[1].trim()); }
+
+    const plotterM = text.match(/Plotter[^:\n]*[-:]\s*([^\n]{3,60})/i);
+    if (plotterM) v.chartPlotter = plotterM[1].trim();
+
+    const aisM = text.match(/AIS[^:\n]*[-:]\s*([^\n]{3,60})/i) ||
+                 text.match(/\bAIS\b[^\n]*/i);
+    if (aisM) v.aisSystem = aisM[1]?.trim() || "SIMRAD AIS";
+
+    const autopilotM = text.match(/Autopilot[^:\n]*[-:]\s*([^\n]{3,60})/i);
+    if (autopilotM) v.autopilot = autopilotM[1].trim();
+
+    const satcomM = text.match(/(?:Satellite\s+Comm|VSAT|Satcom|Starlink)[^:\n]*[-:]\s*([^\n]{3,60})/i) ||
+                    text.match(/Starlink/i);
+    if (satcomM) v.satcom = satcomM[1]?.trim() || "Starlink";
+
+    // GPS/plotter block → navigation field
+    const gpsM = text.match(/GPS[^:\n]*[-:]\s*([^\n]{3,60})/i);
+    if (gpsM) navItems.push(gpsM[1].trim());
+    const echoM = text.match(/Echosounder[^:\n]*[-:]\s*([^\n]{3,60})/i);
+    if (echoM) navItems.push(echoM[1].trim());
+    if (navItems.length) v.navigation = navItems.join("; ");
+
+    const anchorM = grab(/Anchor\s*Winch[^:\n]*[-:]\s*([^\n]{3,80})/i);
+    if (anchorM) v.anchoring = anchorM;
+
+    const windlassM = grab(/(?:Anchor\s*Winch|Windlass)[^:\n]*[-:]\s*([^\n]{3,80})/i);
+    if (windlassM) v.windlass = windlassM;
+
+    // ── Safety ────────────────────────────────────────────────────────────
+    const fireM = grab(/(?:Fire\s+Suppression|Fixed\s+Fire|Fire\s+Pump)[^:\n]*[-:?\s]\s*([^\n]{3,60})/i);
+    if (fireM) v.fireSuppression = fireM;
+
+    // ── Refit details ─────────────────────────────────────────────────────
+    // Collect refit/upgrade info into refitDetails
+    const refitSection = text.match(/REFIT\s+UPGRADES?([\s\S]*?)(?:\n[A-Z\s]{5,}\n|$)/i);
+    if (refitSection) {
+      const refitLines = refitSection[1].trim().split("\n")
+        .map(l => l.trim()).filter(l => l.length > 3).slice(0, 10);
+      if (refitLines.length) v.refitDetails = refitLines.join(" · ");
+    }
+
+    // Refit year: "Full Paint 2023" or "New TDS Teak Decks 2025"
+    const refitYrM = text.match(/(?:Full Paint|Refit|New Teak|Major Refit)\s+(20\d\d|19\d\d)/i);
+    if (refitYrM) v.refitYear = refitYrM[1];
+
+    // ── Images: boatsgroup CDN ────────────────────────────────────────────
     const imgRegex = /https:\/\/images\.boatsgroup\.com\/[^\s"')]+\.(?:jpg|jpeg|png|webp)/gi;
     const imgMatches = text.match(imgRegex) || [];
     const seen = new Set<string>();
     const images: { src: string; alt: string }[] = [];
     for (const src of imgMatches) {
-      // Upscale: swap w=200 → w=1200
       const big = src.replace(/[?&]w=\d+/, m => m.replace(/\d+/, "1200"))
-                     .replace(/[?&]format=webp/, "")
-                     .replace(/[?&]exact/, "");
+                     .replace(/[?&]format=webp/, "").replace(/[?&]exact/, "");
       if (!seen.has(big) && !/logo|icon|sprite/i.test(big)) {
         seen.add(big);
         images.push({ src: big, alt: "" });
@@ -430,11 +564,14 @@ export default function BrochuresPage() {
     }
     if (images.length) v.images = images;
 
-    // Description: longest paragraph (>100 chars, not a heading)
-    const paras = text.split(/\n{2,}/).map(p => p.trim()).filter(p => p.length > 100 && !/^[A-Z\s]+$/.test(p));
+    // ── Description ───────────────────────────────────────────────────────
+    const paras = text.split(/\n{2,}/).map(p => p.trim())
+      .filter(p => p.length > 80 && !/^[A-Z\s]+$/.test(p) && !/^[A-Z][A-Z\s]+$/.test(p.split("\n")[0]));
     if (paras.length) v.description = paras[0].slice(0, 800);
 
-    if (!v.name && !v.price && !images.length) {
+    // ── Validation ────────────────────────────────────────────────────────
+    const fieldCount = Object.keys(v).filter(k => (v as Record<string,unknown>)[k]).length;
+    if (fieldCount === 0) {
       showToast("Couldn't extract data — try selecting all text on the listing page (CMD+A, CMD+C)", "error");
       return;
     }
@@ -445,12 +582,27 @@ export default function BrochuresPage() {
       features: [], sourceUrl: url || "",
     } as unknown as VesselData);
 
-    const merged: VesselData = { ...base, ...v, images: v.images || base.images || [] };
+    const merged: VesselData = { ...base };
+    // Merge: only fill fields that are currently empty
+    for (const [k, val] of Object.entries(v)) {
+      const key = k as keyof VesselData;
+      if (key === "images") continue;
+      const existing = (merged as Record<string,unknown>)[k];
+      if (!existing || existing === "" || existing === null || existing === 0) {
+        (merged as Record<string,unknown>)[k] = val;
+      }
+    }
+    // Always merge images (append, don't overwrite)
+    if (images.length) {
+      const existingSrcs = new Set(merged.images.map(i => i.src));
+      merged.images = [...merged.images, ...images.filter(i => !existingSrcs.has(i.src))];
+    }
+
     setVessel(prepVessel(merged));
     setPasteText("");
     setShowPasteImport(false);
     if (step !== "preview") setStep("preview");
-    showToast(`Paste import: ${Object.keys(v).filter(k => (v as Record<string,unknown>)[k]).length} fields extracted${images.length ? ` · ${images.length} images` : ""}`, "success");
+    showToast(`Paste import: ${fieldCount} fields extracted${images.length ? ` · ${images.length} images` : ""}`, "success");
   }
 
   /* ── Hidden fields ── */

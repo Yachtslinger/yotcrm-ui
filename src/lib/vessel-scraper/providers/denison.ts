@@ -169,13 +169,23 @@ function parseDenison(url: string, html: string): VesselData {
 
   // ── 4. Flat "Label: Value" spec text under .specifications ───────────────
   // Denison renders specs as: "Cruising Speed: 18 kn Maximum Speed: 12 kn Beam: 27' 11'' ..."
+  // Tank format: "Fuel Tank: 1 x 7526|gallon" → convert pipe-qty to readable
   const specContainer = $(".specifications, [class*='spec'], [class*='detail']").first();
   const rawSpecText = specContainer.length
     ? specContainer.text()
-    : $("body").text().slice(0, 30000); // fallback: mine full page text
+    : $("body").text().slice(0, 30000);
 
-  // Split on known label patterns — look for "Word(s): value" pairs
-  const specPairs = rawSpecText.match(/([A-Z][A-Za-z\s\/\(\)]+?):\s*([^\n:]{2,80})/g) || [];
+  // Normalise Denison's "N x QUANTITY|unit" tank notation before parsing
+  const normSpecText = rawSpecText.replace(
+    /(\d+)\s*x\s*([\d,]+)\s*\|\s*(gallon|liter|litre|gal|lt)/gi,
+    (_, _count, qty, unit) => {
+      const n = parseInt(qty.replace(/,/g, ""));
+      const isGal = /gal/i.test(unit);
+      return isGal ? `${n.toLocaleString("en-US")} gal` : `${n.toLocaleString("en-US")} lt`;
+    }
+  );
+
+  const specPairs = normSpecText.match(/([A-Z][A-Za-z\s\/\(\)]+?):\s*([^\n:]{2,80})/g) || [];
   for (const pair of specPairs) {
     const colon = pair.indexOf(":");
     const label = pair.slice(0, colon).trim();
