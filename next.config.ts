@@ -3,7 +3,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   outputFileTracingRoot: path.join(__dirname),
-  serverExternalPackages: ["better-sqlite3", "googleapis"],
+  serverExternalPackages: ["better-sqlite3", "googleapis", "puppeteer", "puppeteer-extra", "puppeteer-extra-plugin-stealth", "clone-deep", "merge-deep"],
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },
   webpack: (config: { externals: unknown[] }) => {

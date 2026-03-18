@@ -12,7 +12,8 @@
  *   2. Puppeteer stealth fallback (if CF blocks plain fetch)
  *   3. Slug fallback (always populates name/year/builder)
  */
-import puppeteer from "puppeteer";
+import puppeteerExtra from "puppeteer-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import type { VesselData } from "../types";
 import { emptyVessel } from "../types";
 import { clean, cleanHeadline, dedupeImages } from "../utils";
@@ -249,22 +250,28 @@ export async function scrapeYachtWorld(url: string): Promise<VesselData> {
     console.warn("[YachtWorld] __REDUX_STATE__ found but data.id missing — falling through to Puppeteer");
   }
 
-  // ── Strategy 2: Puppeteer → window.__REDUX_STATE__ via evaluate ───────────
-  // Always works — bypasses Cloudflare challenge, accesses JS state directly
+  // ── Strategy 2: Puppeteer + stealth → window.__REDUX_STATE__ ───────────────
+  // puppeteer-extra-plugin-stealth patches 20+ browser fingerprints so CF
+  // treats the headless browser as a real user — bypasses JS challenge pages.
+  puppeteerExtra.use(StealthPlugin());
   let browser = null;
   try {
-    browser = await (puppeteer as any).launch({
+    browser = await puppeteerExtra.launch({
       headless: true,
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
       args: ["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage","--disable-blink-features=AutomationControlled"],
     });
     const page = await (browser as any).newPage();
-    await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, "webdriver", { get: () => false });
-    });
     await page.setUserAgent(UA);
     await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" });
-    await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
+    // Use domcontentloaded then explicitly wait for __REDUX_STATE__ to be set.
+    // networkidle2 fires too early on CF challenge pages — this ensures the real
+    // YachtWorld listing page has SSR-rendered its Redux state before we evaluate.
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.waitForFunction(
+      () => !!(window as any).__REDUX_STATE__?.app?.data?.id,
+      { timeout: 20000 }
+    ).catch(() => {/* CF challenge or listing not found — evaluate will return null */});
 
     // __REDUX_STATE__ is set by SSR — available immediately without waiting for analytics
     // NOTE: We extract ONLY primitives inside evaluate() to avoid Puppeteer JSON
