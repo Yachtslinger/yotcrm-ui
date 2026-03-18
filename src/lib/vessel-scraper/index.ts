@@ -42,18 +42,43 @@ export async function scrapeVessel(url: string): Promise<VesselData> {
 
   // YachtWorld is Cloudflare-blocked on Railway. Both YW and BoatTrader are
   // owned by Boats Group and share identical listing IDs and slug formats.
-  // Silently rewrite: yachtworld.com/yacht/SLUG → boattrader.com/boat/SLUG
-  const rewritten = normalised.replace(
-    /^https?:\/\/(?:www\.)?yachtworld\.com\/yacht\//i,
-    "https://www.boattrader.com/boat/"
-  );
+  // Try rewriting: yachtworld.com/yacht/SLUG → boattrader.com/boat/SLUG
+  // If BoatTrader also blocks, fall through to the YachtWorld slug-fallback provider.
+  const isYachtWorld = /yachtworld\.com\/yacht\//i.test(normalised);
+  const rewritten = isYachtWorld
+    ? normalised.replace(/^https?:\/\/(?:www\.)?yachtworld\.com\/yacht\//i, "https://www.boattrader.com/boat/")
+    : normalised;
 
   const { hostname } = new URL(rewritten);
   const provider = PROVIDERS.find(p => p.pattern.test(hostname));
   if (provider) {
-    return provider.fn(rewritten);
+    try {
+      const result = await provider.fn(rewritten);
+      // If BoatTrader returned only stub data (no images, no price) AND
+      // the original was a YachtWorld URL, also run the YW slug fallback to merge
+      if (isYachtWorld && result.images.length === 0 && !result.price) {
+        const ywProvider = PROVIDERS.find(p => p.pattern.test("www.yachtworld.com"));
+        if (ywProvider) {
+          try {
+            const ywResult = await ywProvider.fn(normalised);
+            // Merge: yw fills any empty fields
+            if (!result.name && ywResult.name) result.name = ywResult.name;
+            if (!result.year && ywResult.year) result.year = ywResult.year;
+            if (!result.builder && ywResult.builder) result.builder = ywResult.builder;
+          } catch { /* slug fallback is best-effort */ }
+        }
+      }
+      return result;
+    } catch (err) {
+      // BoatTrader hard-failed — fall through to YachtWorld slug provider
+      if (isYachtWorld) {
+        const ywProvider = PROVIDERS.find(p => p.pattern.test("www.yachtworld.com"));
+        if (ywProvider) return ywProvider.fn(normalised);
+      }
+      throw err;
+    }
   }
-  // Generic fallback — attempts cheerio + JSON-LD extraction
+  // Generic fallback
   return genericScrape(rewritten);
 }
 

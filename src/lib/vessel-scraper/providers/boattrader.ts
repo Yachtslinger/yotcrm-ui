@@ -32,9 +32,25 @@ export async function scrapeBoatTrader(url: string): Promise<VesselData> {
     cache: "no-store",
     redirect: "follow",
   });
+  // 403/429 = blocked by Cloudflare — return slug-derived stub rather than crashing
+  if (res.status === 403 || res.status === 429 || res.status === 503) {
+    const vessel = emptyVessel(url);
+    vessel.name = slugToName(url);
+    const ym = url.match(/\/(\d{4})-/);
+    if (ym) vessel.year = parseInt(ym[1]);
+    const makeM = url.match(/\/\d{4}-([a-z]+(?:-[a-z]+)?)-/i);
+    if (makeM) vessel.builder = makeM[1].replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    return vessel;
+  }
   if (!res.ok) throw new Error(`BoatTrader fetch failed: ${res.status}`);
   const html = await res.text();
   return parseBoatTrader(url, html);
+}
+
+function slugToName(url: string): string {
+  const slug = url.split("/").filter(Boolean).pop() || "";
+  const withoutId = slug.replace(/-\d{6,8}$/, "");
+  return withoutId.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 }
 
 function parseBoatTrader(url: string, html: string): VesselData {
