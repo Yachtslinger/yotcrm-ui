@@ -41,15 +41,22 @@ export async function scrapeDenison(url: string): Promise<VesselData> {
   return parseDenison(url, html);
 }
 
-/** Decode HTML entities in a string so JSON.parse won't choke */
+/** Decode HTML entities AND sanitize literal newlines inside JSON string values */
 function decodeEntities(s: string): string {
-  return s
+  // 1. Decode HTML entities
+  let out = s
     .replace(/&#039;/g, "'")
     .replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"')
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&apos;/g, "'");
+  // 2. Replace literal newlines/tabs inside JSON string values with spaces
+  //    (Denison embeds raw newlines in description values — invalid JSON)
+  out = out.replace(/"(?:[^"\\]|\\.)*"/g, (match) =>
+    match.replace(/\n/g, " ").replace(/\r/g, "").replace(/\t/g, " ")
+  );
+  return out;
 }
 
 /** Upscale a boatsgroup CDN thumbnail to full resolution */
