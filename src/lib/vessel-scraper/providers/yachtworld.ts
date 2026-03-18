@@ -325,10 +325,14 @@ export async function scrapeYachtWorld(url: string): Promise<VesselData> {
           freshL:   (tanks.fresh || tanks.freshWater)?.[0]?.capacity?.l   || 0,
           holdGal: tanks.holding?.[0]?.capacity?.gal || 0, holdL: tanks.holding?.[0]?.capacity?.l || 0,
         },
-        // Media
+        // Media — normalise protocol-relative URLs (//images.boatsgroup.com/...) to https:
         images: media
           .filter((m: any) => (m.mediaType === "image" || m.originalImageUrl || m.url) && !(/logo|icon|sprite|flag|avatar/i.test(m.url || "")))
-          .map((m: any) => ({ src: m.originalImageUrl || m.url || m.thumbnailUrl || "", title: m.title || "" }))
+          .map((m: any) => {
+            let src = m.originalImageUrl || m.url || m.thumbnailUrl || "";
+            if (src.startsWith("//")) src = "https:" + src;
+            return { src, title: m.title || "" };
+          })
           .filter((m: any) => m.src.startsWith("http")),
         videos: media
           .filter((m: any) => m.mediaType === "video" || m.videoUrl)
