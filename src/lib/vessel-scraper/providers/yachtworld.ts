@@ -1,343 +1,203 @@
 /**
- * YachtWorld scraper — v2
- * Strategy (in order):
- *   1. Plain fetch with realistic headers (fast, works if YW serves SSR)
- *   2. Stealthy Puppeteer fetch (slower, bypasses Cloudflare JS challenges)
- *   3. URL-slug fallback — always populates name/year/builder from the URL
- *
- * Image upscaling: boatsgroup CDN thumbnails arrive at ?w=200 — we replace to ?w=1200.
+ * YachtWorld scraper — v3
+ * YachtWorld uses a React SPA. After JS runs:
+ *   - window.digitalData.product[0].productInfo  → name, price, location, year, specs
+ *   - document.querySelectorAll('img[src*="boatsgroup"]') → all gallery images
+ *   - document.querySelector('h1')               → vessel title
+ *   - URL slug                                    → year / make / model fallback
  */
-import * as cheerio from "cheerio";
+import puppeteer from "puppeteer";
 import type { VesselData } from "../types";
 import { emptyVessel } from "../types";
 import { clean, cleanHeadline, dedupeImages, assignSpec } from "../utils";
-import { stealthFetch } from "../../campaign/providers/stealthFetch";
 
 // ── URL slug parser ───────────────────────────────────────────────────────────
-// URL format: /yacht/YYYY-make-words-model-words-LISTINGID/
-// e.g. /yacht/2017-northern-marine-expedition-9034848/
 function parseSlug(url: string): Partial<VesselData> {
   const slug = url.split("/").filter(Boolean).pop() || "";
   const result: Partial<VesselData> = {};
-
-  // Extract listing ID (trailing 7-digit number)
-  const idMatch = slug.match(/[- ](\d{6,8})$/);
-  const listingId = idMatch ? idMatch[1] : null;
-
-  // Extract year (4-digit at start)
   const yearMatch = slug.match(/^(\d{4})-/);
   if (yearMatch) result.year = parseInt(yearMatch[1]);
-
-  // Extract make + model from middle portion
+  const idMatch = slug.match(/-(\d{6,8})$/);
+  const listingId = idMatch?.[1] || null;
   if (yearMatch && listingId) {
-    const middle = slug
-      .replace(/^\d{4}-/, "")         // remove year
-      .replace(/-?\d{6,8}$/, "")      // remove listing ID
-      .trim();
-
-    // Title-case and space-join
+    const middle = slug.replace(/^\d{4}-/, "").replace(/-?\d{6,8}$/, "");
     const words = middle.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1));
-    // First word is typically the builder — rest is model
-    if (words.length >= 2) {
-      result.builder = words[0];
-      result.name = words.join(" ");   // e.g. "Northern Marine Expedition"
-    } else if (words.length === 1) {
-      result.name = words[0];
-    }
+    result.builder = words[0] || "";
+    result.name = `${result.year} ${words.join(" ")}`;
   }
-
-  // Full display name with year
-  if (result.year && result.name) {
-    result.name = `${result.year} ${result.name}`;
-  }
-
   return result;
 }
 
-// ── Image URL upscaler ────────────────────────────────────────────────────────
-// boatsgroup CDN: replace small w= param with 1200px for full-res
-function upscaleBoatsgroup(src: string): string {
-  if (!src.includes("boatsgroup.com") && !src.includes("images.boatsgroup")) return src;
-  // Remove all resize/quality params and request full width
+function upscale(src: string): string {
+  if (!src) return src;
   return src
-    .replace(/[?&]w=\d+/, (m) => m.replace(/\d+/, "1200"))
-    .replace(/[?&]format=webp/, "")
-    .replace(/[?&]exact/, "")
-    .replace(/[?&]ratio=[^&]+/, "")
+    .replace(/[?&]w=\d+/, m => m.replace(/\d+/, "1200"))
+    .replace(/[?&]format=webp/g, "")
+    .replace(/[?&]exact/g, "")
+    .replace(/[?&]ratio=[^&]+/g, "")
     .replace(/&&+/g, "&")
     .replace(/[?&]$/, "");
 }
 
-// ── Boatsgroup image fetcher via YachtWorld embed page ───────────────────────
-// The standard page is Cloudflare-blocked, but we can still extract images
-// from the raw HTML by trying alternate entry points and parsing img tags.
-async function fetchBoatsgroupImages(listingId: string): Promise<{ src: string; alt: string }[]> {
-  // Try fetching the YachtWorld listing via a Google cache or alternative proxy
-  const urls = [
-    `https://webcache.googleusercontent.com/search?q=cache:yachtworld.com/yacht/-${listingId}/`,
-    `https://www.bing.com/search?q=yachtworld+${listingId}&format=json`,
-  ];
-
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, {
-        headers: { "User-Agent": "Mozilla/5.0", "Accept": "text/html,*/*" },
-        signal: AbortSignal.timeout(8000),
-      });
-      if (!res.ok) continue;
-      const text = await res.text();
-      const imgRegex = /https:\/\/images\.boatsgroup\.com\/resize\/[^\s"')]+\.(?:jpg|jpeg|png|webp)/gi;
-      const imgs = text.match(imgRegex) || [];
-      if (imgs.length > 0) {
-        const seen = new Set<string>();
-        return imgs
-          .map(src => upscaleBoatsgroup(src))
-          .filter(src => !seen.has(src) && seen.add(src) && !isJunk(src))
-          .map(src => ({ src, alt: "" }));
-      }
-    } catch { continue; }
-  }
-  return [];
-}
-
-// ── Markdown page parser — extracts data from plain-text page fetch ───────────
-// YachtWorld's page renders price/location in markdown even when JS is blocked
-function parseFromMarkdown(text: string): Partial<VesselData> {
-  const result: Partial<VesselData> = { images: [] };
-
-  // Price: "US$3,750,000" or "$3,750,000"
-  const priceMatch = text.match(/\b(US\$[\d,]+(?:\.\d+)?|\$[\d,]+(?:\.\d+)?|€[\d,]+(?:\.\d+)?)\b/);
-  if (priceMatch) result.price = priceMatch[1];
-
-  // Location: city + state pattern after price
-  const locMatch = text.match(/\n([A-Z][a-zA-Z\s]+,\s+[A-Z][a-zA-Z\s]+)\n/);
-  if (locMatch) result.location = locMatch[1].trim();
-
-  // Images: extract boatsgroup thumbnail URLs and upscale
-  const imgRegex = /https:\/\/images\.boatsgroup\.com\/resize\/[^\s")]+\.(?:jpg|jpeg|png|webp)[^\s")"]*/gi;
-  const imgs = text.match(imgRegex) || [];
-  const seen = new Set<string>();
-  for (const src of imgs) {
-    const clean = src.replace(/[?&]format=webp/, "").replace(/[?&]exact/, "").replace(/&&+/g, "&");
-    const upscaled = upscaleBoatsgroup(clean);
-    if (!seen.has(upscaled) && !isJunk(upscaled)) {
-      seen.add(upscaled);
-      (result.images as { src: string; alt: string }[]).push({ src: upscaled, alt: "" });
-    }
-  }
-
-  return result;
-}
-async function plainFetch(url: string): Promise<string> {
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9",
-      "Accept-Encoding": "gzip, deflate, br",
-      "Cache-Control": "no-cache",
-      "Pragma": "no-cache",
-    },
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.text();
-}
-
-// ── Main export ───────────────────────────────────────────────────────────────
 export async function scrapeYachtWorld(url: string): Promise<VesselData> {
-  // 1. Always seed with slug data
   const slugData = parseSlug(url);
-  const listingId = url.match(/[-/](\d{6,8})[/?]?$/)?.[1] || null;
-
-  let html = "";
-  let markdownText = "";
-
-  // 2. Try plain fetch — even if Cloudflare blocks JS rendering,
-  //    the plain HTML often has price/location/images in it
-  try {
-    const rawHtml = await plainFetch(url);
-    if (rawHtml.length > 5000 && !/checking your browser|just a moment/i.test(rawHtml)) {
-      html = rawHtml;
-    }
-    // Always try markdown-style extraction on raw text too
-    markdownText = rawHtml;
-  } catch { /* fall through */ }
-
-  // 3. Puppeteer stealth fallback
-  if (!html) {
-    try {
-      html = await stealthFetch(url);
-      markdownText = html;
-    } catch { /* fall through */ }
-  }
-
-  // 4. Parse HTML if available
-  const vessel = html ? parseYachtWorld(url, html) : emptyVessel(url);
-
-  // 5. Back-fill from markdown text extraction (price/location/images)
-  if (markdownText) {
-    const mdData = parseFromMarkdown(markdownText);
-    if (!vessel.price    && mdData.price)    vessel.price    = mdData.price;
-    if (!vessel.location && mdData.location) vessel.location = mdData.location;
-    if (vessel.images.length === 0 && mdData.images?.length) {
-      vessel.images = mdData.images as { src: string; alt: string }[];
-    }
-  }
-
-  // 6. Back-fill from slug
-  if (!vessel.name    && slugData.name)    vessel.name    = slugData.name;
-  if (!vessel.year    && slugData.year)    vessel.year    = slugData.year;
-  if (!vessel.builder && slugData.builder) vessel.builder = slugData.builder;
-
-  // 7. If still no images, try boatsgroup API directly
-  if (vessel.images.length === 0 && listingId) {
-    vessel.images = await fetchBoatsgroupImages(listingId);
-  }
-
-  // 8. Upscale any remaining thumbnail images
-  vessel.images = vessel.images.map(img => ({
-    ...img,
-    src: upscaleBoatsgroup(img.src),
-  }));
-
-  return vessel;
-}
-
-// ── HTML parser (shared between plain-fetch and Puppeteer paths) ──────────────
-function parseYachtWorld(url: string, html: string): VesselData {
-  const $ = cheerio.load(html);
   const vessel = emptyVessel(url);
 
-  // JSON-LD — YachtWorld has very good structured data when rendered
-  $('script[type="application/ld+json"]').each((_, el) => {
-    try {
-      const json = JSON.parse($(el).text());
-      const nodes: Record<string, unknown>[] = Array.isArray(json)
-        ? json : json["@graph"] ? json["@graph"] : [json];
+  // Seed from slug immediately — these are always available
+  if (slugData.name)    vessel.name    = slugData.name;
+  if (slugData.year)    vessel.year    = slugData.year;
+  if (slugData.builder) vessel.builder = slugData.builder;
 
-      for (const node of nodes) {
-        if (!node || typeof node !== "object") continue;
-        const type = String(node["@type"] || "").toLowerCase();
-        if (!/product|boat|vehicle/i.test(type) && !node.offers) continue;
+  let browser = null;
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-blink-features=AutomationControlled",
+        "--window-size=1920,1080",
+      ],
+    });
 
-        if (node.name && !vessel.name) {
-          const brand = (node.brand as Record<string,string>)?.name || "";
-          const raw = String(node.name).trim();
-          vessel.name = cleanHeadline(brand && !raw.toLowerCase().includes(brand.toLowerCase())
-            ? `${brand} ${raw}` : raw);
+    const page = await browser.newPage();
+
+    // Stealth: hide automation signals
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => false });
+      Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3, 4, 5] });
+      Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+      (window as any).chrome = { runtime: {} };
+    });
+
+    await page.setUserAgent(
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    );
+    await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" });
+
+    await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
+
+    // ── Extract everything via page.evaluate() ────────────────────────────
+    const extracted = await page.evaluate(() => {
+      // 1. window.digitalData.product — rich structured data YachtWorld sets after React hydrates
+      const dd = (window as any).digitalData;
+      const product = dd?.product?.[0]?.productInfo || dd?.product?.productInfo || null;
+
+      // 2. All boatsgroup gallery images (rendered src attributes, not data-src)
+      const imgEls = Array.from(document.querySelectorAll("img")) as HTMLImageElement[];
+      const imageSrcs = imgEls
+        .map(img => img.getAttribute("data-src") || img.src || "")
+        .filter(src => src.includes("boatsgroup.com") && !/(logo|icon|sprite|flag|avatar)/i.test(src));
+
+      // 3. DOM fallbacks
+      const h1 = document.querySelector("h1")?.textContent?.trim() || "";
+      const priceEl = (
+        document.querySelector('[data-testid="listing-price"]') ||
+        document.querySelector('[class*="listingPrice"]') ||
+        document.querySelector('[class*="price-display"]') ||
+        Array.from(document.querySelectorAll('[class*="price" i]'))
+          .find(el => /US\$|\$[\d,]{4}/.test(el.textContent || ""))
+      );
+      const priceText = priceEl?.textContent?.trim() || "";
+
+      const locationEl = (
+        document.querySelector('[data-testid*="location"]') ||
+        document.querySelector('[class*="location" i]')
+      );
+      const locationText = locationEl?.textContent?.trim() || "";
+
+      // 4. Spec items from DOM
+      const specRows: { label: string; value: string }[] = [];
+      document.querySelectorAll("dl dt").forEach(dt => {
+        const dd2 = dt.nextElementSibling;
+        if (dd2?.tagName === "DD") {
+          specRows.push({ label: dt.textContent?.trim() || "", value: dd2.textContent?.trim() || "" });
         }
-        if (node.description && !vessel.description)
-          vessel.description = clean(String(node.description));
+      });
+      document.querySelectorAll('[data-testid*="spec"], [class*="spec-row"], [class*="specRow"]').forEach(el => {
+        const label = el.querySelector('[class*="label" i], [class*="key" i], strong')?.textContent?.trim() || "";
+        const value = el.querySelector('[class*="value" i], [class*="data" i], span:last-child')?.textContent?.trim() || "";
+        if (label && value) specRows.push({ label, value });
+      });
 
-        if (node.image) {
-          const imgs = Array.isArray(node.image) ? node.image : [node.image];
-          for (const img of imgs) {
-            const src = typeof img === "string" ? img : (img as Record<string,string>)?.url || "";
-            if (src && /^https?:\/\//i.test(src)) vessel.images.push({ src, alt: "" });
-          }
-        }
+      // 5. Description
+      const descEl = document.querySelector('[data-testid*="description"], [class*="description" i] p');
+      const description = descEl?.textContent?.trim() || "";
 
-        const offers = (node.offers as Record<string,unknown>) || {};
-        if (offers.price && !vessel.price) {
-          const p = offers.price;
-          const c = String(offers.priceCurrency || "USD");
-          vessel.price = typeof p === "number"
-            ? `${c === "EUR" ? "€" : "$"}${(p as number).toLocaleString("en-US")}`
-            : String(p);
-        }
+      return { product, imageSrcs, h1, priceText, locationText, specRows, description };
+    });
 
-        const avail = (offers.availableAtOrFrom as Record<string,unknown>) || {};
-        const addr  = (avail.address as Record<string,string>) || {};
-        if (!vessel.location)
-          vessel.location = [addr.addressLocality, addr.addressRegion, addr.addressCountry]
-            .filter(Boolean).join(", ");
+    // ── Map extracted data to vessel ──────────────────────────────────────
 
-        const brand = (node.brand as Record<string,string>) || (node.manufacturer as Record<string,string>);
-        if (brand?.name && !vessel.builder) vessel.builder = clean(brand.name);
-
-        if (!vessel.year) {
-          const yr = String(node.productionDate || node.vehicleModelDate || "");
-          const y = parseInt(yr);
-          if (y > 1900) vessel.year = y;
-        }
-
-        const props = Array.isArray(node.additionalProperty)
-          ? (node.additionalProperty as { name?: string; value?: string }[]) : [];
-        for (const prop of props) {
-          if (prop.name && prop.value) assignSpec(vessel, prop.name, String(prop.value));
-        }
+    // From window.digitalData.product
+    if (extracted.product) {
+      const p = extracted.product;
+      if (p.manufacturer && !vessel.builder) vessel.builder = clean(String(p.manufacturer));
+      if (p.yearBuilt && !vessel.year) vessel.year = parseInt(String(p.yearBuilt));
+      if (p.model && !vessel.name) vessel.name = cleanHeadline(`${p.yearBuilt || ""} ${p.manufacturer || ""} ${p.model}`) || "";
+      if (p.listedPrice && !vessel.price) {
+        const n = parseFloat(String(p.listedPrice).replace(/[^0-9.]/g, ""));
+        if (!isNaN(n)) vessel.price = `$${n.toLocaleString("en-US")}`;
       }
-    } catch { /* skip */ }
-  });
-
-  // OG meta fallbacks
-  if (!vessel.name)  vessel.name  = cleanHeadline($('meta[property="og:title"]').attr("content")) || "";
-  if (!vessel.description) vessel.description = clean($('meta[property="og:description"]').attr("content"));
-  const ogImg = $('meta[property="og:image"]').attr("content");
-  if (ogImg) vessel.images.push({ src: ogImg, alt: vessel.name });
-
-  // H1 fallback
-  if (!vessel.name) vessel.name = cleanHeadline($("h1").first().text()) || "";
-
-  // Price from URL metadata
-  if (!vessel.price) {
-    const priceEl = $('[class*="price" i]').first().text();
-    if (priceEl) vessel.price = clean(priceEl);
-  }
-
-  // Location
-  if (!vessel.location) vessel.location = clean($('[class*="location" i]').first().text());
-
-  // DOM spec tables
-  $("dt").each((_, el) => assignSpec(vessel, $(el).text(), $(el).next("dd").text()));
-  $("table tr").each((_, row) => {
-    const cells = $(row).find("th, td");
-    if (cells.length >= 2) assignSpec(vessel, cells.eq(0).text(), cells.eq(1).text());
-  });
-  $("[data-testid]").each((_, el) => {
-    const testId = $(el).attr("data-testid") || "";
-    if (/spec|detail/i.test(testId)) {
-      const label = clean($(el).find("[class*='label' i], [class*='name' i]").first().text());
-      const value = clean($(el).find("[class*='value' i], [class*='data' i]").last().text());
-      if (label && value) assignSpec(vessel, label, value);
+      if (p.location && !vessel.location) {
+        const loc = p.location;
+        vessel.location = [loc.city, loc.stateProvince, loc.country]
+          .filter(Boolean)
+          .map((s: string) => s.charAt(0).toUpperCase() + s.slice(1))
+          .join(", ");
+      }
+      if (p.boatLength && !vessel.loa) vessel.loa = `${p.boatLength} ft`;
+      if (p.type)     assignSpec(vessel, "hull form",  String(p.type));
+      if (p.category?.boatClass) assignSpec(vessel, "hull type", String(p.category?.boatClass || p.boatClass || ""));
     }
-  });
 
-  // Images — boatsgroup CDN thumbnails (upscale later in main export)
-  $("img").each((_, img) => {
-    const src =
-      $(img).attr("data-src") ||
-      $(img).attr("data-lazy-src") ||
-      bestFromSrcset($(img).attr("srcset") || "") ||
-      $(img).attr("src") || "";
-    if (src && /boatsgroup\.com/i.test(src) && !isJunk(src))
-      vessel.images.push({ src, alt: clean($(img).attr("alt")) });
-  });
+    // Title from H1
+    if (extracted.h1 && (!vessel.name || vessel.name === slugData.name)) {
+      vessel.name = cleanHeadline(extracted.h1) || vessel.name;
+    }
 
-  // Also grab any non-boatsgroup gallery images
-  $(".swiper-slide img, [class*='gallery'] img, figure img").each((_, img) => {
-    const src = $(img).attr("data-src") || $(img).attr("src") || "";
-    if (src && /\.(jpe?g|png|webp)/i.test(src) && !isJunk(src))
-      vessel.images.push({ src, alt: clean($(img).attr("alt")) });
-  });
+    // Price from DOM
+    if (!vessel.price && extracted.priceText) {
+      const priceMatch = extracted.priceText.match(/US\$([\d,]+)|\$([\d,]+)/);
+      if (priceMatch) vessel.price = `$${(priceMatch[1] || priceMatch[2])}`;
+    }
 
-  vessel.images = dedupeImages(vessel.images);
-  return vessel;
-}
+    // Location from DOM
+    if (!vessel.location && extracted.locationText) {
+      vessel.location = extracted.locationText;
+    }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function bestFromSrcset(srcset: string): string {
-  const parts = srcset.split(",").map(s => s.trim()).filter(Boolean);
-  let best = ""; let bestW = 0;
-  for (const part of parts) {
-    const [url, descriptor] = part.split(/\s+/);
-    const w = descriptor ? parseFloat(descriptor) : 1;
-    if (w > bestW && url) { best = url; bestW = w; }
+    // Spec rows from DOM
+    for (const row of extracted.specRows) {
+      if (row.label && row.value) assignSpec(vessel, row.label, row.value);
+    }
+
+    // Description
+    if (!vessel.description && extracted.description) {
+      vessel.description = extracted.description;
+    }
+
+    // Images — upscale all boatsgroup thumbnails
+    const seen = new Set<string>();
+    for (const src of extracted.imageSrcs) {
+      const up = upscale(src);
+      if (!seen.has(up)) {
+        seen.add(up);
+        vessel.images.push({ src: up, alt: vessel.name });
+      }
+    }
+    vessel.images = dedupeImages(vessel.images);
+
+  } catch (err) {
+    console.error("[YachtWorld] Puppeteer failed:", err instanceof Error ? err.message : err);
+    // Return what we have from slug — at least name/year/builder
+  } finally {
+    if (browser) {
+      try { await browser.close(); } catch { /* ignore */ }
+    }
   }
-  return best;
-}
 
-function isJunk(src: string): boolean {
-  return /logo|icon|sprite|pixel|flag|avatar|favicon|\.svg|placeholder/i.test(src);
+  return vessel;
 }

@@ -40,46 +40,47 @@ const PROVIDERS: { pattern: RegExp; fn: Provider }[] = [
 export async function scrapeVessel(url: string): Promise<VesselData> {
   const normalised = normaliseUrl(url);
 
-  // YachtWorld is Cloudflare-blocked on Railway. Both YW and BoatTrader are
-  // owned by Boats Group and share identical listing IDs and slug formats.
-  // Try rewriting: yachtworld.com/yacht/SLUG → boattrader.com/boat/SLUG
-  // If BoatTrader also blocks, fall through to the YachtWorld slug-fallback provider.
+  // YachtWorld: try YachtWorld provider first (has Puppeteer stealth).
+  // If that returns sparse data, also try BoatTrader as a cross-reference.
   const isYachtWorld = /yachtworld\.com\/yacht\//i.test(normalised);
-  const rewritten = isYachtWorld
-    ? normalised.replace(/^https?:\/\/(?:www\.)?yachtworld\.com\/yacht\//i, "https://www.boattrader.com/boat/")
-    : normalised;
-
-  const { hostname } = new URL(rewritten);
-  const provider = PROVIDERS.find(p => p.pattern.test(hostname));
-  if (provider) {
-    try {
-      const result = await provider.fn(rewritten);
-      // If BoatTrader returned only stub data (no images, no price) AND
-      // the original was a YachtWorld URL, also run the YW slug fallback to merge
-      if (isYachtWorld && result.images.length === 0 && !result.price) {
-        const ywProvider = PROVIDERS.find(p => p.pattern.test("www.yachtworld.com"));
-        if (ywProvider) {
-          try {
-            const ywResult = await ywProvider.fn(normalised);
-            // Merge: yw fills any empty fields
-            if (!result.name && ywResult.name) result.name = ywResult.name;
-            if (!result.year && ywResult.year) result.year = ywResult.year;
-            if (!result.builder && ywResult.builder) result.builder = ywResult.builder;
-          } catch { /* slug fallback is best-effort */ }
-        }
+  if (isYachtWorld) {
+    const ywProvider = PROVIDERS.find(p => p.pattern.test("www.yachtworld.com"));
+    if (ywProvider) {
+      try {
+        const result = await ywProvider.fn(normalised);
+        // If we got real data, return it
+        if (result.images.length > 0 || result.price) return result;
+        // Sparse — try BoatTrader cross-reference to fill gaps
+        const btUrl = normalised.replace(
+          /^https?:\/\/(?:www\.)?yachtworld\.com\/yacht\//i,
+          "https://www.boattrader.com/boat/"
+        );
+        try {
+          const btResult = await PROVIDERS.find(p => p.pattern.test("www.boattrader.com"))!.fn(btUrl);
+          // Merge: YW wins on text fields, merge images
+          for (const k of Object.keys(btResult) as (keyof VesselData)[]) {
+            if (k === "images") continue;
+            const yw = (result as Record<string,unknown>)[k as string];
+            const bt = (btResult as Record<string,unknown>)[k as string];
+            if ((!yw || yw === "" || yw === null) && bt) {
+              (result as Record<string,unknown>)[k as string] = bt;
+            }
+          }
+          const existingSrcs = new Set(result.images.map(i => i.src));
+          result.images = [...result.images, ...btResult.images.filter(i => !existingSrcs.has(i.src))];
+        } catch { /* BoatTrader is best-effort */ }
+        return result;
+      } catch (err) {
+        console.error("[scraper] YachtWorld provider failed:", err);
+        // Fall through to generic
       }
-      return result;
-    } catch (err) {
-      // BoatTrader hard-failed — fall through to YachtWorld slug provider
-      if (isYachtWorld) {
-        const ywProvider = PROVIDERS.find(p => p.pattern.test("www.yachtworld.com"));
-        if (ywProvider) return ywProvider.fn(normalised);
-      }
-      throw err;
     }
   }
-  // Generic fallback
-  return genericScrape(rewritten);
+
+  const { hostname } = new URL(normalised);
+  const provider = PROVIDERS.find(p => p.pattern.test(hostname));
+  if (provider) return provider.fn(normalised);
+  return genericScrape(normalised);
 }
 
 /** Convert VesselData to the CampaignDraft shape used by the campaign builder */
