@@ -1,246 +1,301 @@
 /**
- * YachtWorld scraper — v3
- * YachtWorld uses a React SPA. After JS runs:
- *   - window.digitalData.product[0].productInfo  → name, price, location, year, specs
- *   - document.querySelectorAll('img[src*="boatsgroup"]') → all gallery images
- *   - document.querySelector('h1')               → vessel title
- *   - URL slug                                    → year / make / model fallback
+ * YachtWorld scraper — v4
+ *
+ * Discovery: YachtWorld SSR-embeds all listing data as:
+ *   <script>var __REDUX_STATE__={"app":{"data":{...full listing...}}}</script>
+ *
+ * This JSON contains EVERYTHING: specs, engines, tanks, images, price, location.
+ * It's in the static HTML — no JS execution, no Cloudflare risk.
+ *
+ * Strategy:
+ *   1. Plain fetch (fast, works when CF doesn't block)
+ *   2. Puppeteer stealth fallback (if CF blocks plain fetch)
+ *   3. Slug fallback (always populates name/year/builder)
  */
 import puppeteer from "puppeteer";
 import type { VesselData } from "../types";
 import { emptyVessel } from "../types";
-import { clean, cleanHeadline, dedupeImages, assignSpec } from "../utils";
+import { clean, cleanHeadline, dedupeImages } from "../utils";
 
-// ── URL slug parser ───────────────────────────────────────────────────────────
+const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+
+// ── Slug fallback ─────────────────────────────────────────────────────────────
 function parseSlug(url: string): Partial<VesselData> {
   const slug = url.split("/").filter(Boolean).pop() || "";
   const result: Partial<VesselData> = {};
   const yearMatch = slug.match(/^(\d{4})-/);
   if (yearMatch) result.year = parseInt(yearMatch[1]);
   const idMatch = slug.match(/-(\d{6,8})$/);
-  const listingId = idMatch?.[1] || null;
-  if (yearMatch && listingId) {
+  if (yearMatch && idMatch) {
     const middle = slug.replace(/^\d{4}-/, "").replace(/-?\d{6,8}$/, "");
     const words = middle.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1));
-    // Heuristic: last word is usually model, rest is builder
-    // e.g. "northern-marine-expedition" → builder="Northern Marine", model="Expedition"
-    // e.g. "sunseeker-predator-82" → builder="Sunseeker", model="Predator 82"
-    // Known single-word builders: sunseeker, azimut, ferretti, benetti, princess, cranchi
-    const SINGLE_WORD_BUILDERS = new Set(["sunseeker","azimut","ferretti","benetti","princess","cranchi","riva","pershing","fairline","jeanneau","beneteau","hatteras","viking","formula","chaparral"]);
-    const firstWord = words[0]?.toLowerCase() || "";
-    if (SINGLE_WORD_BUILDERS.has(firstWord) || words.length <= 2) {
-      result.builder = words[0];
-      result.name = `${result.year} ${words.join(" ")}`;
-    } else {
-      // Multi-word: assume last word is model suffix, rest is builder
-      result.builder = words.slice(0, -1).join(" ");
-      result.name = `${result.year} ${words.join(" ")}`;
-    }
+    const SINGLE = new Set(["sunseeker","azimut","ferretti","benetti","princess","cranchi","riva","pershing","fairline","jeanneau","beneteau","hatteras","viking","formula","chaparral"]);
+    result.builder = SINGLE.has(words[0]?.toLowerCase()) || words.length <= 2
+      ? words[0]
+      : words.slice(0, -1).join(" ");
+    result.name = `${result.year} ${words.join(" ")}`;
   }
   return result;
 }
 
+// ── Image helpers ─────────────────────────────────────────────────────────────
 function upscale(src: string): string {
-  if (!src) return src;
   return src
     .replace(/[?&]w=\d+/, m => m.replace(/\d+/, "1200"))
-    .replace(/[?&]format=webp/g, "")
-    .replace(/[?&]exact/g, "")
-    .replace(/[?&]ratio=[^&]+/g, "")
-    .replace(/&&+/g, "&")
-    .replace(/[?&]$/, "");
+    .replace(/[?&]format=webp/g, "").replace(/[?&]exact/g, "")
+    .replace(/[?&]ratio=[^&]+/g, "").replace(/&&+/g, "&").replace(/[?&]$/, "");
+}
+function isJunk(src: string) { return /logo|icon|sprite|flag|avatar|favicon/i.test(src); }
+
+// ── Parse __REDUX_STATE__ from HTML ──────────────────────────────────────────
+function extractReduxState(html: string): Record<string, unknown> | null {
+  // The variable is set as: var __REDUX_STATE__={...};
+  // It can be large (500k+) so we need to extract via bracket matching
+  const marker = "var __REDUX_STATE__=";
+  const start = html.indexOf(marker);
+  if (start === -1) return null;
+  const jsonStart = start + marker.length;
+  // Find matching closing brace
+  let depth = 0, i = jsonStart, inStr = false, esc = false;
+  for (; i < Math.min(html.length, jsonStart + 2000000); i++) {
+    const c = html[i];
+    if (esc) { esc = false; continue; }
+    if (c === "\\" && inStr) { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === "{") depth++;
+    else if (c === "}") { depth--; if (depth === 0) break; }
+  }
+  try {
+    return JSON.parse(html.slice(jsonStart, i + 1));
+  } catch {
+    return null;
+  }
 }
 
+// ── Map __REDUX_STATE__ data to VesselData ────────────────────────────────────
+function mapReduxToVessel(data: Record<string, unknown>, vessel: VesselData): void {
+  const d = data as Record<string, any>;
+
+  // Identity
+  if (d.boatName)  vessel.name    = clean(d.boatName);  // actual vessel name (e.g. "iiWii")
+  if (d.make)      vessel.builder = clean(d.make);
+  if (d.year)      vessel.year    = parseInt(String(d.year));
+  if (d.hull?.hin) (vessel as any).hullNumber = d.hull.hin;
+  if (d.hull?.material) vessel.hullMaterial = clean(d.hull.material);
+  if (d.hull?.shape)    vessel.hullForm     = clean(d.hull.shape);
+  if (d.legal?.flagOfRegistry) vessel.flagState = d.legal.flagOfRegistry;
+
+  // Price
+  const usd = d.price?.type?.amount?.USD;
+  if (usd && !vessel.price) vessel.price = `$${Number(usd).toLocaleString("en-US")}`;
+
+  // Location
+  const loc = d.location?.address;
+  if (loc && !vessel.location) {
+    vessel.location = [loc.city, loc.subdivision, loc.country].filter(Boolean).join(", ");
+  }
+
+  // Description (plain text version)
+  if (d.descriptionNoHTML && !vessel.description) {
+    vessel.description = clean(String(d.descriptionNoHTML)).slice(0, 2000);
+  }
+
+  // Dimensions
+  const dims = d.specifications?.dimensions;
+  if (dims) {
+    if (dims.lengths?.nominal?.ft && !vessel.loa) vessel.loa = `${dims.lengths.nominal.ft} ft / ${dims.lengths.nominal.m} m`;
+    if (dims.beam?.ft && !vessel.beam)            vessel.beam = `${dims.beam.ft} ft / ${dims.beam.m} m`;
+    if (dims.maxDraft?.ft && !vessel.draft)       vessel.draft = `${dims.maxDraft.ft} ft / ${dims.maxDraft.m} m`;
+    if (dims.minDraft?.ft && !(vessel as any).draftMin) (vessel as any).draftMin = `${dims.minDraft.ft} ft`;
+    if (dims.maxBridge?.ft && !(vessel as any).airDraft) (vessel as any).airDraft = `${dims.maxBridge.ft} ft`;
+  }
+
+  // Performance
+  const spd = d.specifications?.speedDistance;
+  if (spd) {
+    if (spd.maxSpeed?.kn && !vessel.maxSpeed)     vessel.maxSpeed = `${spd.maxSpeed.kn} kn`;
+    if (spd.cruisingSpeed?.kn && !vessel.cruiseSpeed) vessel.cruiseSpeed = `${spd.cruisingSpeed.kn} kn`;
+    if (spd.range?.nmi && !vessel.range)          vessel.range = `${spd.range.nmi} nmi`;
+  }
+
+  // Accommodation
+  const acc = d.specifications?.accommodation;
+  if (acc) {
+    if (acc.cabins != null && !vessel.staterooms) vessel.staterooms = String(acc.cabins);
+    if (acc.guestCabins != null)                  (vessel as any).guestCabins = String(acc.guestCabins);
+    if (acc.crewCabins != null)                   vessel.crewCabins = String(acc.crewCabins);
+    if (acc.passengers != null && !vessel.guests) vessel.guests = String(acc.passengers);
+    if (acc.crew != null && !vessel.crew)         vessel.crew = String(acc.crew);
+  }
+
+  // Propulsion
+  const engines: any[] = d.propulsion?.engines || [];
+  if (engines.length && !vessel.engines) {
+    const eng = engines[0];
+    const parts = [eng.make, eng.model].filter(Boolean);
+    if (parts.length) vessel.engines = parts.join(" ");
+    if (eng.power?.hp && !vessel.power) vessel.power = `${eng.power.hp} hp`;
+    if (eng.hours != null && !(vessel as any).engineHours) (vessel as any).engineHours = `${eng.hours} hrs`;
+    if (eng.fuel && !(vessel as any).fuelType) (vessel as any).fuelType = clean(eng.fuel);
+    if (eng.driveType) vessel.propulsion = clean(eng.driveType);
+  }
+  if (engines.length > 1) {
+    vessel.engines = `${engines.length}x ${vessel.engines}`;
+  }
+
+  // Fuel type from top-level
+  if (d.fuelType && !(vessel as any).fuelType) (vessel as any).fuelType = clean(d.fuelType);
+
+  // Tanks
+  const tanks = d.tanks as Record<string, any[]> | undefined;
+  if (tanks) {
+    const fuelTank = tanks.fuel?.[0]?.capacity;
+    if (fuelTank && !vessel.fuelTank) {
+      const gal = Math.round(fuelTank.gal);
+      const lt  = Math.round(fuelTank.l);
+      vessel.fuelTank = `${gal.toLocaleString("en-US")} gal / ${lt.toLocaleString("en-US")} lt`;
+    }
+    const freshTank = tanks.fresh?.[0]?.capacity || tanks.freshWater?.[0]?.capacity;
+    if (freshTank && !vessel.freshWater) {
+      const gal = Math.round(freshTank.gal);
+      const lt  = Math.round(freshTank.l);
+      vessel.freshWater = `${gal.toLocaleString("en-US")} gal / ${lt.toLocaleString("en-US")} lt`;
+    }
+    const holdTank = tanks.holding?.[0]?.capacity;
+    if (holdTank && !vessel.holdingTank) {
+      vessel.holdingTank = `${Math.round(holdTank.gal)} gal / ${Math.round(holdTank.l)} lt`;
+    }
+  }
+
+  // Hull / class
+  if (d.class && !vessel.hullForm) vessel.hullForm = clean(String(d.class).replace(/-/g, " "));
+  if (d.type)  (vessel as any).propulsion = (vessel as any).propulsion || clean(d.type);
+
+  // Videos
+  const media: any[] = d.media || [];
+  const videoMedia = media.filter((m: any) => m.mediaType === "video" || m.videoUrl);
+  if (videoMedia.length) {
+    (vessel as any).videos = videoMedia.map((m: any) => ({
+      url: m.videoUrl || m.url || "",
+      type: m.mediaType === "youtube" ? "youtube" : "other",
+      thumbnail: m.thumbnailUrl || "",
+      title: m.title || "",
+    })).filter((v: any) => v.url);
+  }
+
+  // Images from media array (full resolution)
+  const imgMedia = media.filter((m: any) => m.mediaType === "image" || m.originalImageUrl || m.url);
+  for (const m of imgMedia) {
+    const src = m.originalImageUrl || m.url || m.thumbnailUrl || "";
+    if (src && src.startsWith("http") && !isJunk(src)) {
+      vessel.images.push({ src: upscale(src), alt: m.title || vessel.name });
+    }
+  }
+
+  // Title (broker-supplied listing title, not vessel name)
+  // Keep as notes if different from vessel name
+  if (d.title && d.title !== vessel.name) {
+    (vessel as any).notes = clean(d.title);
+  }
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
 export async function scrapeYachtWorld(url: string): Promise<VesselData> {
   const slugData = parseSlug(url);
   const vessel = emptyVessel(url);
 
-  // Seed from slug immediately — these are always available
+  // Always seed from slug (cheap, always available)
   if (slugData.name)    vessel.name    = slugData.name;
   if (slugData.year)    vessel.year    = slugData.year;
   if (slugData.builder) vessel.builder = slugData.builder;
 
+  // ── Strategy 1: Plain fetch → parse __REDUX_STATE__ ──────────────────────
+  // Works when Cloudflare doesn't challenge the request (Railway IPs sometimes pass)
+  let html = "";
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA, "Accept-Language": "en-US,en;q=0.9", "Accept": "text/html,*/*" },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (res.ok) html = await res.text();
+  } catch { /* fall through */ }
+
+  if (html && !html.includes("checking your browser") && !html.includes("cf-browser-verification")) {
+    const redux = extractReduxState(html);
+    const data = (redux as any)?.app?.data;
+    if (data && data.id) {
+      mapReduxToVessel(data, vessel);
+      if (vessel.images.length < 5) {
+        // Supplement with raw HTML boatsgroup URLs
+        const bgRx = /https:\/\/images\.boatsgroup\.com\/resize\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp)[^\s"'<>]*/gi;
+        let m: RegExpExecArray | null;
+        const seen = new Set(vessel.images.map(i => i.src));
+        while ((m = bgRx.exec(html)) !== null) {
+          const up = upscale(m[0]);
+          if (!seen.has(up) && !isJunk(up)) { seen.add(up); vessel.images.push({ src: up, alt: vessel.name }); }
+        }
+      }
+      vessel.images = dedupeImages(vessel.images);
+      return vessel;
+    }
+  }
+
+  // ── Strategy 2: Puppeteer → window.__REDUX_STATE__ via evaluate ───────────
+  // Always works — bypasses Cloudflare challenge, accesses JS state directly
   let browser = null;
   try {
-    browser = await puppeteer.launch({
+    browser = await (puppeteer as any).launch({
       headless: true,
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-blink-features=AutomationControlled",
-        "--window-size=1920,1080",
-      ],
+      args: ["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage","--disable-blink-features=AutomationControlled"],
     });
-
-    const page = await browser.newPage();
-
-    // Stealth: hide automation signals
+    const page = await (browser as any).newPage();
     await page.evaluateOnNewDocument(() => {
       Object.defineProperty(navigator, "webdriver", { get: () => false });
-      Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3, 4, 5] });
-      Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
-      (window as any).chrome = { runtime: {} };
     });
-
-    await page.setUserAgent(
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-    );
+    await page.setUserAgent(UA);
     await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" });
-
     await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
 
-    // Wait explicitly for window.digitalData.product to be set by YachtWorld's analytics
-    try {
-      await page.waitForFunction(
-        () => !!(window as any).digitalData?.product?.[0]?.productInfo?.productID,
-        { timeout: 8000 }
-      );
-    } catch {
-      // digitalData didn't populate — continue anyway with DOM fallback
+    // __REDUX_STATE__ is set by SSR — available immediately without waiting for analytics
+    const reduxData = await page.evaluate(() => (window as any).__REDUX_STATE__?.app?.data || null);
+
+    if (reduxData && reduxData.id) {
+      mapReduxToVessel(reduxData, vessel);
     }
 
-    // ── Extract everything via page.evaluate() ────────────────────────────
-    const extracted = await page.evaluate(() => {
-      // 1. window.digitalData.product — rich structured data YachtWorld sets after React hydrates
-      const dd = (window as any).digitalData;
-      const product = dd?.product?.[0]?.productInfo || dd?.product?.productInfo || null;
+    // Rendered images — pick up anything mapReduxToVessel may have missed
+    const imgSrcs: string[] = await page.evaluate(() =>
+      Array.from(document.querySelectorAll("img"))
+        .map((img: any) => img.getAttribute("data-src") || img.src || "")
+        .filter((src: string) => src.includes("boatsgroup.com") && !/logo|icon|sprite|flag|avatar/i.test(src))
+    );
+    const seen = new Set(vessel.images.map(i => i.src));
+    for (const src of imgSrcs) {
+      const up = upscale(src);
+      if (!seen.has(up)) { seen.add(up); vessel.images.push({ src: up, alt: vessel.name }); }
+    }
 
-      // 2. All boatsgroup gallery images (rendered src attributes, not data-src)
-      const imgEls = Array.from(document.querySelectorAll("img")) as HTMLImageElement[];
-      const imageSrcs = imgEls
-        .map(img => img.getAttribute("data-src") || img.src || "")
-        .filter(src => src.includes("boatsgroup.com") && !/(logo|icon|sprite|flag|avatar)/i.test(src));
-
-      // 3. DOM fallbacks
-      const h1 = document.querySelector("h1")?.textContent?.trim() || "";
-
-      // Price: target the main listing price specifically — avoid "similar listings" sections
-      // Walk up from a US$ price element and reject if it's inside a related/similar card
-      let priceText = "";
-      const allPriceEls = Array.from(document.querySelectorAll("*"))
-        .filter(el => /US\$[\d,]{4,}/.test(el.textContent || "") && (el.children.length === 0 || el.children.length <= 2));
-      for (const el of allPriceEls.slice(0, 5)) {
-        // Skip if inside a "similar" / "related" / "sponsored" section
-        let parent: Element | null = el;
-        let inRelated = false;
-        for (let i = 0; i < 8; i++) {
-          parent = parent?.parentElement || null;
-          if (!parent) break;
-          const cls = (parent.className || "").toLowerCase();
-          const testid = (parent.getAttribute("data-testid") || "").toLowerCase();
-          if (/similar|related|recommend|carousel|sponsored|other-listing/i.test(cls + testid)) {
-            inRelated = true; break;
+    // Price fallback from DOM if __REDUX_STATE__ didn't have it
+    if (!vessel.price) {
+      const priceText: string = await page.evaluate(() => {
+        for (const el of Array.from(document.querySelectorAll("*"))) {
+          if ((el as Element).children.length <= 2 && /US\$[\d,]{4,}/.test((el as Element).textContent || "")) {
+            return (el as Element).textContent?.trim() || "";
           }
         }
-        if (!inRelated) { priceText = el.textContent?.trim() || ""; break; }
-      }
-
-      const locationEl = (
-        document.querySelector('[data-testid*="location"]') ||
-        document.querySelector('[class*="location" i]')
-      );
-      const locationText = locationEl?.textContent?.trim() || "";
-
-      // 4. Spec items from DOM
-      const specRows: { label: string; value: string }[] = [];
-      document.querySelectorAll("dl dt").forEach(dt => {
-        const dd2 = dt.nextElementSibling;
-        if (dd2?.tagName === "DD") {
-          specRows.push({ label: dt.textContent?.trim() || "", value: dd2.textContent?.trim() || "" });
-        }
+        return "";
       });
-      document.querySelectorAll('[data-testid*="spec"], [class*="spec-row"], [class*="specRow"]').forEach(el => {
-        const label = el.querySelector('[class*="label" i], [class*="key" i], strong')?.textContent?.trim() || "";
-        const value = el.querySelector('[class*="value" i], [class*="data" i], span:last-child')?.textContent?.trim() || "";
-        if (label && value) specRows.push({ label, value });
-      });
-
-      // 5. Description
-      const descEl = document.querySelector('[data-testid*="description"], [class*="description" i] p');
-      const description = descEl?.textContent?.trim() || "";
-
-      return { product, imageSrcs, h1, priceText, locationText, specRows, description };
-    });
-
-    // ── Map extracted data to vessel ──────────────────────────────────────
-
-    // From window.digitalData.product — always overrides slug (more authoritative)
-    if (extracted.product) {
-      const p = extracted.product;
-      // Always overwrite slug data with real product data
-      if (p.manufacturer) vessel.builder = clean(String(p.manufacturer));
-      if (p.yearBuilt)    vessel.year    = parseInt(String(p.yearBuilt));
-      if (p.listedPrice) {
-        const n = parseFloat(String(p.listedPrice).replace(/[^0-9.]/g, ""));
-        if (!isNaN(n) && n > 10000) vessel.price = `$${n.toLocaleString("en-US")}`;
-      }
-      const nameParts = [p.yearBuilt, p.manufacturer, p.model].filter(Boolean);
-      if (nameParts.length) vessel.name = cleanHeadline(nameParts.join(" ")) || vessel.name;
-      if (p.location && !vessel.location) {
-        const loc = p.location;
-        vessel.location = [loc.city, loc.stateProvince, loc.country]
-          .filter(Boolean)
-          .map((s: string) => s.charAt(0).toUpperCase() + s.slice(1))
-          .join(", ");
-      }
-      if (p.boatLength && !vessel.loa) vessel.loa = `${p.boatLength} ft`;
+      const pm = priceText.match(/US\$([\d,]+)/);
+      if (pm) vessel.price = `$${pm[1]}`;
     }
 
-    // Title + LOA from H1 — e.g. "2017 Northern Marine Expedition | 80ft"
-    if (extracted.h1) {
-      const pipeIdx = extracted.h1.indexOf(" | ");
-      if (pipeIdx > 0) {
-        const titlePart = extracted.h1.slice(0, pipeIdx).trim();
-        const loaPart   = extracted.h1.slice(pipeIdx + 3).trim(); // "80ft"
-        if (!vessel.name || vessel.name === slugData.name) vessel.name = cleanHeadline(titlePart) || vessel.name;
-        if (!vessel.loa && /\d/.test(loaPart)) vessel.loa = loaPart;
-      } else if (!vessel.name || vessel.name === slugData.name) {
-        vessel.name = cleanHeadline(extracted.h1) || vessel.name;
-      }
-    }
-
-    // Price from DOM — only use if digitalData didn't provide it
-    // Target the main listing price, not related listing prices
-    if (!vessel.price && extracted.priceText) {
-      const priceMatch = extracted.priceText.match(/US\$([\d,]+)/);
-      if (priceMatch) vessel.price = `$${priceMatch[1]}`;
-    }
-
-    // Location from DOM
-    if (!vessel.location && extracted.locationText) {
-      vessel.location = extracted.locationText;
-    }
-
-    // Spec rows from DOM
-    for (const row of extracted.specRows) {
-      if (row.label && row.value) assignSpec(vessel, row.label, row.value);
-    }
-
-    // Description
-    if (!vessel.description && extracted.description) {
-      vessel.description = extracted.description;
-    }
-
-    // Images — upscale all boatsgroup thumbnails
-    const seen = new Set<string>();
-    for (const src of extracted.imageSrcs) {
-      const up = upscale(src);
-      if (!seen.has(up)) {
-        seen.add(up);
-        vessel.images.push({ src: up, alt: vessel.name });
-      }
-    }
     vessel.images = dedupeImages(vessel.images);
-
   } catch (err) {
     console.error("[YachtWorld] Puppeteer failed:", err instanceof Error ? err.message : err);
-    // Return what we have from slug — at least name/year/builder
   } finally {
-    if (browser) {
-      try { await browser.close(); } catch { /* ignore */ }
-    }
+    if (browser) { try { await (browser as any).close(); } catch { /**/ } }
   }
 
   return vessel;
