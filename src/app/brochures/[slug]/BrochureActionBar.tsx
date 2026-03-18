@@ -3,8 +3,10 @@
 // Floating bar on the brochure viewer — back, copy link, download PDF, send
 
 import React from "react";
+import { useRouter } from "next/navigation";
 
 export function BrochureActionBar({ slug, vesselName }: { slug: string; vesselName: string }) {
+  const router = useRouter();
   const [copied, setCopied] = React.useState(false);
   const [sending, setSending] = React.useState(false);
   const [sendOpen, setSendOpen] = React.useState(false);
@@ -85,7 +87,15 @@ export function BrochureActionBar({ slug, vesselName }: { slug: string; vesselNa
           <button onClick={() => setCollapsed(false)} style={btnStyle("#b8933a")}>☰</button>
         ) : (
           <>
-            <button onClick={() => window.history.length > 1 ? window.history.back() : window.location.href = "/brochures"}
+            <button
+              onClick={() => {
+                // history.back() is unreliable for direct links — always go to brochures list
+                if (document.referrer && new URL(document.referrer).hostname === window.location.hostname) {
+                  router.back();
+                } else {
+                  router.push("/brochures");
+                }
+              }}
               style={btnStyle("#94a3b8")} title="Back to E-Brochures">
               ← Back
             </button>

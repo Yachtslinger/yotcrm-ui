@@ -227,6 +227,7 @@ footer{background:var(--navy-deep);border-top:1px solid var(--divider);padding:3
 <nav>
   <a class="nav-brand" href="#">${esc(vessel.name)} · ${esc(vessel.builder || "")}</a>
   <ul class="nav-links">
+    <li><a href="javascript:void(0)" onclick="window.history.length>1&&document.referrer?window.history.back():window.location.href='/brochures'" style="opacity:.6;font-size:9px;">← Back</a></li>
     <li><a href="#intro">Overview</a></li>
     <li><a href="#gallery">Gallery</a></li>
     ${gaImages.length > 0 ? `<li><a href="#arrangements">Arrangements</a></li>` : ""}
