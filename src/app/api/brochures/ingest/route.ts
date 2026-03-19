@@ -18,6 +18,16 @@ import type { VesselData } from "@/lib/brochure-storage";
 
 export const runtime = "nodejs";
 
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+export async function OPTIONS() {
+  return new Response(null, { status: 204, headers: CORS });
+}
+
 // ── Image helpers (mirrors yachtworld.ts) ─────────────────────────────────────
 function upscale(src: string): string {
   if (src.startsWith("//")) src = "https:" + src;
@@ -137,16 +147,6 @@ function mapJsonLd(nodes: any[], vessel: VesselData) {
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS });
-}
-
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json() as {
