@@ -3,7 +3,7 @@ import React from "react";
 
 const BASE = "https://yotcrm-production.up.railway.app";
 
-const code = `javascript:location.href="https://yotcrm-production.up.railway.app/brochures?url="+encodeURIComponent(location.href);`;
+const code = `javascript:(function(){var f=document.createElement('form');f.method='GET';f.action='https://yotcrm-production.up.railway.app/brochures';var i=document.createElement('input');i.type='hidden';i.name='url';i.value=location.href;document.body.appendChild(f);f.appendChild(i);f.submit();})();`;
 
 export default function BookmarkletPage() {
   const [copied, setCopied] = React.useState(false);
