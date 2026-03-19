@@ -6,38 +6,45 @@
  */
 import type { VesselData } from "./types";
 import { emptyVessel } from "./types";
-import { scrapeOceanKing }   from "./providers/oceanking";
-import { scrapeVanDerValk }  from "./providers/vandervalk";
-import { scrapeDenison }     from "./providers/denison";
-import { scrapeYachtSlinger } from "./providers/yachtslinger";
-import { scrapeYachtBuyer }  from "./providers/yachtbuyer";
-import { scrapeRUYachts }         from "./providers/ruyachts";
-import { scrapeBoatTrader }       from "./providers/boattrader";
+import { scrapeOceanKing }      from "./providers/oceanking";
+import { scrapeVanDerValk }     from "./providers/vandervalk";
+import { scrapeDenison }        from "./providers/denison";
+import { scrapeYachtSlinger }   from "./providers/yachtslinger";
+import { scrapeYachtBuyer }     from "./providers/yachtbuyer";
+import { scrapeRUYachts }       from "./providers/ruyachts";
+import { scrapeBoatTrader }     from "./providers/boattrader";
 import { scrapeBoatInternational } from "./providers/boatinternational";
-import { scrapeSuperyachtTimes }  from "./providers/superyachttimes";
-import { scrapeSuperyachtFan }    from "./providers/superyachtfan";
+import { scrapeSuperyachtTimes } from "./providers/superyachttimes";
+import { scrapeSuperyachtFan }  from "./providers/superyachtfan";
+import { scrapeIYC }            from "./providers/iyc";
+import { scrapeFGI }            from "./providers/fgi";
+import { scrapeEdmiston }       from "./providers/edmiston";
+import { scrapeAlliedMarine }   from "./providers/alliedmarine";
 
 // Provider registry — maps hostname patterns to scraper functions.
-// YachtWorld is intentionally excluded — their anti-bot infra makes reliable
-// scraping impractical on Railway. Use any of the brokerages below instead.
+// YachtWorld excluded — Cloudflare anti-bot blocks Railway IPs reliably.
+// HMY excluded — same reason.
+// YachtBuyer: specs only, NO images (watermarked).
 type Provider = (url: string) => Promise<VesselData>;
 
 const PROVIDERS: { pattern: RegExp; fn: Provider }[] = [
-  // Dedicated providers (custom DOM parsing)
-  { pattern: /oceanking\.it/i,           fn: scrapeOceanKing },
-  { pattern: /vandervalkshipyard\.com/i, fn: scrapeVanDerValk },
-  { pattern: /denisonyachtsales\.com/i,  fn: scrapeDenison },
-  { pattern: /denisonyachting\.com/i,    fn: scrapeDenison },
-  { pattern: /yachtslinger\.com/i,       fn: scrapeYachtSlinger },
-  { pattern: /yachtbuyer\.com/i,         fn: scrapeYachtBuyer },
-  { pattern: /ruyachts\.com/i,           fn: scrapeRUYachts },
-  { pattern: /boattrader\.com/i,         fn: scrapeBoatTrader },
-  { pattern: /boatinternational\.com/i,  fn: scrapeBoatInternational },
-  { pattern: /superyachttimes\.com/i,    fn: scrapeSuperyachtTimes },
-  { pattern: /superyachtfan\.com/i,      fn: scrapeSuperyachtFan },
-  // Major brokerage houses — clean sites, generic scraper handles them well
-  // IYC, Allied Marine, Frazer, Edmiston, Burgess, Ocean Independence, YATCO, etc.
-  // These fall through to genericScrape() below — no dedicated provider needed.
+  { pattern: /oceanking\.it/i,            fn: scrapeOceanKing },
+  { pattern: /vandervalkshipyard\.com/i,  fn: scrapeVanDerValk },
+  { pattern: /denisonyachtsales\.com/i,   fn: scrapeDenison },
+  { pattern: /denisonyachting\.com/i,     fn: scrapeDenison },
+  { pattern: /yachtslinger\.com/i,        fn: scrapeYachtSlinger },
+  { pattern: /yachtbuyer\.com/i,          fn: scrapeYachtBuyer },   // specs only, no images
+  { pattern: /ruyachts\.com/i,            fn: scrapeRUYachts },
+  { pattern: /boattrader\.com/i,          fn: scrapeBoatTrader },
+  { pattern: /boatinternational\.com/i,   fn: scrapeBoatInternational },
+  { pattern: /superyachttimes\.com/i,     fn: scrapeSuperyachtTimes },
+  { pattern: /superyachtfan\.com/i,       fn: scrapeSuperyachtFan },
+  { pattern: /\biyc\.com/i,              fn: scrapeIYC },
+  { pattern: /fgiyachtgroup\.com/i,       fn: scrapeFGI },
+  { pattern: /edmiston\.com/i,            fn: scrapeEdmiston },
+  { pattern: /alliedmarine\.com/i,        fn: scrapeAlliedMarine },
+  // Burgess, Ocean Independence, Fraser, Northrop & Johnson, YATCO, etc.
+  // fall through to genericScrape() — JSON-LD + OG meta handles them well.
 ];
 
 /** Scrape a vessel listing URL and return a full VesselData object */
@@ -45,8 +52,17 @@ export async function scrapeVessel(url: string): Promise<VesselData> {
   const normalised = normaliseUrl(url);
   const { hostname } = new URL(normalised);
   const provider = PROVIDERS.find(p => p.pattern.test(hostname));
-  if (provider) return provider.fn(normalised);
-  return genericScrape(normalised);
+  const result = provider ? await provider.fn(normalised) : await genericScrape(normalised);
+
+  // Global watermark guard — strip any image that looks watermarked regardless of source.
+  // Known watermarked CDNs / patterns:
+  //   image.yachtbuyer.com  — always watermarked
+  //   watermark in URL path  — various sites
+  result.images = result.images.filter(i =>
+    !/image\.yachtbuyer\.com|watermark|wm_|_wm\.|watermarked/i.test(i.src)
+  );
+
+  return result;
 }
 
 /** Convert VesselData to the CampaignDraft shape used by the campaign builder */
