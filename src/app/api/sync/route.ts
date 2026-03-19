@@ -29,7 +29,7 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { leads = [], boats = [], todos = [], pocket_listings = [], iso_requests = [], marinas = [],
       listings = [], enrichment_profiles = [], enrichment_sources = [], score_weights = [],
-      vessel_owners = [], buyer_searches = [], brochures = [] } = body;
+      vessel_owners = [], buyer_searches = [] } = body;
 
     const db = getDb();
     try {
@@ -380,48 +380,10 @@ export async function POST(req: Request) {
 
       db.pragma("foreign_keys = ON");
 
-      // ── Sync brochures (upsert by slug — preserve Railway-created ones) ──
-      if (brochures.length > 0) {
-        db.exec(`CREATE TABLE IF NOT EXISTS brochures (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          slug TEXT UNIQUE NOT NULL,
-          vessel_name TEXT NOT NULL,
-          builder TEXT DEFAULT '',
-          year INTEGER,
-          source_url TEXT DEFAULT '',
-          vessel_data TEXT NOT NULL,
-          is_pocket_listing INTEGER DEFAULT 0,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`);
-        const upsertBrochure = db.prepare(`
-          INSERT INTO brochures (id, slug, vessel_name, builder, year, source_url, vessel_data, is_pocket_listing, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(slug) DO UPDATE SET
-            vessel_name = excluded.vessel_name,
-            builder     = excluded.builder,
-            year        = excluded.year,
-            source_url  = excluded.source_url,
-            vessel_data = excluded.vessel_data,
-            is_pocket_listing = excluded.is_pocket_listing,
-            updated_at  = excluded.updated_at
-        `);
-        for (const b of brochures) {
-          upsertBrochure.run(
-            b.id, b.slug, b.vessel_name || '', b.builder || '',
-            b.year || null, b.source_url || '', b.vessel_data || '{}',
-            b.is_pocket_listing || 0,
-            b.created_at || new Date().toISOString(),
-            b.updated_at || new Date().toISOString()
-          );
-        }
-      }
-
       const counts = { leads: leads.length, boats: boats.length, todos: todos.length,
         pocket_listings: pocket_listings.length, iso_requests: iso_requests.length, marinas: marinas.length,
         my_listings: listings.length, vessel_owners: vessel_owners.length, buyer_searches: buyer_searches.length,
-        enrichment_profiles: enrichment_profiles.length, enrichment_sources: enrichment_sources.length,
-        brochures: brochures.length };
+        enrichment_profiles: enrichment_profiles.length, enrichment_sources: enrichment_sources.length };
       console.log("[SYNC] Database synced:", counts);
       return NextResponse.json({ ok: true, synced: counts });
     } finally { db.close(); }

@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
   try {
     const { text } = await req.json();
     if (!text?.trim()) return NextResponse.json({ error: "text required" }, { status: 400, headers: CORS });
-    const prompt = bYou are a marine equipment expert. Extract structured fields from this yacht listing text.
+    const prompt = `You are a marine equipment expert. Extract structured fields from this yacht listing text.
 Return ONLY raw JSON - no markdown fences, no explanation.
 Omit fields not mentioned. Be specific with brands and models.
 Example: "Garmin 9000 chartplotter" -> { "chartPlotter": "Garmin 9000" }

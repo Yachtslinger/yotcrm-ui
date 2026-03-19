@@ -1,7 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
-
-const client = new Anthropic();
 
 export async function POST(req: NextRequest) {
   try {
@@ -110,13 +107,23 @@ JSON structure (all numbers are annual USD amounts):
 
 Rules: use real operational logic, fuel based on burn rate and hours, dockage based on region, insurance 1-1.75% of vessel value, all values realistic and defensible.`;
 
-    const message = await client.messages.create({
-      model: "claude-opus-4-5-20251101",
-      max_tokens: 4000,
-      messages: [{ role: "user", content: prompt }],
+    const message = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY || "",
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-opus-4-6",
+        max_tokens: 4000,
+        messages: [{ role: "user", content: prompt }],
+      }),
     });
+    if (!message.ok) throw new Error(`Anthropic API error: ${message.status}`);
+    const messageData = await message.json() as { content?: { type: string; text?: string }[] };
 
-    const text = message.content[0].type === "text" ? message.content[0].text : "";
+    const text = messageData.content?.find(b => b.type === "text")?.text || "";
     const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const modelData = JSON.parse(cleaned);
 

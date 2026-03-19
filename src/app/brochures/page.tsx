@@ -257,6 +257,7 @@ export default function BrochuresPage() {
   // Broker selection — all three on by default, user can toggle
   const [selectedBrokers, setSelectedBrokers] = React.useState<Set<string>>(new Set(["Will Noftsinger","Paolo Ameglio","Peter Quintal"]));
   const [isPocket, setIsPocket] = React.useState(false);
+  const [writeupLoading, setWriteupLoading] = React.useState(false);
   const pdfInputRef = React.useRef<HTMLInputElement>(null);
   const gaInputRef  = React.useRef<HTMLInputElement>(null);
 
@@ -489,8 +490,44 @@ export default function BrochuresPage() {
     }
   }
 
+  /** Generate a Claude writeup from whatever VesselData we have so far */
+  async function handleGenerateWriteup() {
+    if (!vessel) return;
+    setWriteupLoading(true);
+    showToast("Claude is generating your writeup…", "success");
+    try {
+      const res = await fetch("/api/brochures/generate-writeup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(vessel),
+      });
+      const d = await res.json();
+      if (!d.ok) throw new Error(d.error || "Writeup failed");
+      const w = d.writeup as Record<string, string>;
+      // Always overwrite marketing copy; only fill empty spec fields
+      const overwrite = ["description", "customIntro"];
+      const fill = ["engines", "engineHours", "navigation", "chartPlotter", "radar",
+                    "autopilot", "aisSystem", "satcom", "toys", "tender", "notes"];
+      setVessel(v => {
+        if (!v) return v;
+        const update: Partial<VesselData> = {};
+        for (const key of overwrite) {
+          if (w[key]) (update as Record<string, unknown>)[key] = w[key];
+        }
+        for (const key of fill) {
+          if (w[key] && !(v as Record<string, unknown>)[key]) (update as Record<string, unknown>)[key] = w[key];
+        }
+        return { ...v, ...update };
+      });
+      showToast("✍️ Writeup generated — review the Description and Navigation fields below", "success");
+    } catch (err) {
+      showToast(`Writeup failed: ${err instanceof Error ? err.message : "unknown"}`, "error");
+    } finally {
+      setWriteupLoading(false);
+    }
+  }
+
   function handlePdfSelect(file: File) {
-    setPendingPdf(file);
     setPdfFileName(file.name);
     showToast(`PDF staged: ${file.name} — click Build Brochure to include it`, "success");
   }
@@ -1134,6 +1171,14 @@ export default function BrochuresPage() {
             </button>
             <button onClick={restoreAll} className="text-xs px-3 py-1.5 rounded-lg border border-[var(--border)] text-[var(--navy-400)] hover:border-[var(--brass-400)]">
               Restore Hidden Fields
+            </button>
+            <button
+              onClick={handleGenerateWriteup}
+              disabled={writeupLoading || step === "saving"}
+              className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-all border-[var(--brass-400)] text-[var(--brass-400)] hover:bg-[rgba(184,147,58,.08)] disabled:opacity-50 disabled:cursor-not-allowed">
+              {writeupLoading
+                ? <><div className="w-3.5 h-3.5 border-2 border-[var(--brass-400)]/30 border-t-[var(--brass-400)] rounded-full animate-spin" />Generating…</>
+                : <>✍️ Generate Writeup</>}
             </button>
             <button className="btn-primary flex items-center gap-2 text-sm" onClick={handlePublish} disabled={step === "saving"}>
               {step === "saving"

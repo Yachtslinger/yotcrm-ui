@@ -9,7 +9,6 @@ import { emptyVessel } from "./types";
 import { scrapeOceanKing }   from "./providers/oceanking";
 import { scrapeVanDerValk }  from "./providers/vandervalk";
 import { scrapeDenison }     from "./providers/denison";
-import { scrapeYachtWorld }  from "./providers/yachtworld";
 import { scrapeYachtSlinger } from "./providers/yachtslinger";
 import { scrapeYachtBuyer }  from "./providers/yachtbuyer";
 import { scrapeRUYachts }         from "./providers/ruyachts";
@@ -18,66 +17,32 @@ import { scrapeBoatInternational } from "./providers/boatinternational";
 import { scrapeSuperyachtTimes }  from "./providers/superyachttimes";
 import { scrapeSuperyachtFan }    from "./providers/superyachtfan";
 
-// Provider registry — maps hostname patterns to scraper functions
+// Provider registry — maps hostname patterns to scraper functions.
+// YachtWorld is intentionally excluded — their anti-bot infra makes reliable
+// scraping impractical on Railway. Use any of the brokerages below instead.
 type Provider = (url: string) => Promise<VesselData>;
 
 const PROVIDERS: { pattern: RegExp; fn: Provider }[] = [
+  // Dedicated providers (custom DOM parsing)
   { pattern: /oceanking\.it/i,           fn: scrapeOceanKing },
   { pattern: /vandervalkshipyard\.com/i, fn: scrapeVanDerValk },
   { pattern: /denisonyachtsales\.com/i,  fn: scrapeDenison },
   { pattern: /denisonyachting\.com/i,    fn: scrapeDenison },
-  { pattern: /yachtworld\.com/i,         fn: scrapeYachtWorld },
   { pattern: /yachtslinger\.com/i,       fn: scrapeYachtSlinger },
   { pattern: /yachtbuyer\.com/i,         fn: scrapeYachtBuyer },
-  { pattern: /ruyachts\.com/i,                fn: scrapeRUYachts },
-  { pattern: /boattrader\.com/i,              fn: scrapeBoatTrader },
-  { pattern: /boatinternational\.com/i,       fn: scrapeBoatInternational },
-  { pattern: /superyachttimes\.com/i,         fn: scrapeSuperyachtTimes },
-  { pattern: /superyachtfan\.com/i,           fn: scrapeSuperyachtFan },
+  { pattern: /ruyachts\.com/i,           fn: scrapeRUYachts },
+  { pattern: /boattrader\.com/i,         fn: scrapeBoatTrader },
+  { pattern: /boatinternational\.com/i,  fn: scrapeBoatInternational },
+  { pattern: /superyachttimes\.com/i,    fn: scrapeSuperyachtTimes },
+  { pattern: /superyachtfan\.com/i,      fn: scrapeSuperyachtFan },
+  // Major brokerage houses — clean sites, generic scraper handles them well
+  // IYC, Allied Marine, Frazer, Edmiston, Burgess, Ocean Independence, YATCO, etc.
+  // These fall through to genericScrape() below — no dedicated provider needed.
 ];
 
 /** Scrape a vessel listing URL and return a full VesselData object */
 export async function scrapeVessel(url: string): Promise<VesselData> {
   const normalised = normaliseUrl(url);
-
-  // YachtWorld: try YachtWorld provider first (has Puppeteer stealth).
-  // If that returns sparse data, also try BoatTrader as a cross-reference.
-  const isYachtWorld = /yachtworld\.com\/yacht\//i.test(normalised);
-  if (isYachtWorld) {
-    const ywProvider = PROVIDERS.find(p => p.pattern.test("www.yachtworld.com"));
-    if (ywProvider) {
-      try {
-        const result = await ywProvider.fn(normalised);
-        // If we got real data (images, price, OR any spec field), return it
-        const hasData = result.images.length > 0 || !!result.price || !!result.loa || !!result.beam || !!result.engines;
-        if (hasData) return result;
-        // Sparse — try BoatTrader cross-reference to fill gaps
-        const btUrl = normalised.replace(
-          /^https?:\/\/(?:www\.)?yachtworld\.com\/yacht\//i,
-          "https://www.boattrader.com/boat/"
-        );
-        try {
-          const btResult = await PROVIDERS.find(p => p.pattern.test("www.boattrader.com"))!.fn(btUrl);
-          // Merge: YW wins on text fields, merge images
-          for (const k of Object.keys(btResult) as (keyof VesselData)[]) {
-            if (k === "images") continue;
-            const yw = (result as Record<string,unknown>)[k as string];
-            const bt = (btResult as Record<string,unknown>)[k as string];
-            if ((!yw || yw === "" || yw === null) && bt) {
-              (result as Record<string,unknown>)[k as string] = bt;
-            }
-          }
-          const existingSrcs = new Set(result.images.map(i => i.src));
-          result.images = [...result.images, ...btResult.images.filter(i => !existingSrcs.has(i.src))];
-        } catch { /* BoatTrader is best-effort */ }
-        return result;
-      } catch (err) {
-        console.error("[scraper] YachtWorld provider failed:", err);
-        // Fall through to generic
-      }
-    }
-  }
-
   const { hostname } = new URL(normalised);
   const provider = PROVIDERS.find(p => p.pattern.test(hostname));
   if (provider) return provider.fn(normalised);

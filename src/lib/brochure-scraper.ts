@@ -4,7 +4,6 @@
 
 import { scrapeDenison } from "@/lib/campaign/providers/denison";
 import { formatCapacity, extractFuelFromText } from "@/lib/capacity-utils";
-import { scrapeYachtWorld } from "@/lib/campaign/providers/yachtworld";
 import { scrapeGeneric } from "@/lib/campaign/providers/generic";
 import type { CampaignDraft } from "@/lib/campaign/providers/denison";
 import type { VesselData } from "@/lib/brochure-storage";
