@@ -154,13 +154,18 @@ function parseDenison(url: string, html: string): VesselData {
     cleanHeadline($("h1").first().text().replace(/Yacht for Sale/i, "").trim()) ||
     cleanHeadline($('meta[property="og:title"]').attr("content")) || "";
 
+  // Collect ALL listing body paragraphs — Claude needs the full text to summarize well
   if (!vessel.description) {
+    const paras: string[] = [];
+    const JUNK = /privacy\s*policy|cookie|newsletter|inquire|fill\s*out\s*the\s*form|our\s*team|contact|disclaimer|offered\s*(as\s*a\s*convenience|subject\s*to)|denison\s*yacht\s*sales\s*offers|cannot\s*guarantee|broker/i;
     $("p").each((_, p) => {
-      if (vessel.description) return;
       const t = clean($(p).text());
-      if (t.length > 80 && /\b(yacht|vessel|built|motor|sail|feet|meter|knot|cabin|stateroom|delivered|commissioned)\b/i.test(t))
-        vessel.description = t;
+      if (t.length < 60) return;                          // skip short snippets
+      if (JUNK.test(t)) return;                           // skip boilerplate
+      if (!/\b(yacht|vessel|built|motor|sail|feet|meter|knot|cabin|stateroom|delivered|commissioned|design|interior|exterior|hull|engine|speed|range|deck|suite|guest|owner|charter|tender)\b/i.test(t)) return;
+      paras.push(t);
     });
+    if (paras.length) vessel.description = paras.join("\n\n").slice(0, 6000);
   }
   if (!vessel.description)
     vessel.description = clean($('meta[property="og:description"]').attr("content"));

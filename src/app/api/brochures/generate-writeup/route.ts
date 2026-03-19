@@ -1,21 +1,7 @@
 /**
  * POST /api/brochures/generate-writeup
- * Accepts a VesselData object (raw scrape output), sends it to Claude,
- * and returns structured writeup JSON:
- *   - headline: marketing headline
- *   - customIntro: brochure intro paragraph (below hero)
- *   - description: full brochure body copy
- *   - engines: normalized engine string
- *   - engineHours: normalized hours string
- *   - navigation: normalized nav/electronics string
- *   - chartPlotter: chart plotter details
- *   - radar: radar details
- *   - autopilot: autopilot details
- *   - aisSystem: AIS details
- *   - satcom: SATCOM/VSAT details
- *   - toys: water toys summary
- *   - tender: tender/garage details
- *   - notes: any additional remarks extracted
+ * Accepts VesselData, sends full listing text + specs to Claude,
+ * returns structured brochure copy + normalized spec fields.
  */
 import { NextRequest, NextResponse } from "next/server";
 
@@ -24,97 +10,85 @@ export const maxDuration = 60;
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   let vessel: Record<string, unknown>;
-  try {
-    vessel = await req.json();
-  } catch {
-    return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
-  }
+  try { vessel = await req.json(); }
+  catch { return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 }); }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ ok: false, error: "ANTHROPIC_API_KEY not set" }, { status: 500 });
-  }
+  if (!apiKey) return NextResponse.json({ ok: false, error: "ANTHROPIC_API_KEY not set" }, { status: 500 });
 
-  // Build a concise spec summary to send to Claude
+  // ── Spec summary ──────────────────────────────────────────────────────────
   const specLines: string[] = [];
   const add = (label: string, key: string) => {
     const val = vessel[key];
     if (val && String(val).trim()) specLines.push(`${label}: ${String(val).trim()}`);
   };
+  add("Vessel Name", "name");         add("Builder", "builder");
+  add("Year", "year");                add("LOA", "loa");
+  add("Beam", "beam");                add("Draft", "draft");
+  add("Displacement", "displacement"); add("Gross Tonnage", "grossTonnage");
+  add("Hull Material", "hullMaterial"); add("Hull Form", "hullForm");
+  add("Exterior Design", "exteriorDesign"); add("Interior Design", "interiorDesign");
+  add("Naval Architect", "navalArchitect"); add("Classification", "classification");
+  add("Nav Class", "navClass");       add("Flag State", "flagState");
+  add("Location", "location");        add("Asking Price", "price");
+  add("Main Engines", "engines");     add("Engine Hours", "engineHours");
+  add("Power Output", "power");       add("Max Speed", "maxSpeed");
+  add("Cruise Speed", "cruiseSpeed"); add("Range", "range");
+  add("Gensets", "gensets");          add("Generator KW", "generatorKW");
+  add("Stabilisers", "stabilisers");  add("Zero Speed Stabs", "zeroSpeedStabilisers");
+  add("Bow Thruster", "bowThruster"); add("Stern Thruster", "sternThruster");
+  add("Fuel Capacity", "fuelTank");   add("Fresh Water", "freshWater");
+  add("Holding Tank", "holdingTank"); add("Grey Water", "greyWater");
+  add("Staterooms", "staterooms");    add("Guests", "guests");
+  add("Crew", "crew");                add("Crew Cabins", "crewCabins");
+  add("Owner Cabin", "ownersCabin");
+  add("Flybridge", "flybridge");      add("Beach Club", "beachClub");
+  add("Jacuzzi", "jacuzzi");          add("Gym", "gym");
+  add("Tender", "tender");            add("Water Toys", "toys");
+  add("Navigation", "navigation");    add("Chart Plotter", "chartPlotter");
+  add("Radar", "radar");              add("Autopilot", "autopilot");
+  add("AIS", "aisSystem");            add("SATCOM", "satcom");
+  add("Air Con", "airCon");           add("Water Maker", "waterMaker");
+  add("Shore Power", "shorepower");   add("Refit Year", "refitYear");
+  add("Refit Details", "refitDetails"); add("Fire Suppression", "fireSuppression");
+  add("Life Rafts", "lifeRafts");
 
-  add("Vessel Name", "name");
-  add("Builder", "builder");
-  add("Year", "year");
-  add("LOA", "loa");
-  add("Beam", "beam");
-  add("Draft", "draft");
-  add("Location", "location");
-  add("Asking Price", "price");
-  add("Gross Tonnage", "grossTonnage");
-  add("Displacement", "displacement");
-  add("Hull Material", "hullMaterial");
-  add("Exterior Design", "exteriorDesign");
-  add("Interior Design", "interiorDesign");
-  add("Naval Architect", "navalArchitect");
-  add("Main Engines", "engines");
-  add("Engine Hours", "engineHours");
-  add("Power Output", "power");
-  add("Max Speed", "maxSpeed");
-  add("Cruise Speed", "cruiseSpeed");
-  add("Range", "range");
-  add("Gensets", "gensets");
-  add("Stabilisers", "stabilisers");
-  add("Fuel Capacity", "fuelTank");
-  add("Fresh Water", "freshWater");
-  add("Staterooms", "staterooms");
-  add("Guests", "guests");
-  add("Crew", "crew");
-  add("Flybridge", "flybridge");
-  add("Beach Club", "beachClub");
-  add("Jacuzzi", "jacuzzi");
-  add("Tender / Garage", "tender");
-  add("Water Toys", "toys");
-  add("Navigation Systems", "navigation");
-  add("Chart Plotter", "chartPlotter");
-  add("Radar", "radar");
-  add("Autopilot", "autopilot");
-  add("AIS", "aisSystem");
-  add("SATCOM / VSAT", "satcom");
-  add("Air Conditioning", "airCon");
-  add("Water Maker", "waterMaker");
-  add("Refit Year", "refitYear");
-  add("Refit Details", "refitDetails");
-  add("Classification", "classification");
-  add("Flag State", "flagState");
-
-  // Include raw description / features so Claude can mine them
-  const rawDescription = String(vessel.description || "").slice(0, 2000);
+  // ── Raw listing content — pass full text up to 5000 chars ────────────────
+  const rawDescription = String(vessel.description || "").slice(0, 5000);
   const rawFeatures = Array.isArray(vessel.features)
-    ? (vessel.features as string[]).join("\n")
+    ? (vessel.features as string[]).slice(0, 30).join("\n")
     : "";
 
-  const prompt = `You are a luxury yacht marketing specialist writing for an elite brokerage.
-Given the vessel data below, produce a JSON object (and ONLY JSON — no markdown fences, no preamble).
+  const prompt = `You are a senior yacht marketing copywriter for an elite brokerage. Your job is to:
+1. Read the raw listing text and features list carefully — this is your PRIMARY source
+2. Synthesize it into polished, original brochure copy in a formal luxury voice
+3. Normalize and extract spec fields from the raw text where scraped values are missing
 
-VESSEL DATA:
-${specLines.join("\n")}${rawDescription ? `\n\nRAW LISTING DESCRIPTION:\n${rawDescription}` : ""}${rawFeatures ? `\n\nFEATURES / EQUIPMENT LIST:\n${rawFeatures}` : ""}
+STRUCTURED SPECS:
+${specLines.join("\n")}
 
-Return a JSON object with exactly these keys:
+RAW LISTING BODY TEXT (your primary source — synthesize this):
+${rawDescription || "(none)"}
+
+${rawFeatures ? `KEY FEATURES / HIGHLIGHTS:\n${rawFeatures}` : ""}
+
+Return ONLY a raw JSON object — no markdown fences, no preamble, no explanation.
+
 {
-  "headline": "Short punchy marketing headline (max 12 words)",
-  "customIntro": "2-3 sentence intro paragraph for below the hero image. Evocative, third-person, luxury tone.",
-  "description": "Full brochure body copy. 3-5 paragraphs covering: vessel character/design, performance, accommodation, onboard experience, ideal use. Formal, third-person, luxury brokerage voice. No bullet points.",
-  "engines": "Normalized engine string extracted or inferred from the data (e.g. '2x MTU 16V 2000 M96'). Empty string if unknown.",
-  "engineHours": "Engine hours as a clean string (e.g. '1,200 hrs (2023)'). Empty string if unknown.",
-  "navigation": "Full navigation/electronics suite as a comma-separated list extracted from the raw data. Empty string if unknown.",
-  "chartPlotter": "Chart plotter make/model if identifiable. Empty string if unknown.",
-  "radar": "Radar make/model if identifiable. Empty string if unknown.",
-  "autopilot": "Autopilot make/model if identifiable. Empty string if unknown.",
-  "aisSystem": "AIS system if identifiable. Empty string if unknown.",
-  "satcom": "SATCOM/VSAT system if identifiable. Empty string if unknown.",
-  "toys": "Water toys summary as a clean comma-separated list. Empty string if unknown.",
-  "tender": "Tender and garage details. Empty string if unknown.",
-  "notes": "Any additional remarks, condition notes, or standout features not covered above. Empty string if none."
+  "headline": "Punchy marketing headline max 12 words. Lead with the vessel name.",
+  "customIntro": "2-3 sentences. The hook paragraph that appears beneath the hero image. Evocative, third-person. Capture what makes this vessel unique — her story, commission, character, or standout quality. Never generic.",
+  "description": "4-6 paragraphs of polished brochure body copy. SYNTHESIZE the raw listing text — do not copy it verbatim. Cover: (1) vessel identity and design pedigree, (2) performance and range capability, (3) accommodation and interior experience, (4) deck layout and entertaining spaces, (5) technical specification highlights and condition. Formal luxury brokerage voice, third-person, no bullet points. Each paragraph should flow into the next.",
+  "engines": "Clean engine string e.g. '2x Caterpillar C32 ACERT'. Extract from raw text if not in specs. Empty string if unknown.",
+  "engineHours": "Engine hours as clean string e.g. 'Port: 1,819 hrs / Stbd: 1,824 hrs'. Extract from raw text. Empty string if unknown.",
+  "navigation": "Full nav/electronics suite as comma-separated list. Extract makes and models from raw text. e.g. 'Furuno radar, Furuno AIS, Simrad autopilot, Furuno echosounder'. Empty string if unknown.",
+  "chartPlotter": "Chart plotter make/model from raw text. Empty string if unknown.",
+  "radar": "Radar make/model from raw text. Empty string if unknown.",
+  "autopilot": "Autopilot make/model from raw text. Empty string if unknown.",
+  "aisSystem": "AIS system from raw text. Empty string if unknown.",
+  "satcom": "SATCOM/VSAT/comms systems e.g. 'Starlink x2, Inmarsat GMDSS'. Extract from raw text. Empty string if unknown.",
+  "toys": "Water toys and watersports equipment as comma-separated list. Empty string if unknown.",
+  "tender": "Tender make/model/size and garage details. e.g. 'Williams 565 Tender in hydraulic portside garage'. Empty string if unknown.",
+  "notes": "Generator hours if found (e.g. 'Gen hours — Port: 3,068 / Stbd: 3,078'), plus any other standout notes: charter capability, special equipment, survey status, condition remarks. Empty string if none."
 }`;
 
   try {
@@ -127,7 +101,7 @@ Return a JSON object with exactly these keys:
       },
       body: JSON.stringify({
         model: "claude-opus-4-6",
-        max_tokens: 2000,
+        max_tokens: 3000,
         messages: [{ role: "user", content: prompt }],
       }),
     });
@@ -137,22 +111,14 @@ Return a JSON object with exactly these keys:
       throw new Error(`Anthropic API error (${aiRes.status}): ${errText.slice(0, 200)}`);
     }
 
-    const aiData = await aiRes.json() as {
-      content?: { type: string; text?: string }[];
-    };
-
+    const aiData = await aiRes.json() as { content?: { type: string; text?: string }[] };
     const raw = aiData.content?.find(b => b.type === "text")?.text || "";
-    // Strip any accidental markdown fences
     const cleaned = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
 
     let writeup: Record<string, string>;
-    try {
-      writeup = JSON.parse(cleaned);
-    } catch {
-      return NextResponse.json(
-        { ok: false, error: "Claude returned non-JSON output", raw },
-        { status: 500 }
-      );
+    try { writeup = JSON.parse(cleaned); }
+    catch {
+      return NextResponse.json({ ok: false, error: "Claude returned non-JSON output", raw }, { status: 500 });
     }
 
     return NextResponse.json({ ok: true, writeup });

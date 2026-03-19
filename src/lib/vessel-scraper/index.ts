@@ -109,12 +109,21 @@ async function genericScrape(url: string): Promise<VesselData> {
     cleanHeadline($("h1").first().text()) ||
     "";
 
-  // Description
-  vessel.description = clean(
-    $('meta[property="og:description"]').attr("content") ||
-    $("article p").first().text() ||
-    $("main p").first().text()
-  );
+  // Description — collect all listing body paragraphs for Claude to synthesize
+  {
+    const ogDesc = clean($('meta[property="og:description"]').attr("content") || "");
+    const JUNK = /privacy\s*policy|cookie|newsletter|fill\s*out|our\s*team|disclaimer|offered\s*subject\s*to|cannot\s*guarantee|broker|terms\s*of\s*use/i;
+    const paras: string[] = [];
+    $("article p, main p, [class*='description'] p, [class*='overview'] p, p").each((_, p) => {
+      const t = clean($(p).text());
+      if (t.length < 60 || JUNK.test(t)) return;
+      if (!/\b(yacht|vessel|built|motor|sail|feet|meter|knot|cabin|stateroom|design|hull|engine|speed|range|deck|suite|guest|owner|tender|charter)\b/i.test(t)) return;
+      if (!paras.includes(t)) paras.push(t);
+    });
+    vessel.description = paras.length
+      ? paras.join("\n\n").slice(0, 6000)
+      : ogDesc;
+  }
 
   // JSON-LD
   $('script[type="application/ld+json"]').each((_, el) => {
