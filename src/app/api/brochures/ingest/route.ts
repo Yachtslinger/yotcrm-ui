@@ -137,6 +137,16 @@ function mapJsonLd(nodes: any[], vessel: VesselData) {
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS });
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json() as {
@@ -189,12 +199,11 @@ export async function POST(req: NextRequest) {
 
     vessel.images = dedupeImages(vessel.images);
 
-    // Return the vessel data — client opens the brochure editor pre-filled
-    return NextResponse.json({ ok: true, vessel });
+    return NextResponse.json({ ok: true, vessel }, { headers: CORS });
 
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[brochures/ingest]", msg);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json({ error: msg }, { status: 500, headers: CORS });
   }
 }
