@@ -274,6 +274,19 @@ export default function BrochuresPage() {
 
   React.useEffect(() => { fetchBrochures(); }, []);
 
+  // ── Bookmarklet: ?url=<listing_url> — auto-populate URL field and trigger build
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const ingestUrl = params.get("url");
+    if (!ingestUrl) return;
+    window.history.replaceState({}, "", "/brochures");
+    setUrls([ingestUrl, ""]);
+    // Small delay so the UI renders before we kick off the build
+    setTimeout(() => handleBuild(), 300);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Bookmarklet ingest: ?ingest=1 means the bookmarklet posted vessel data
   //    to /api/brochures/ingest and stored the result in sessionStorage.
   //    We read it here and jump straight into the editor pre-filled.
