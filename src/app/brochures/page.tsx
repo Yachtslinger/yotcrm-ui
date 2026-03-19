@@ -274,16 +274,37 @@ export default function BrochuresPage() {
 
   React.useEffect(() => { fetchBrochures(); }, []);
 
-  // ── Bookmarklet: ?url=<listing_url> — populate URL field and kick off build
+  // ── Bookmarklet: ?d=<base64> — specs encoded directly in URL (survives Safari cross-origin nav)
   React.useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    const ingestUrl = params.get("url");
-    if (!ingestUrl) return;
+    const encoded = params.get("d");
+    if (!encoded) return;
     window.history.replaceState({}, "", "/brochures");
-    setUrls([ingestUrl, ""]);
-    // Call buildFromUrl directly — don't rely on urls state which isn't updated yet
-    buildFromUrl(ingestUrl);
+    try {
+      const json = decodeURIComponent(escape(atob(encoded)));
+      const v = JSON.parse(json) as VesselData;
+      if (v && (v.name || v.sourceUrl)) {
+        // If there's a hero image from og:image, add it as the first image
+        const heroImage = (v as any).heroImage;
+        if (heroImage && !v.images?.length) {
+          v.images = [{ src: heroImage, alt: v.name || "" }];
+        }
+        v.images = v.images || [];
+        v.features = v.features || [];
+        setVessel(prepVessel(v));
+        setStep("preview");
+        const hasSpecs = !!(v.loa || v.beam || v.engines || v.price);
+        if (!v.images.length || v.images.length < 3) {
+          setShowPasteImport(true);
+          showToast(`⚓ ${v.name || "Vessel"} loaded${hasSpecs ? " with specs" : ""} — paste page source below to add photos`, "success");
+        } else {
+          showToast(`⚓ ${v.name || "Vessel"} · ${v.images.length} images loaded`, "success");
+        }
+      }
+    } catch (err) {
+      showToast("Bookmarklet data could not be decoded", "error");
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
