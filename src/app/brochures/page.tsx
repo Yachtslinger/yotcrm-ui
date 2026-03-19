@@ -258,6 +258,7 @@ export default function BrochuresPage() {
   const [selectedBrokers, setSelectedBrokers] = React.useState<Set<string>>(new Set(["Will Noftsinger","Paolo Ameglio","Peter Quintal"]));
   const [isPocket, setIsPocket] = React.useState(false);
   const [writeupLoading, setWriteupLoading] = React.useState(false);
+  const [writeupFields, setWriteupFields] = React.useState<Set<string>>(new Set());
   const pdfInputRef = React.useRef<HTMLInputElement>(null);
   const gaInputRef  = React.useRef<HTMLInputElement>(null);
 
@@ -504,22 +505,25 @@ export default function BrochuresPage() {
       const d = await res.json();
       if (!d.ok) throw new Error(d.error || "Writeup failed");
       const w = d.writeup as Record<string, string>;
-      // Always overwrite marketing copy; only fill empty spec fields
       const overwrite = ["description", "customIntro"];
       const fill = ["engines", "engineHours", "navigation", "chartPlotter", "radar",
                     "autopilot", "aisSystem", "satcom", "toys", "tender", "notes"];
+      const populated = new Set<string>();
       setVessel(v => {
         if (!v) return v;
         const update: Partial<VesselData> = {};
         for (const key of overwrite) {
-          if (w[key]) (update as Record<string, unknown>)[key] = w[key];
+          if (w[key]) { (update as Record<string, unknown>)[key] = w[key]; populated.add(key); }
         }
         for (const key of fill) {
-          if (w[key] && !(v as Record<string, unknown>)[key]) (update as Record<string, unknown>)[key] = w[key];
+          if (w[key] && !(v as Record<string, unknown>)[key]) { (update as Record<string, unknown>)[key] = w[key]; populated.add(key); }
         }
         return { ...v, ...update };
       });
-      showToast("✍️ Writeup generated — review the Description and Navigation fields below", "success");
+      setWriteupFields(populated);
+      // Clear highlights after 6 seconds
+      setTimeout(() => setWriteupFields(new Set()), 6000);
+      showToast(`✍️ ${populated.size} fields populated — highlighted in gold below`, "success");
     } catch (err) {
       showToast(`Writeup failed: ${err instanceof Error ? err.message : "unknown"}`, "error");
     } finally {
@@ -1172,14 +1176,6 @@ export default function BrochuresPage() {
             <button onClick={restoreAll} className="text-xs px-3 py-1.5 rounded-lg border border-[var(--border)] text-[var(--navy-400)] hover:border-[var(--brass-400)]">
               Restore Hidden Fields
             </button>
-            <button
-              onClick={handleGenerateWriteup}
-              disabled={writeupLoading || step === "saving"}
-              className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-all border-[var(--brass-400)] text-[var(--brass-400)] hover:bg-[rgba(184,147,58,.08)] disabled:opacity-50 disabled:cursor-not-allowed">
-              {writeupLoading
-                ? <><div className="w-3.5 h-3.5 border-2 border-[var(--brass-400)]/30 border-t-[var(--brass-400)] rounded-full animate-spin" />Generating…</>
-                : <>✍️ Generate Writeup</>}
-            </button>
             <button className="btn-primary flex items-center gap-2 text-sm" onClick={handlePublish} disabled={step === "saving"}>
               {step === "saving"
                 ? <span className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Saving…</span>
@@ -1342,8 +1338,35 @@ export default function BrochuresPage() {
           <VideoAdder onAdd={addVideo} />
         </div>
 
+        {/* ── Claude Writeup Generator ── */}
+        <div className="rounded-xl p-5 mb-4" style={{ background: "var(--card)", border: "1px solid rgba(184,147,58,.4)" }}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: "var(--brass-400)" }}>✍️ AI Writeup Generator</p>
+              <p className="text-xs" style={{ color: "var(--navy-400)" }}>
+                Sends all scraped data to Claude and generates the brochure description, intro paragraph, and normalizes engine hours, electronics, navigation, toys, and tender fields. Marketing copy always overwrites — spec fields only fill if empty.
+              </p>
+            </div>
+            <button
+              onClick={handleGenerateWriteup}
+              disabled={writeupLoading || step === "saving"}
+              style={{ background: "rgba(184,147,58,.15)", border: "1px solid rgba(184,147,58,.5)", color: "var(--brass-400)", whiteSpace: "nowrap" }}
+              className="flex-shrink-0 flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-lg transition-all hover:bg-[rgba(184,147,58,.25)] disabled:opacity-50 disabled:cursor-not-allowed">
+              {writeupLoading
+                ? <><div className="w-4 h-4 border-2 border-[var(--brass-400)]/30 border-t-[var(--brass-400)] rounded-full animate-spin" />Generating…</>
+                : <>✍️ Generate Writeup</>}
+            </button>
+          </div>
+          {writeupFields.size > 0 && (
+            <div className="mt-3 text-xs px-3 py-2 rounded-lg" style={{ background: "rgba(184,147,58,.1)", border: "1px solid rgba(184,147,58,.3)", color: "var(--brass-400)" }}>
+              ✓ Populated: {[...writeupFields].join(", ")} — fields highlighted below for 6 seconds
+            </div>
+          )}
+        </div>
+
         {/* Description */}
-        <div className="rounded-xl p-5 mb-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>          <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "var(--brass-400)" }}>Description</p>
+        <div className="rounded-xl p-5 mb-4" style={{ background: "var(--card)", border: `1px solid ${writeupFields.has("description") ? "rgba(184,147,58,.6)" : "var(--border)"}`, transition: "border-color 0.5s" }}>
+          <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "var(--brass-400)" }}>Description {writeupFields.has("description") && <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full normal-case font-normal" style={{ background: "rgba(184,147,58,.2)", color: "var(--brass-400)" }}>✍️ AI generated</span>}</p>
           <textarea
             className="w-full rounded-lg text-sm p-3 resize-y"
             style={{ background: "var(--input,#1e293b)", border: "1px solid var(--border)", color: "var(--foreground)", height: 100, fontFamily: "inherit" }}
@@ -1400,7 +1423,7 @@ export default function BrochuresPage() {
                       {f.key === "customIntro" ? (
                         <textarea
                           className="w-full rounded-lg text-sm p-2.5 resize-y"
-                          style={{ background: "var(--input,#1e293b)", border: "1px solid var(--border)", color: "var(--foreground)", minHeight: 140 }}
+                          style={{ background: "var(--input,#1e293b)", border: `1px solid ${writeupFields.has(f.key as string) ? "rgba(184,147,58,.7)" : "var(--border)"}`, color: "var(--foreground)", minHeight: 140, transition: "border-color 0.5s" }}
                           value={rawVal}
                           onChange={e => updateField(f.key, e.target.value)}
                           placeholder="Write a custom paragraph that appears full-width below the hero image — as long as you want. Great for personal commentary, why you love this boat, or context for your client."
@@ -1408,7 +1431,7 @@ export default function BrochuresPage() {
                       ) : (
                         <input
                           className="w-full rounded-lg text-sm p-2.5"
-                          style={{ background: "var(--input,#1e293b)", border: "1px solid var(--border)", color: "var(--foreground)" }}
+                          style={{ background: "var(--input,#1e293b)", border: `1px solid ${writeupFields.has(f.key as string) ? "rgba(184,147,58,.7)" : "var(--border)"}`, color: "var(--foreground)", transition: "border-color 0.5s" }}
                           value={rawVal}
                           onChange={e => updateField(f.key, e.target.value)}
                           onBlur={e => blurField(f.key, e.target.value)}
