@@ -1822,99 +1822,167 @@ function ImageGrid({ images, onMove, onRemove, onCategory }: {
 }) {
   const [dragIdx, setDragIdx] = React.useState<number | null>(null);
   const [overIdx, setOverIdx] = React.useState<number | null>(null);
-  const [expanded, setExpanded] = React.useState<number | null>(null);
+  const [selected, setSelected] = React.useState<Set<number>>(new Set());
 
   const CATS = [
     { key: "exterior",  label: "EXT", color: "#0ea5e9" },
     { key: "interior",  label: "INT", color: "#a78bfa" },
     { key: "technical", label: "TEC", color: "#34d399" },
   ];
-  function catColor(cat?: string) {
-    return CATS.find(c => c.key === cat)?.color || "rgba(255,255,255,.25)";
-  }
+  const catColor = (cat?: string) => CATS.find(c => c.key === cat)?.color || "rgba(255,255,255,.25)";
+
+  const toggleSelect = (i: number) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(i) ? next.delete(i) : next.add(i);
+      return next;
+    });
+  };
+
+  const applyBulkCategory = (cat: string) => {
+    selected.forEach(i => onCategory(i, cat));
+    setSelected(new Set());
+  };
+
+  const removeBulkSelected = () => {
+    // Remove in reverse order so indices stay valid
+    [...selected].sort((a,b) => b - a).forEach(i => onRemove(i));
+    setSelected(new Set());
+  };
+
+  const selectAll = () => setSelected(new Set(images.map((_, i) => i)));
+  const clearSelection = () => setSelected(new Set());
 
   if (!images.length) return (
     <div className="text-xs py-4 text-center" style={{ color: "var(--navy-400)" }}>No images yet — paste a URL or upload a file below</div>
   );
 
   return (
-    <div className="flex flex-wrap gap-2 mb-3">
-      {images.map((img, i) => {
-        const cat    = img.category || "";
-        const isOpen = expanded === i;
-        const isDragging = dragIdx === i;
-        const isOver     = overIdx === i && dragIdx !== i;
-        return (
-          <div key={i}
-            draggable
-            onDragStart={() => { setDragIdx(i); setExpanded(null); }}
-            onDragEnter={() => setOverIdx(i)}
-            onDragOver={e => { e.preventDefault(); setOverIdx(i); }}
-            onDragEnd={() => {
-              if (dragIdx !== null && overIdx !== null && dragIdx !== overIdx) {
-                onMove(dragIdx, overIdx);
-              }
-              setDragIdx(null); setOverIdx(null);
-            }}
-            onDrop={e => { e.preventDefault(); }}
-            className="relative rounded overflow-hidden flex-shrink-0 select-none"
-            style={{
-              width: 110, height: 74,
-              background: "var(--navy-800,#0f172a)",
-              cursor: isDragging ? "grabbing" : "grab",
-              opacity: isDragging ? 0.45 : 1,
-              outline: isOver ? "2px solid var(--brass-400)" : "none",
-              transition: "opacity .15s, outline .1s",
-            }}>
-            <img src={img.src} alt="" className="w-full h-full object-cover block pointer-events-none"
-              onError={e => { (e.currentTarget as HTMLImageElement).style.opacity = "0.15"; }} />
+    <div>
+      {/* Bulk action toolbar — visible when any selected */}
+      {selected.size > 0 ? (
+        <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-lg flex-wrap"
+          style={{ background: "rgba(184,147,58,.12)", border: "1px solid rgba(184,147,58,.4)" }}>
+          <span className="text-xs font-semibold" style={{ color: "var(--brass-400)" }}>
+            {selected.size} selected
+          </span>
+          <span className="text-xs" style={{ color: "var(--navy-400)" }}>— tag as:</span>
+          {CATS.map(c => (
+            <button key={c.key} onClick={() => applyBulkCategory(c.key)}
+              className="px-3 py-1 rounded text-xs font-bold transition-all hover:opacity-80"
+              style={{ background: c.color + "22", color: c.color, border: `1px solid ${c.color}` }}>
+              {c.key}
+            </button>
+          ))}
+          <button onClick={() => applyBulkCategory("")}
+            className="px-3 py-1 rounded text-xs transition-all"
+            style={{ background: "rgba(255,255,255,.06)", color: "rgba(255,255,255,.5)", border: "1px solid rgba(255,255,255,.15)" }}>
+            clear tag
+          </button>
+          <div className="flex-1" />
+          <button onClick={removeBulkSelected}
+            className="px-3 py-1 rounded text-xs font-bold"
+            style={{ background: "rgba(180,0,0,.2)", color: "#f87171", border: "1px solid rgba(180,0,0,.4)" }}>
+            ✕ Remove {selected.size}
+          </button>
+          <button onClick={clearSelection} className="text-xs px-2 py-1 rounded"
+            style={{ color: "var(--navy-400)" }}>
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 mb-2">
+          <button onClick={selectAll}
+            className="text-[10px] px-2 py-0.5 rounded"
+            style={{ background: "rgba(184,147,58,.1)", color: "var(--brass-400)", border: "1px solid rgba(184,147,58,.3)" }}>
+            Select all
+          </button>
+          <span className="text-[10px]" style={{ color: "var(--navy-500)" }}>
+            Click image to select · drag to reorder · TAG button to categorise individually
+          </span>
+        </div>
+      )}
 
-            {/* HERO badge */}
-            {i === 0 && <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded text-[9px] font-bold z-10 pointer-events-none"
-              style={{ background: "var(--brass-400)", color: "#fff" }}>HERO</span>}
+      <div className="flex flex-wrap gap-2 mb-3">
+        {images.map((img, i) => {
+          const cat        = img.category || "";
+          const isDragging = dragIdx === i;
+          const isOver     = overIdx === i && dragIdx !== i;
+          const isSelected = selected.has(i);
+          return (
+            <div key={i}
+              draggable={selected.size === 0}
+              onDragStart={() => { if (selected.size === 0) { setDragIdx(i); } }}
+              onDragEnter={() => setOverIdx(i)}
+              onDragOver={e => { e.preventDefault(); setOverIdx(i); }}
+              onDragEnd={() => {
+                if (dragIdx !== null && overIdx !== null && dragIdx !== overIdx) onMove(dragIdx, overIdx);
+                setDragIdx(null); setOverIdx(null);
+              }}
+              onDrop={e => e.preventDefault()}
+              onClick={() => toggleSelect(i)}
+              className="relative rounded overflow-hidden flex-shrink-0 select-none"
+              style={{
+                width: 110, height: 74,
+                background: "var(--navy-800,#0f172a)",
+                cursor: selected.size > 0 ? "pointer" : (isDragging ? "grabbing" : "grab"),
+                opacity: isDragging ? 0.45 : 1,
+                outline: isSelected ? "2px solid var(--brass-400)" : isOver ? "2px solid #60a5fa" : "none",
+                boxShadow: isSelected ? "0 0 0 2px rgba(184,147,58,.6)" : "none",
+                transition: "opacity .15s, outline .1s, box-shadow .1s",
+              }}>
+              <img src={img.src} alt="" className="w-full h-full object-cover block pointer-events-none"
+                onError={e => { (e.currentTarget as HTMLImageElement).style.opacity = "0.15"; }} />
 
-            {/* Category badge */}
-            {i > 0 && !isOpen && (
-              <button onMouseDown={e => e.stopPropagation()}
-                onClick={e => { e.stopPropagation(); setExpanded(i); }}
-                className="absolute top-1 left-1 px-1.5 py-0.5 rounded text-[8px] font-bold z-10 leading-tight"
-                style={{ background: cat ? catColor(cat) : "rgba(0,0,0,.45)", color: "#fff", border: `1px solid ${cat ? catColor(cat) : "rgba(255,255,255,.2)"}` }}>
-                {cat ? CATS.find(c=>c.key===cat)?.label : "TAG"}
-              </button>
-            )}
-
-            {/* Category picker overlay */}
-            {isOpen && (
-              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-1"
-                style={{ background: "rgba(0,0,0,.82)" }}>
-                {CATS.map(c => (
-                  <button key={c.key} onMouseDown={e => e.stopPropagation()}
-                    onClick={() => { onCategory(i, c.key); setExpanded(null); }}
-                    className="w-16 py-0.5 rounded text-[9px] font-bold leading-tight"
-                    style={{ background: cat===c.key ? c.color : "rgba(255,255,255,.1)", color: "#fff", border: `1px solid ${c.color}` }}>
-                    {c.key}
-                  </button>
-                ))}
-                <button onMouseDown={e => e.stopPropagation()}
-                  onClick={() => { onCategory(i, ""); setExpanded(null); }}
-                  className="w-16 py-0.5 rounded text-[9px] leading-tight"
-                  style={{ background: "rgba(255,255,255,.06)", color: "rgba(255,255,255,.5)" }}>clear</button>
-                <button onMouseDown={e => e.stopPropagation()} onClick={() => setExpanded(null)}
-                  className="absolute top-0.5 right-0.5 w-4 h-4 flex items-center justify-center rounded text-[9px]"
-                  style={{ background: "rgba(180,0,0,.5)", color: "#fff" }}>✕</button>
+              {/* Selection checkbox */}
+              <div className="absolute top-1 left-1 z-10 w-4 h-4 rounded flex items-center justify-center pointer-events-none"
+                style={{
+                  background: isSelected ? "var(--brass-400)" : "rgba(0,0,0,.5)",
+                  border: `1px solid ${isSelected ? "var(--brass-400)" : "rgba(255,255,255,.3)"}`,
+                }}>
+                {isSelected && <span className="text-[8px] font-bold text-white">✓</span>}
               </div>
-            )}
 
-            {/* Delete button — top right */}
-            <button onMouseDown={e => e.stopPropagation()} onClick={() => onRemove(i)}
-              className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded z-10 text-[10px] font-bold text-white"
-              style={{ background: "rgba(180,0,0,.6)" }}>✕</button>
+              {/* HERO badge */}
+              {i === 0 && <span className="absolute top-1 left-6 px-1.5 py-0.5 rounded text-[9px] font-bold z-10 pointer-events-none"
+                style={{ background: "var(--brass-400)", color: "#fff" }}>HERO</span>}
 
-            {/* Index badge — bottom right */}
-            <span className="absolute bottom-1 right-1 text-[9px] text-white/40 pointer-events-none">{i + 1}</span>
-          </div>
-        );
-      })}
+              {/* Category badge (only when no selection mode) */}
+              {selected.size === 0 && i > 0 && (
+                <button onMouseDown={e => e.stopPropagation()}
+                  onClick={e => {
+                    e.stopPropagation();
+                    // cycle through cats on single click
+                    const cur = CATS.findIndex(c => c.key === cat);
+                    const next = CATS[(cur + 1) % (CATS.length + 1)];
+                    onCategory(i, next ? next.key : "");
+                  }}
+                  className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[8px] font-bold z-10 leading-tight"
+                  style={{ background: cat ? catColor(cat) : "rgba(0,0,0,.45)", color: "#fff", border: `1px solid ${cat ? catColor(cat) : "rgba(255,255,255,.2)"}` }}>
+                  {cat ? CATS.find(c=>c.key===cat)?.label : "TAG"}
+                </button>
+              )}
+
+              {/* Category indicator in select mode */}
+              {selected.size > 0 && cat && (
+                <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[8px] font-bold pointer-events-none"
+                  style={{ background: catColor(cat), color: "#fff" }}>
+                  {CATS.find(c=>c.key===cat)?.label}
+                </div>
+              )}
+
+              {/* Delete (only when not in select mode) */}
+              {selected.size === 0 && (
+                <button onMouseDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onRemove(i); }}
+                  className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded z-10 text-[10px] font-bold text-white"
+                  style={{ background: "rgba(180,0,0,.6)" }}>✕</button>
+              )}
+
+              {/* Index */}
+              <span className="absolute bottom-1 right-1 text-[9px] text-white/40 pointer-events-none">{i + 1}</span>
+            </div>
+          );      })}
+    </div>
     </div>
   );
 }
