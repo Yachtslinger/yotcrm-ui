@@ -335,3 +335,299 @@ export function assignSpec(vessel: VesselData, label: string, value: string): vo
     vessel.stockNumber = v;
   }
 }
+
+/**
+ * mineFromText — extract vessel spec fields from free-form listing prose.
+ * Run AFTER structured parsing; only fills fields still empty.
+ * Covers: engines, hours, performance, accommodation, nav/comms,
+ *         stabilisers, thrusters, gensets, tanks, amenities, design credits.
+ */
+export function mineFromText(vessel: VesselData, raw: string): void {
+  if (!raw || raw.length < 20) return;
+  const t = raw.replace(/\s+/g, " ");
+
+  // Helper: set field only if currently empty
+  const set = (field: keyof VesselData, value: string) => {
+    if (value && !(vessel as Record<string, unknown>)[field as string])
+      (vessel as Record<string, unknown>)[field as string] = value.trim();
+  };
+  const setNum = (field: keyof VesselData, value: number) => {
+    if (!(vessel as Record<string, unknown>)[field as string])
+      (vessel as Record<string, unknown>)[field as string] = value;
+  };
+  const grab = (p: RegExp): string => {
+    const m = t.match(p);
+    return m ? (m[1] || m[0]).trim() : "";
+  };
+
+  // ── Engines ────────────────────────────────────────────────────────────────
+  if (!vessel.engines) {
+    // "powered by twin MTU 12V 4000 M93" / "2x Caterpillar C32 ACERT"
+    const eng =
+      grab(/[Pp]owered by\s+(twin|2\s*x|two|triple|3\s*x|quad|4\s*x)\s+([A-Za-z][A-Za-z0-9\-\s]{2,30}?)\s+(?:diesel\s+)?(?:engine|motor)/i) ||
+      grab(/(\d+\s*[Xx×]\s*[A-Z][a-zA-Z]+\s+[A-Z0-9\-]{2,}(?:\s+[A-Z][A-Z0-9]{1,})?)/i) ||
+      grab(/[Mm]ain\s+engines?[:\s]+([A-Za-z][A-Za-z0-9\s\-×x,]{3,60}?)(?:\.|,|\n)/i);
+    if (eng) set("engines", eng);
+  }
+
+  // ── Engine hours ────────────────────────────────────────────────────────────
+  if (!vessel.engineHours) {
+    // "Port: 1,819 hrs / Stbd: 1,824 hrs"  or  "1,200 engine hours"
+    const portH = t.match(/(?:[Pp]ort|PS|P)[:\s-]+(\d[\d,]+)\s*(?:hrs?|hours?)/i);
+    const stbdH = t.match(/(?:[Ss]t(?:ar)?bd?|SB|S)[:\s-]+(\d[\d,]+)\s*(?:hrs?|hours?)/i);
+    if (portH && stbdH) {
+      set("engineHours", `Port: ${portH[1]} hrs / Stbd: ${stbdH[1]} hrs`);
+    } else {
+      const eh = grab(/(\d[\d,]+)\s*(?:engine\s*)?hours?\s*(?:each|per\s*engine|on\s+(?:both|each))?/i) ||
+                 grab(/engine\s+hours?[:\s]+(\d[\d,]+)/i) ||
+                 grab(/(?:approx\.?\s*)?(\d[\d,]+)\s*hrs?\s+(?:on|per)\s+(?:each|the)\s+(?:main\s+)?engine/i);
+      if (eh) set("engineHours", `${eh} hrs`);
+    }
+  }
+
+  // ── Power ──────────────────────────────────────────────────────────────────
+  if (!vessel.power) {
+    const pw = grab(/(\d[\d,]+)\s*(?:hp|HP|bhp|mhp|kW|KW)\s*(?:each|per\s+engine|total)?/i) ||
+               grab(/(?:total\s+)?power\s+(?:output\s+)?(?:of\s+)?(\d[\d,]+\s*(?:hp|kW))/i);
+    if (pw) set("power", pw);
+  }
+
+  // ── Max speed ──────────────────────────────────────────────────────────────
+  if (!vessel.maxSpeed) {
+    const ms = grab(/(?:top|max(?:imum)?)\s+speed\s+(?:of\s+)?([\d.]+)\s*(?:knots?|kn)/i) ||
+               grab(/([\d.]+)\s*(?:knots?|kn)\s+(?:top|max(?:imum)?|full)/i) ||
+               grab(/reaches?\s+(?:a\s+)?(?:top\s+)?(?:max(?:imum)?\s+)?speed\s+of\s+([\d.]+)\s*(?:knots?|kn)/i);
+    if (ms) set("maxSpeed", `${ms} kn`);
+  }
+
+  // ── Cruise speed ────────────────────────────────────────────────────────────
+  if (!vessel.cruiseSpeed) {
+    const cs = grab(/cruis(?:es?|ing)\s+(?:comfortably\s+)?(?:at\s+)?([\d.]+)\s*(?:knots?|kn)/i) ||
+               grab(/(?:service|cruise|cruising)\s+speed\s+(?:of\s+)?([\d.]+)\s*(?:knots?|kn)/i);
+    if (cs) set("cruiseSpeed", `${cs} kn`);
+  }
+
+  // ── Range ───────────────────────────────────────────────────────────────────
+  if (!vessel.range) {
+    const rm = t.match(/([\d,]+)\s*(?:nautical\s+)?(?:miles?|nm)\s+(?:at|@)\s+([\d.]+)\s*(?:knots?|kn)/i);
+    if (rm) set("range", `${rm[1]} nm @ ${rm[2]} kn`);
+    else {
+      const r2 = grab(/range\s+(?:of\s+)?([\d,]+)\s*(?:nautical\s+)?(?:miles?|nm)/i) ||
+                 grab(/([\d,]+)\s*(?:nautical\s+)?(?:nm|mile)s?\s+range/i);
+      if (r2) set("range", `${r2} nm`);
+    }
+  }
+
+  // ── Accommodation ────────────────────────────────────────────────────────────
+  if (!vessel.guests) {
+    const g = grab(/accommodates?\s+(?:up\s+to\s+)?(\d+)\s+guests?/i) ||
+              grab(/(?:up\s+to\s+)?(\d+)\s+guests?\s+(?:in|across)/i) ||
+              grab(/maximum\s+(?:of\s+)?(\d+)\s+(?:overnight\s+)?guests?/i);
+    if (g) set("guests", g);
+  }
+  if (!vessel.staterooms) {
+    const sr = grab(/(\d+)\s+(?:guest\s+)?staterooms?/i) ||
+               grab(/(\d+)\s+(?:en-?suite\s+)?cabins?(?!\s+crew)/i) ||
+               grab(/accommodation\s+(?:comprises?\s+)?(?:of\s+)?(\d+)\s+cabins?/i);
+    if (sr) set("staterooms", sr);
+  }
+  if (!vessel.crew) {
+    const cr = grab(/(?:up\s+to\s+|total\s+of\s+)?(\d+)\s+crew\b/i) ||
+               grab(/crew\s+(?:of|capacity[:\s]+)(\d+)/i) ||
+               grab(/(?:a\s+)?crew\s+complement\s+(?:of\s+)?(\d+)/i);
+    if (cr) set("crew", cr);
+  }
+
+  // ── Stabilisers ──────────────────────────────────────────────────────────────
+  if (!vessel.stabilisers) {
+    const brands = "Seakeeper|Naiad|Trac|CMC|ABT|Quantum|Sleipner|Wesmar|Side-Power";
+    const stab =
+      grab(new RegExp(`((?:${brands})[A-Za-z0-9\\s\\-]+?(?:gyro(?:scopic)?|fin|stabiliz(?:a?tion|er|or)|zero.speed)[A-Za-z0-9\\s\\-]*)`, "i")) ||
+      grab(new RegExp(`((?:zero.speed\\s+)?(?:fin\\s+)?stabiliz(?:a?tion|er|or)s?\\s+(?:by\\s+|make:\\s*)?(?:${brands})[A-Za-z0-9\\s\\-]*)`, "i")) ||
+      grab(new RegExp(`(?:${brands})\\s+[A-Za-z0-9\\s\\-]*?stabiliz(?:a?tion|er|or)`, "i")) ||
+      grab(/zero.speed\s+stabiliz(?:a?tion|er|or)s?/i) ||
+      grab(/fin\s+stabiliz(?:a?tion|er|or)s?/i) ||
+      grab(/gyroscopic\s+stabiliz(?:a?tion|er|or)s?/i);
+    if (stab) set("stabilisers", stab);
+  }
+  if (!vessel.zeroSpeedStabilisers && /zero.speed\s+stabiliz/i.test(t))
+    set("zeroSpeedStabilisers", "Yes");
+
+  // ── Thrusters ────────────────────────────────────────────────────────────────
+  if (!vessel.bowThruster) {
+    const bt = grab(/bow\s+thruster[s]?(?:[:\s]+)([A-Za-z0-9\s\-kW]+?)(?:,|\.|and\s+stern)/i) ||
+               (/(bow\s+(?:and\s+stern\s+)?thruster)/i.test(t) ? "Yes" : "");
+    if (bt) set("bowThruster", bt);
+  }
+  if (!vessel.sternThruster) {
+    const st = grab(/stern\s+thruster[s]?(?:[:\s]+)([A-Za-z0-9\s\-kW]+?)(?:,|\.)/i) ||
+               (/stern\s+thruster/i.test(t) ? "Yes" : "");
+    if (st) set("sternThruster", st);
+  }
+
+  // ── Gensets ───────────────────────────────────────────────────────────────────
+  if (!vessel.gensets) {
+    const gs =
+      grab(/(\d+\s*[Xx×]\s*[A-Za-z][A-Za-z0-9\s\-]+?\s*(?:\d+\s*)?kW\s*generators?)/i) ||
+      grab(/(?:two|three|2|3)\s+([A-Za-z][A-Za-z0-9\s]+?)\s+generators?(?:\s+each\s+[\d]+\s*kW)?/i) ||
+      grab(/generators?[:\s]+(\d+\s*[Xx×]\s*[A-Za-z][A-Za-z0-9\s\-kW]{3,40})/i);
+    if (gs) set("gensets", gs);
+  }
+
+  // ── Navigation / comms ─────────────────────────────────────────────────────
+  const NAV_BRANDS = "Furuno|Garmin|Simrad|Raymarine|Navionics|B&G|Icom|Standard Horizon|JRC|Koden|Northstar|Lowrance|Humminbird|Chartmaster";
+  if (!vessel.radar) {
+    const r = grab(new RegExp(`((?:${NAV_BRANDS})\\s+[A-Za-z0-9\\-\\s]{1,20}?\\s*radar)`, "i")) ||
+              grab(/([A-Za-z]+\s+radar\s+(?:IMO|ARPA)?)/i);
+    if (r) set("radar", r);
+  }
+  if (!vessel.chartPlotter) {
+    const cp = grab(new RegExp(`((?:${NAV_BRANDS})\\s+[A-Za-z0-9\\-\\s]{1,20}?\\s*(?:chart\\s*plotter|MFD|multifunction))`, "i")) ||
+               grab(/([A-Za-z]+\s+(?:\d+\s+)?chart\s*plotter)/i);
+    if (cp) set("chartPlotter", cp);
+  }
+  if (!vessel.autopilot) {
+    const ap = grab(new RegExp(`((?:${NAV_BRANDS})\\s+[A-Za-z0-9\\-\\s]{0,15}?autopilot)`, "i")) ||
+               grab(/autopilot[:\s]+([A-Za-z][A-Za-z0-9\s\-]{2,30})/i);
+    if (ap) set("autopilot", ap);
+  }
+  if (!vessel.aisSystem) {
+    const ais = grab(new RegExp(`((?:${NAV_BRANDS})\\s+[A-Za-z0-9\\-\\s]{0,10}?AIS)`, "i")) ||
+                (/\bAIS\b/.test(t) ? "AIS" : "");
+    if (ais) set("aisSystem", ais);
+  }
+  if (!vessel.satcom) {
+    const stlk = (t.match(/Starlink/gi) || []).length;
+    const irid = /Iridium/i.test(t);
+    const inm  = /Inmarsat/i.test(t);
+    const kvh  = /KVH/i.test(t);
+    if (stlk > 0 || irid || inm || kvh) {
+      const parts: string[] = [];
+      if (stlk > 0) parts.push(stlk > 1 ? `Starlink x${stlk}` : "Starlink");
+      if (inm)  parts.push("Inmarsat");
+      if (irid) parts.push("Iridium");
+      if (kvh)  parts.push("KVH");
+      set("satcom", parts.join(", "));
+    }
+  }
+
+  // ── Navigation summary ─────────────────────────────────────────────────────
+  if (!vessel.navigation) {
+    const navParts: string[] = [];
+    if (vessel.radar)       navParts.push(vessel.radar);
+    if (vessel.chartPlotter && vessel.chartPlotter !== vessel.radar) navParts.push(vessel.chartPlotter);
+    if (vessel.autopilot)   navParts.push(vessel.autopilot);
+    if (vessel.aisSystem && vessel.aisSystem !== "AIS") navParts.push(vessel.aisSystem);
+    // Look for additional nav equipment in text
+    const echoM = grab(/([A-Za-z]+\s+echosounder)/i);
+    if (echoM) navParts.push(echoM);
+    if (navParts.length > 1) set("navigation", navParts.join(", "));
+  }
+
+  // ── Design credits ──────────────────────────────────────────────────────────
+  if (!vessel.exteriorDesign) {
+    const ed = grab(/exterior\s+(?:design|styling|designer)\s+by\s+([A-Za-z][A-Za-z\s&\-\.]{2,40}?)(?:\.|,|and\s+interior|\n)/i) ||
+               grab(/(?:designed|styled)\s+(?:externally\s+)?by\s+([A-Za-z][A-Za-z\s&\-\.]{2,30}?)\s+(?:for\s+the\s+exterior|exterior)/i);
+    if (ed) set("exteriorDesign", ed);
+  }
+  if (!vessel.interiorDesign) {
+    const id = grab(/interior\s+(?:design|styling|designer)\s+(?:by\s+)?([A-Za-z][A-Za-z\s&\-\.]{2,40}?)(?:\.|,|\n)/i) ||
+               grab(/([A-Za-z][A-Za-z\s&\-]{3,30}?)\s+(?:studio|design(?:ers?)?)\s+(?:created|designed|executed)\s+the\s+interior/i);
+    if (id) set("interiorDesign", id);
+  }
+  if (!vessel.navalArchitect) {
+    const na = grab(/naval\s+arch(?:itect(?:ure)?|\.)\s+(?:by\s+)?([A-Za-z][A-Za-z\s&\-\.]{2,30}?)(?:\.|,|\n)/i);
+    if (na) set("navalArchitect", na);
+  }
+
+  // ── Hull & classification ────────────────────────────────────────────────────
+  if (!vessel.hullMaterial) {
+    if (/steel\s+hull/i.test(t)) set("hullMaterial", "Steel");
+    else if (/alumini(?:um|um)\s+hull/i.test(t)) set("hullMaterial", "Aluminium");
+    else if (/fibreglass|fiberglass|grp\s+hull|frp\s+hull/i.test(t)) set("hullMaterial", "GRP / Fibreglass");
+    else if (/composite\s+hull/i.test(t)) set("hullMaterial", "Composite");
+    else if (/carbon\s+(?:fibre|fiber)\s+hull/i.test(t)) set("hullMaterial", "Carbon fibre");
+  }
+  if (!vessel.classification) {
+    const cl = grab(/(?:built\s+to\s+|classed\s+with\s+|classified\s+by\s+)?(Lloyd'?s?\s+Register[A-Za-z\s,]+|Bureau\s+Veritas[A-Za-z\s,]*|RINA[A-Za-z\s,]*|DNV(?:\s+GL)?[A-Za-z\s,]*|ABS[A-Za-z\s,]*)/i);
+    if (cl) set("classification", cl.trim().replace(/\s+/g," "));
+  }
+
+  // ── Refit ──────────────────────────────────────────────────────────────────
+  if (!vessel.refitYear) {
+    const ry = grab(/(?:refit|refitted|refurbished|re-?fit(?:ted)?)\s+in\s+((?:19|20)\d{2})/i) ||
+               grab(/((?:19|20)\d{2})\s+refit/i);
+    if (ry) set("refitYear", ry);
+  }
+
+  // ── Amenities from keywords ─────────────────────────────────────────────────
+  if (!vessel.flybridge && /flybridge/i.test(t)) set("flybridge", "Yes");
+  if (!vessel.beachClub && /beach\s*club/i.test(t)) set("beachClub", "Yes");
+  if (!vessel.jacuzzi && /jacuzzi|hot\s*tub|whirlpool/i.test(t)) set("jacuzzi", "Yes");
+  if (!vessel.gym && /\bgym\b|gymnasium|fitness\s+(?:room|center|centre)/i.test(t)) set("gym", "Yes");
+  if (!vessel.cinema && /cinema|theatre|theater|screening\s+room/i.test(t)) set("cinema", "Yes");
+  if (!vessel.helideck && /helide(?:ck|cks)|helipad|helicopter\s+landing/i.test(t)) set("helideck", "Yes");
+  if (!vessel.swimmingPlatform && /swim(?:ming)?\s+platform/i.test(t)) set("swimmingPlatform", "Yes");
+
+  // ── Tender ──────────────────────────────────────────────────────────────────
+  if (!vessel.tender) {
+    const td = grab(/([A-Za-z]+\s+\d{3,4})\s+[Tt]ender/i) ||
+               grab(/([\d.]+\s*(?:m|ft)[^\n,]{0,30}tender[^\n,]*)/i) ||
+               grab(/tender[:\s]+([A-Za-z0-9\s\-\.]{4,40}?)(?:,|\.|\n)/i);
+    if (td) set("tender", td);
+  }
+
+  // ── Water toys ──────────────────────────────────────────────────────────────
+  if (!vessel.toys) {
+    const toyList: string[] = [];
+    if (/jet\s*ski|waverunner|pwc/i.test(t)) toyList.push("Jet ski");
+    if (/seabob/i.test(t)) toyList.push("Seabob");
+    if (/wakeboard/i.test(t)) toyList.push("Wakeboard");
+    if (/water\s*ski(?!\s+tender)/i.test(t)) toyList.push("Water skis");
+    if (/kayak/i.test(t)) toyList.push("Kayak(s)");
+    if (/paddleboard|SUP\b/i.test(t)) toyList.push("Paddleboard(s)");
+    if (/inflatable/i.test(t)) toyList.push("Inflatables");
+    if (/efoil|e-foil/i.test(t)) toyList.push("eFoil");
+    if (/scuba|dive\s+(?:equipment|gear)/i.test(t)) toyList.push("Dive equipment");
+    if (/snorkel/i.test(t)) toyList.push("Snorkelling gear");
+    if (/windsurfer/i.test(t)) toyList.push("Windsurfer");
+    if (toyList.length) set("toys", toyList.join(", "));
+  }
+
+  // ── Fuel tank from prose ─────────────────────────────────────────────────────
+  if (!vessel.fuelTank) {
+    const fuelL = t.match(/([\d,]+)\s*(?:litr?e?s?|lt|l)\s+(?:of\s+)?fuel/i);
+    const fuelG = t.match(/([\d,]+)\s*(?:us\s*)?gal(?:lon)?\s+fuel/i);
+    if (fuelL) set("fuelTank", lToGal(parseInt(fuelL[1].replace(/,/g,""))));
+    else if (fuelG) set("fuelTank", galToL(parseInt(fuelG[1].replace(/,/g,""))));
+  }
+
+  // ── Watermaker ───────────────────────────────────────────────────────────────
+  if (!vessel.waterMaker) {
+    const wm = grab(/([A-Za-z][A-Za-z0-9\s\-]+?)\s*water\s*maker/i) ||
+               (/reverse\s*osmosis|watermaker|water\s*maker/i.test(t) ? "Yes" : "");
+    if (wm) set("waterMaker", wm);
+  }
+
+  // ── Year fallback from prose ─────────────────────────────────────────────────
+  if (!vessel.year) {
+    const ym = t.match(/delivered\s+in\s+((?:19|20)\d{2})/i) ||
+               t.match(/built\s+(?:in\s+)?((?:19|20)\d{2})/i) ||
+               t.match(/launched\s+(?:in\s+)?((?:19|20)\d{2})/i);
+    if (ym) setNum("year", parseInt(ym[1]));
+  }
+
+  // ── LOA from prose ────────────────────────────────────────────────────────────
+  if (!vessel.loa) {
+    const lm = t.match(/(\d+(?:\.\d+)?)\s*(?:metre|meter)s?\s+(?:motor\s+)?yacht/i) ||
+               t.match(/(\d+(?:\.\d+)?\s*m)\s*(?:\/|,|\s)\s*(\d+(?:\.\d+)?)\s*(?:ft|')/i) ||
+               t.match(/(\d+)\s*(?:ft|foot|feet)\s+(?:motor\s+)?yacht/i);
+    if (lm) set("loa", lm[2] ? `${lm[1]}/${lm[2]}` : lm[1]);
+  }
+
+  // ── Location fallback ─────────────────────────────────────────────────────────
+  if (!vessel.location) {
+    const loc = grab(/(?:currently\s+)?(?:located|lying|berthed|moored)\s+(?:at\s+|in\s+)([A-Za-z][A-Za-z,\s]{3,40}?)(?:\.|,|\n)/i);
+    if (loc) set("location", loc);
+  }
+}

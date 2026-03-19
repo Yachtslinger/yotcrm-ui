@@ -54,13 +54,15 @@ export async function scrapeVessel(url: string): Promise<VesselData> {
   const provider = PROVIDERS.find(p => p.pattern.test(hostname));
   const result = provider ? await provider.fn(normalised) : await genericScrape(normalised);
 
-  // Global watermark guard — strip any image that looks watermarked regardless of source.
-  // Known watermarked CDNs / patterns:
-  //   image.yachtbuyer.com  — always watermarked
-  //   watermark in URL path  — various sites
+  // Global watermark guard
   result.images = result.images.filter(i =>
     !/image\.yachtbuyer\.com|watermark|wm_|_wm\.|watermarked/i.test(i.src)
   );
+
+  // Mine free-text description for any fields still empty after structured parsing
+  if (result.description) mineFromText(result, result.description);
+  // Also mine the features list as a secondary text source
+  if (result.features?.length) mineFromText(result, result.features.join(". "));
 
   return result;
 }
@@ -103,7 +105,7 @@ export function vesselToCampaignDraft(v: VesselData) {
 // ─── Generic fallback ────────────────────────────────────────────────────────
 
 import * as cheerio from "cheerio";
-import { assignSpec, cleanHeadline, clean, dedupeImages } from "./utils";
+import { assignSpec, cleanHeadline, clean, dedupeImages, mineFromText } from "./utils";
 
 async function genericScrape(url: string): Promise<VesselData> {
   const res = await fetch(url, {
