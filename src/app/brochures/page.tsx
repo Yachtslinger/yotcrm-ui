@@ -274,7 +274,7 @@ export default function BrochuresPage() {
 
   React.useEffect(() => { fetchBrochures(); }, []);
 
-  // ── Bookmarklet: ?url=<listing_url> — auto-populate URL field and trigger build
+  // ── Bookmarklet: ?url=<listing_url> — populate URL field and kick off build
   React.useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
@@ -282,8 +282,8 @@ export default function BrochuresPage() {
     if (!ingestUrl) return;
     window.history.replaceState({}, "", "/brochures");
     setUrls([ingestUrl, ""]);
-    // Small delay so the UI renders before we kick off the build
-    setTimeout(() => handleBuild(), 300);
+    // Call buildFromUrl directly — don't rely on urls state which isn't updated yet
+    buildFromUrl(ingestUrl);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -356,6 +356,34 @@ export default function BrochuresPage() {
     cleaned.holdingTank = formatCapacityClient(cleaned.holdingTank || "");
     if (!cleaned.pdfUrl) cleaned.pdfUrl = "";
     return cleaned;
+  }
+
+  /** Called by bookmarklet ?url= param — builds directly without relying on urls state */
+  async function buildFromUrl(ingestUrl: string) {
+    setStep("scraping");
+    setNewSlug(null);
+    setBuildStatus("Scraping…");
+    try {
+      const r = await fetch("/api/brochures/preview", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: ingestUrl }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Scrape failed");
+      const v = prepVessel(d.vessel);
+      setVessel(v);
+      setStep("preview");
+      const isSparse = v.images.length === 0 && !v.price;
+      if (isSparse && /yachtworld\.com|boattrader\.com/i.test(ingestUrl)) {
+        setShowPasteImport(true);
+        showToast("YachtWorld blocked — paste page source below to complete the brochure", "error");
+      } else {
+        showToast(`⚓ ${v.name || "Vessel"} loaded · ${v.images.length} images`, "success");
+      }
+    } catch (err) {
+      showToast(`Build failed: ${err instanceof Error ? err.message : "unknown"}`, "error");
+      setStep("list");
+    } finally { setBuildStatus(""); }
   }
 
   /** Unified build — scrapes all URLs and PDF simultaneously, merges all */
