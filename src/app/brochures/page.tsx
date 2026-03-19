@@ -1566,7 +1566,7 @@ export default function BrochuresPage() {
       {/* Generate card */}
       <div className="rounded-xl p-5 mb-6" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
         <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: "var(--brass-400)" }}>Generate New Brochure</p>
-        <p className="text-xs mb-4" style={{ color: "var(--navy-400)" }}>Add any combination of URLs and/or a PDF — the scraper pulls from ALL sources and merges for maximum completeness.</p>
+        <p className="text-xs mb-4" style={{ color: "var(--navy-400)" }}>Paste a listing URL — scraper extracts all available specs and images.</p>
 
         <form onSubmit={handleBuild} className="flex flex-col gap-2 mb-3">
           {/* URL inputs — dynamic list */}
@@ -1591,30 +1591,7 @@ export default function BrochuresPage() {
             style={{ background: "rgba(184,147,58,.08)", border: "1px solid rgba(184,147,58,.25)", color: "var(--brass-400)" }}>
             <Plus className="w-3 h-3" /> Add another URL
           </button>
-          {/* PDF drop zone */}
-          <div className="flex gap-2 items-center">
-            <div className="text-[10px] font-bold uppercase tracking-widest shrink-0 w-10" style={{ color: "var(--navy-400)" }}>PDF</div>
-            <div
-              className="flex-1 rounded-lg border-2 border-dashed flex items-center gap-3 cursor-pointer transition-colors px-3 py-2"
-              style={{ borderColor: pendingPdf ? "var(--brass-400)" : "var(--border)", minHeight: 44,
-                background: pendingPdf ? "rgba(184,147,58,.06)" : "transparent" }}
-              onClick={() => pdfInputRef.current?.click()}
-            >
-              <Upload className="w-4 h-4 shrink-0" style={{ color: pendingPdf ? "var(--brass-400)" : "var(--navy-400)" }} />
-              <div className="flex-1 min-w-0">
-                {pendingPdf
-                  ? <><p className="text-sm font-medium truncate" style={{ color: "var(--brass-400)" }}>{pdfFileName}</p><p className="text-[10px]" style={{ color: "var(--navy-400)" }}>PDF staged — will be scraped with Build</p></>
-                  : <><p className="text-sm" style={{ color: "var(--navy-400)" }}>Drop or click to add spec sheet / brochure PDF</p></>}
-              </div>
-              {pendingPdf && (
-                <button type="button" onClick={e => { e.stopPropagation(); setPendingPdf(null); setPdfFileName(""); }}
-                  className="text-xs px-2 py-0.5 rounded" style={{ background: "rgba(180,0,0,.15)", color: "#f87171" }}>Remove</button>
-              )}
-            </div>
-          </div>
 
-          <input ref={pdfInputRef} type="file" accept=".pdf" className="hidden"
-            onChange={e => { const f = e.target.files?.[0]; if (f) handlePdfSelect(f); e.target.value = ""; }} />
 
           <button type="submit"
             className="flex items-center justify-center gap-2 w-full py-3 rounded-xl text-sm font-bold mt-1 transition-all"

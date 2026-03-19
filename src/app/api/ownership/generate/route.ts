@@ -1,0 +1,128 @@
+import { NextRequest, NextResponse } from "next/server";
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic();
+
+export async function POST(req: NextRequest) {
+  try {
+    const { url } = await req.json();
+    if (!url) return NextResponse.json({ ok: false, error: "URL required" }, { status: 400 });
+
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://yotcrm-production.up.railway.app";
+    const scrapeRes = await fetch(`${baseUrl}/api/brochures/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const scrapeData = await scrapeRes.json();
+    const vessel = scrapeData.vessel || {};
+
+    const vesselSummary = [
+      `Name: ${vessel.name || "Unknown"}`,
+      `Builder: ${vessel.builder || "Unknown"}`,
+      `Year: ${vessel.year || "Unknown"}`,
+      `LOA: ${vessel.loa || "Unknown"}`,
+      `Engines: ${vessel.engines || "Unknown"}`,
+      `Power: ${vessel.power || "Unknown"}`,
+      `Fuel Tank: ${vessel.fuelTank || "Unknown"}`,
+      `Guests: ${vessel.guests || "Unknown"}`,
+      `Staterooms: ${vessel.staterooms || "Unknown"}`,
+      `Crew: ${vessel.crew || "Unknown"}`,
+      `Price: ${vessel.price || "Unknown"}`,
+      `Location: ${vessel.location || "Unknown"}`,
+      `Hull Material: ${vessel.hullMaterial || "Unknown"}`,
+      `Description: ${(vessel.description || "").slice(0, 400)}`,
+    ].join("\n");
+
+    const prompt = `You are a superyacht operations consultant and financial analyst. Analyze this vessel and return ONLY a valid JSON object — no markdown, no explanation, just raw JSON.
+
+VESSEL:
+${vesselSummary}
+URL: ${url}
+
+JSON structure (all numbers are annual USD amounts):
+{
+  "vesselName": "string",
+  "vesselUrl": "string",
+  "crew": {
+    "salaries": { "low": 0, "mid": 0, "high": 0, "breakdown": [{"role":"Captain","low":0,"mid":0,"high":0},{"role":"First Mate / Engineer","low":0,"mid":0,"high":0},{"role":"Stewardess","low":0,"mid":0,"high":0},{"role":"Deckhand","low":0,"mid":0,"high":0}] },
+    "recruitment": {"low":0,"mid":0,"high":0},
+    "travel": {"low":0,"mid":0,"high":0},
+    "accommodation": {"low":0,"mid":0,"high":0},
+    "uniforms": {"low":0,"mid":0,"high":0},
+    "training": {"low":0,"mid":0,"high":0},
+    "foodBeverage": {"low":0,"mid":0,"high":0},
+    "medical": {"low":0,"mid":0,"high":0},
+    "dayWorkers": {"low":0,"mid":0,"high":0},
+    "entertainment": {"low":0,"mid":0,"high":0}
+  },
+  "communications": {
+    "phone": {"low":0,"mid":0,"high":0},
+    "satTV": {"low":0,"mid":0,"high":0},
+    "satcom": {"low":0,"mid":0,"high":0}
+  },
+  "operations": {
+    "agency": {"low":0,"mid":0,"high":0},
+    "audioVisual": {"low":0,"mid":0,"high":0},
+    "auto": {"low":0,"mid":0,"high":0},
+    "bridge": {"low":0,"mid":0,"high":0},
+    "computer": {"low":0,"mid":0,"high":0},
+    "deck": {"low":0,"mid":0,"high":0},
+    "dockExpress": {"low":0,"mid":0,"high":0},
+    "engineering": {"low":0,"mid":0,"high":0},
+    "fuels": {"low":0,"mid":0,"high":0},
+    "galley": {"low":0,"mid":0,"high":0},
+    "interior": {"low":0,"mid":0,"high":0},
+    "launches": {"low":0,"mid":0,"high":0},
+    "mailFreight": {"low":0,"mid":0,"high":0},
+    "office": {"low":0,"mid":0,"high":0},
+    "dockage": {"low":0,"mid":0,"high":0},
+    "safetyMedical": {"low":0,"mid":0,"high":0},
+    "security": {"low":0,"mid":0,"high":0},
+    "survey": {"low":0,"mid":0,"high":0},
+    "warehousing": {"low":0,"mid":0,"high":0}
+  },
+  "insurance": {
+    "hull": {"low":0,"mid":0,"high":0},
+    "pi": {"low":0,"mid":0,"high":0},
+    "crewHealth": {"low":0,"mid":0,"high":0}
+  },
+  "administrative": {
+    "professionalFees": {"low":0,"mid":0,"high":0},
+    "bankCharges": {"low":0,"mid":0,"high":0},
+    "managementFee": {"low":0,"mid":0,"high":0},
+    "managementTravel": {"low":0,"mid":0,"high":0}
+  },
+  "capital": {
+    "av": {"low":0,"mid":0,"high":0},
+    "engineeringDeck": {"low":0,"mid":0,"high":0},
+    "interior": {"low":0,"mid":0,"high":0},
+    "paint": {"low":0,"mid":0,"high":0},
+    "tendersToys": {"low":0,"mid":0,"high":0},
+    "other": {"low":0,"mid":0,"high":0}
+  },
+  "assumptions": "2-3 sentences on usage assumptions",
+  "rangeExplanation": "2-3 sentences explaining the cost range",
+  "categoryBreakdown": "Paragraph covering each major category: what drives costs up and down",
+  "crewStructureNote": "Full crew breakdown with salaries and savings note if one crew removed",
+  "keyDrivers": "Top 3-5 cost drivers with explanation"
+}
+
+Rules: use real operational logic, fuel based on burn rate and hours, dockage based on region, insurance 1-1.75% of vessel value, all values realistic and defensible.`;
+
+    const message = await client.messages.create({
+      model: "claude-opus-4-5-20251101",
+      max_tokens: 4000,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const text = message.content[0].type === "text" ? message.content[0].text : "";
+    const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    const modelData = JSON.parse(cleaned);
+
+    return NextResponse.json({ ok: true, model: modelData });
+  } catch (err) {
+    console.error("Ownership model error:", err);
+    return NextResponse.json({ ok: false, error: err instanceof Error ? err.message : "Unknown error" }, { status: 500 });
+  }
+}

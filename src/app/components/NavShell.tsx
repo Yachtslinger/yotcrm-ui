@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, Lock, CheckSquare,
   FileText, Mail, Settings, Anchor, Link2, MapPin, Briefcase,
   Search, X, LogOut, Zap, CalendarDays, Shield,
-  Upload, CreditCard, Globe, BookOpen, Grid,
+  Upload, CreditCard, Globe, BookOpen, Grid, DollarSign,
 } from "lucide-react";
 
 /* ─── Navigation Config ─── */
@@ -22,7 +22,8 @@ const NAV_ITEMS = [
   { href: "/buyers",    label: "Buyers",      Icon: Search,          color: "#6366f1", group: "listings" },
   { href: "/listings",  label: "My Listings", Icon: Briefcase,       color: "#b45e0b", group: "listings" },
   { href: "/vessels",   label: "PDFs",        Icon: FileText,        color: "#dc2626", group: "listings" },
-  { href: "/brochures", label: "E-Brochures", Icon: BookOpen,        color: "#c9a55c", group: "listings" },
+  { href: "/brochures",  label: "E-Brochures",  Icon: BookOpen,        color: "#c9a55c", group: "listings" },
+  { href: "/ownership",  label: "Cost Model",   Icon: DollarSign,      color: "#10b981", group: "listings" },
   { href: "/offmarket", label: "Off-Market",  Icon: Lock,            color: "#374151", group: "listings" },
   { href: "/calendar",  label: "Calendar",    Icon: CalendarDays,    color: "#0369a1", group: "tools" },
   { href: "/showings",  label: "Locations",   Icon: MapPin,          color: "#059669", group: "tools" },
