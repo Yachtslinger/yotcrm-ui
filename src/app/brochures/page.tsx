@@ -287,24 +287,38 @@ export default function BrochuresPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Bookmarklet ingest: ?ingest=1 means the bookmarklet posted vessel data
-  //    to /api/brochures/ingest and stored the result in sessionStorage.
-  //    We read it here and jump straight into the editor pre-filled.
+  // ── Bookmarklet ingest: ?ingest=name means data is in window.name
+  //    window.name survives cross-origin navigation — no fetch, no CORS, no CSP issues
   React.useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     if (!params.get("ingest")) return;
+    window.history.replaceState({}, "", "/brochures");
+    try {
+      const raw = window.name || "";
+      if (raw.startsWith("__yotcrm__")) {
+        window.name = ""; // clear it
+        const v = JSON.parse(raw.slice("__yotcrm__".length));
+        if (v && (v.name || v.images?.length)) {
+          setVessel(prepVessel(v));
+          setStep("preview");
+          const imgCount = v.images?.length || 0;
+          showToast(`⚓ ${v.name || "Vessel"} · ${imgCount} images loaded`, "success");
+          return;
+        }
+      }
+    } catch { /* ignore */ }
+    // Fallback: check sessionStorage from old approach
     try {
       const raw = sessionStorage.getItem("__yotcrm_ingest");
-      if (!raw) return;
-      sessionStorage.removeItem("__yotcrm_ingest");
-      const v = JSON.parse(raw);
-      if (v?.name || v?.images?.length) {
-        setVessel(prepVessel(v));
-        setStep("preview");
-        // Clean the URL so a refresh doesn't re-trigger
-        window.history.replaceState({}, "", "/brochures");
-        showToast(`⚓ Loaded from bookmarklet · ${v.images?.length || 0} images`, "success");
+      if (raw) {
+        sessionStorage.removeItem("__yotcrm_ingest");
+        const v = JSON.parse(raw);
+        if (v?.name || v?.images?.length) {
+          setVessel(prepVessel(v));
+          setStep("preview");
+          showToast(`⚓ ${v.name || "Vessel"} · ${v.images?.length || 0} images loaded`, "success");
+        }
       }
     } catch { /* ignore */ }
   // eslint-disable-next-line react-hooks/exhaustive-deps
