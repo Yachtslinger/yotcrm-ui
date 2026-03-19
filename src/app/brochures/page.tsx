@@ -877,8 +877,8 @@ export default function BrochuresPage() {
   function restoreAll() { setHiddenFields(new Set()); }
 
   /* ── Live preview ── */
-  function triggerLivePreview(v: VesselData) {
-    if (!livePreview) return;
+  function triggerLivePreview(v: VesselData, forceShow = false) {
+    if (!livePreview && !forceShow) return;
     if (previewDebounce.current) clearTimeout(previewDebounce.current);
     previewDebounce.current = setTimeout(async () => {
       setPreviewLoading(true);
@@ -1165,7 +1165,12 @@ export default function BrochuresPage() {
             <button className="btn-ghost flex items-center gap-1.5 text-sm" onClick={() => { setStep("list"); setVessel(null); setEditingId(null); }} disabled={step === "saving"}>
               <ArrowLeft className="w-4 h-4" /> Cancel
             </button>
-            <button onClick={()=>setLivePreview(v=>!v)}
+            <button onClick={()=>{
+                const next = !livePreview;
+                setLivePreview(next);
+                // Trigger immediate render when enabling preview
+                if (next && vessel) triggerLivePreview(vessel, true);
+              }}
               className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-all ${livePreview?"border-[var(--brass-400)] text-[var(--brass-400)] bg-[rgba(184,147,58,.08)]":"border-[var(--border)] text-[var(--navy-400)] hover:border-[var(--brass-400)]"}`}>
               <Eye className="w-4 h-4" />{livePreview?"Hide Preview":"Live Preview"}
             </button>

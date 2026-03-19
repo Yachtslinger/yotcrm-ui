@@ -484,10 +484,26 @@ function parseDenison(url: string, html: string): VesselData {
     if (cells.length >= 2) assignSpec(vessel, cells.eq(0).text(), cells.eq(1).text());
   });
 
-  // ── 18. Gallery — all boatsgroup images ──────────────────────────────────
-  const imgSet = new Map<string, string>();
+  // ── 18. Gallery — Denison CDN + boatsgroup fallback ─────────────────────
+  // Denison migrated from boatsgroup to cdn.denisonyachtsales.com
+  // Images appear as data-src="_x500.webp" — we upgrade to "_original.webp"
+  // Also keep boatsgroup detection as fallback for older listings.
+  const imgSet = new Map<string, string>(); // normalised key → best URL
 
-  const addImg = (raw: string) => {
+  const addDenisonImg = (raw: string) => {
+    if (!raw) return;
+    const decoded = raw.replace(/&amp;/g, "&");
+    if (isJunk(decoded)) return;
+    if (!/cdn\.denisonyachtsales\.com\/images\/yachts-for-sale\//i.test(decoded)) return;
+    // Upgrade thumbnail to original: _x500.webp → _original.webp
+    const original = decoded.replace(/_x\d+(\.\w+)$/, "_original$1")
+                             .replace(/_\d+x\d+(\.\w+)$/, "_original$1")
+                             .split("?")[0];
+    const key = original;
+    if (!imgSet.has(key)) imgSet.set(key, original);
+  };
+
+  const addBoatsgroupImg = (raw: string) => {
     if (!raw || !/boatsgroup\.com/i.test(raw)) return;
     const decoded = raw.replace(/&amp;/g, "&");
     if (isJunk(decoded)) return;
@@ -497,22 +513,24 @@ function parseDenison(url: string, html: string): VesselData {
     if (!imgSet.has(fullRes)) imgSet.set(fullRes, fullRes);
   };
 
+  // Sweep all img tags and data-src attributes
   $("img").each((_, img) => {
-    addImg($(img).attr("data-src") || "");
-    addImg($(img).attr("data-lazy-src") || "");
-    addImg($(img).attr("src") || "");
-  });
-  $("a[href]").each((_, a) => {
-    const href = $(a).attr("href") || "";
-    if (/boatsgroup\.com\/images\//i.test(href)) addImg(href);
+    const dataSrc = $(img).attr("data-src") || "";
+    const src = $(img).attr("src") || "";
+    addDenisonImg(dataSrc); addDenisonImg(src);
+    addBoatsgroupImg(dataSrc); addBoatsgroupImg(src);
   });
 
-  const bgFullRe   = /https:\/\/images\.boatsgroup\.com\/images\/[^\s"'&<>]+\.(?:jpg|jpeg|png|webp)/gi;
-  const bgResizeRe = /https:\/\/images\.boatsgroup\.com\/resize\/[^\s"'&<>]+\.(?:jpg|jpeg|png|webp)[^\s"'&<>]*/gi;
+  // Regex sweep of raw HTML for both CDNs
+  const denisonRe = /https:\/\/cdn\.denisonyachtsales\.com\/images\/yachts-for-sale\/[^\s"'&<>]+\.(?:webp|jpg|jpeg|png)/gi;
+  const bgFullRe  = /https:\/\/images\.boatsgroup\.com\/images\/[^\s"'&<>]+\.(?:jpg|jpeg|png|webp)/gi;
+  const bgRszRe   = /https:\/\/images\.boatsgroup\.com\/resize\/[^\s"'&<>]+\.(?:jpg|jpeg|png|webp)[^\s"'&<>]*/gi;
   let mx: RegExpExecArray | null;
-  while ((mx = bgFullRe.exec(html)) !== null)   addImg(mx[0]);
-  while ((mx = bgResizeRe.exec(html)) !== null) addImg(mx[0]);
+  while ((mx = denisonRe.exec(html)) !== null) addDenisonImg(mx[0]);
+  while ((mx = bgFullRe.exec(html)) !== null)  addBoatsgroupImg(mx[0]);
+  while ((mx = bgRszRe.exec(html)) !== null)   addBoatsgroupImg(mx[0]);
 
+  // Merge into vessel.images, dedup by key
   const existingKeys = new Set(vessel.images.map(i => i.src.split("?")[0]));
   for (const [key, src] of imgSet) {
     if (!existingKeys.has(key)) vessel.images.push({ src, alt: vessel.name });
