@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import PageTransition from "./PageTransition";
 import {
   LayoutDashboard, Users, Lock, CheckSquare,
-  FileText, Mail, Settings, Anchor, Link2, MapPin, Briefcase,
+  Mail, Settings, Anchor, Link2, MapPin, Briefcase,
   Search, X, LogOut, Zap, CalendarDays, Shield,
   Upload, CreditCard, Globe, BookOpen, Grid, DollarSign,
 } from "lucide-react";
@@ -21,7 +21,7 @@ const NAV_ITEMS = [
   { href: "/campaigns", label: "Campaigns",   Icon: Mail,            color: "#0e7490", group: "core" },
   { href: "/buyers",    label: "Buyers",      Icon: Search,          color: "#6366f1", group: "listings" },
   { href: "/listings",  label: "My Listings", Icon: Briefcase,       color: "#b45e0b", group: "listings" },
-  { href: "/vessels",   label: "PDFs",        Icon: FileText,        color: "#dc2626", group: "listings" },
+
   { href: "/brochures",  label: "E-Brochures",  Icon: BookOpen,        color: "#c9a55c", group: "listings" },
   { href: "/ownership",  label: "Cost Model",   Icon: DollarSign,      color: "#10b981", group: "listings" },
   { href: "/offmarket", label: "Off-Market",  Icon: Lock,            color: "#374151", group: "listings" },
