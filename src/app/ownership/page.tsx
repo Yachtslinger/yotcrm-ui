@@ -111,6 +111,32 @@ export default function OwnershipPage() {
   const [loading, setLoading] = React.useState(false);
   const [model, setModel] = React.useState<CostModel | null>(null);
   const [error, setError] = React.useState("");
+  const [pdfLoading, setPdfLoading] = React.useState(false);
+
+  async function downloadPDF() {
+    if (!model) return;
+    setPdfLoading(true);
+    try {
+      const res = await fetch("/api/ownership/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model }),
+      });
+      if (!res.ok) throw new Error("PDF generation failed");
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      const safeName = (model.vesselName || "ownership-budget").replace(/[^a-zA-Z0-9\s-]/g, "").replace(/\s+/g, "-").toLowerCase();
+      a.download = `${safeName}-cost-model.pdf`;
+      a.click();
+      URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+      alert("PDF download failed: " + (e instanceof Error ? e.message : "Unknown error"));
+    } finally {
+      setPdfLoading(false);
+    }
+  }
   const [activeTab, setActiveTab] = React.useState<"table" | "analysis">("table");
 
   async function generate() {
@@ -255,6 +281,18 @@ export default function OwnershipPage() {
                         border: "1px solid var(--border)",
                       }}>{t}</button>
                   ))}
+                  <button
+                    onClick={downloadPDF}
+                    disabled={pdfLoading}
+                    className="px-4 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5"
+                    style={{
+                      background: pdfLoading ? "var(--border)" : "#1e3a5f",
+                      color: pdfLoading ? "var(--navy-400)" : "#93c5fd",
+                      border: "1px solid #3b82f640",
+                      cursor: pdfLoading ? "not-allowed" : "pointer",
+                    }}>
+                    {pdfLoading ? "Generating…" : "⬇ Save PDF"}
+                  </button>
                 </div>
               </div>
 

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
   try {
     const { url } = await req.json();
@@ -115,17 +118,26 @@ Rules: use real operational logic, fuel based on burn rate and hours, dockage ba
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-opus-4-6",
+        model: "claude-sonnet-4-6",
         max_tokens: 4000,
         messages: [{ role: "user", content: prompt }],
       }),
     });
-    if (!message.ok) throw new Error(`Anthropic API error: ${message.status}`);
+    if (!message.ok) {
+      const errBody = await message.text().catch(() => "");
+      throw new Error(`Anthropic API error ${message.status}: ${errBody.slice(0, 200)}`);
+    }
     const messageData = await message.json() as { content?: { type: string; text?: string }[] };
 
     const text = messageData.content?.find(b => b.type === "text")?.text || "";
+    if (!text) throw new Error("Anthropic returned no text content");
     const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const modelData = JSON.parse(cleaned);
+    let modelData;
+    try {
+      modelData = JSON.parse(cleaned);
+    } catch {
+      throw new Error(`JSON parse failed. Claude response preview: ${cleaned.slice(0, 200)}`);
+    }
 
     return NextResponse.json({ ok: true, model: modelData });
   } catch (err) {
