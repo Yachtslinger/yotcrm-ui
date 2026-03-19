@@ -44,6 +44,9 @@ export function generateBrochureHTML(vessel: VesselData, brokers: BrokerInfo[]):
     tech: techImages.map((img, i) => ({ src: img.src, cap: img.alt || `Technical ${i + 1}` })),
   };
 
+  const customIntro = (vessel as any).customIntro as string | undefined;
+  const customFields = (vessel as any).customFields as { key: string; value: string }[] | undefined || [];
+
   const descHtml = vessel.description
     ? vessel.description.split("\n\n").filter(p => p.trim()).slice(0, 4)
         .map(p => `<p class="section-body reveal">${esc(p.trim())}</p>`).join("")
@@ -220,6 +223,10 @@ footer{background:var(--navy-deep);border-top:1px solid var(--divider);padding:3
 .footer-denison{font-family:'Cinzel',serif;font-size:10px;letter-spacing:.15em;color:var(--muted);}
 .reveal{opacity:0;transform:translateY(30px);transition:opacity .7s ease,transform .7s ease;}
 .reveal.visible{opacity:1;transform:translateY(0);}
+.custom-intro{background:var(--navy-deep);border-bottom:1px solid var(--divider);}
+.custom-intro-inner{max-width:860px;margin:0 auto;padding:80px 60px;}
+.custom-intro-text{font-family:'Cormorant Garamond',serif;font-size:clamp(18px,2.2vw,24px);font-weight:300;line-height:1.75;color:var(--cream);white-space:pre-wrap;}
+.custom-fields-table{margin-top:48px;display:grid;grid-template-columns:1fr 1fr;gap:2px;border:1px solid var(--divider);}
 @media(max-width:960px){nav{padding:0 24px;}.nav-links{display:none;}.hero-content{padding:0 0 56px 32px;}.hero-stats{display:none;}.container{padding:0 26px;}section{padding:72px 0;}.intro-grid{grid-template-columns:1fr;gap:36px;}.specs-table{grid-template-columns:1fr;}.perf-grid{grid-template-columns:1fr 1fr;}.gallery-thumbs{grid-template-columns:repeat(3,1fr);}.brokers-row{gap:20px;}footer{padding:24px 26px;}}
 </style>
 </head>
@@ -249,6 +256,17 @@ footer{background:var(--navy-deep);border-top:1px solid var(--divider);padding:3
     ${heroStats.map(s => `<div class="stat-item"><div class="stat-label">${esc(s.label)}</div><div class="stat-value">${esc(s.value)}</div>${s.unit ? `<div class="stat-unit">${esc(s.unit)}</div>` : ""}</div>`).join("")}
   </div>
 </section>
+${customIntro || customFields.length > 0 ? `
+<section class="custom-intro">
+  <div class="custom-intro-inner">
+    ${customIntro ? `<p class="custom-intro-text reveal">${esc(customIntro)}</p>` : ""}
+    ${customFields.length > 0 ? `
+    <div class="custom-fields-table reveal" style="margin-top:${customIntro ? "48px" : "0"}">
+      ${customFields.filter(f => f.key && f.value).map(f => `
+      <div class="spec-row"><div class="spec-key">${esc(f.key)}</div><div class="spec-val">${esc(f.value)}</div></div>`).join("")}
+    </div>` : ""}
+  </div>
+</section>` : ""}
 <section class="intro" id="intro">
   <div class="container">
     <div class="intro-grid">

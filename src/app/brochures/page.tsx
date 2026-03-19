@@ -118,6 +118,9 @@ type VesselData = {
   fireSuppression: string; lifeRafts: string; mobSystem: string; helideck: string;
   // Condition
   lastSurvey: string; lastDrydock: string; lastService: string; notes: string;
+  // Custom
+  customIntro: string;
+  customFields: { key: string; value: string }[];
   // Media
   pdfUrl: string;
   gaImages?: { src: string; alt: string }[];
@@ -211,6 +214,9 @@ const FIELD_GROUPS: { label: string; fields: { key: keyof VesselData; label: str
   { label: "Condition & Service", fields: [
     { key:"lastSurvey", label:"Last Survey" }, { key:"lastDrydock", label:"Last Dry Dock" },
     { key:"lastService", label:"Last Service / Maintenance" }, { key:"notes", label:"Notes / Remarks" },
+  ]},
+  { label: "Custom Fields", fields: [
+    { key:"customIntro", label:"Intro Paragraph (appears below hero)" },
   ]},
 ];
 
@@ -1346,14 +1352,24 @@ export default function BrochuresPage() {
                           className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] px-1.5 py-0.5 rounded"
                           style={{ background:"rgba(180,0,0,.15)", color:"#f87171" }}>✕</button>
                       </div>
-                      <input
-                        className="w-full rounded-lg text-sm p-2.5"
-                        style={{ background: "var(--input,#1e293b)", border: "1px solid var(--border)", color: "var(--foreground)" }}
-                        value={rawVal}
-                        onChange={e => updateField(f.key, e.target.value)}
-                        onBlur={e => blurField(f.key, e.target.value)}
-                        placeholder={isTank ? "e.g. 50.000 lt. or 13,209 gal" : "—"}
-                      />
+                      {f.key === "customIntro" ? (
+                        <textarea
+                          className="w-full rounded-lg text-sm p-2.5 resize-y"
+                          style={{ background: "var(--input,#1e293b)", border: "1px solid var(--border)", color: "var(--foreground)", minHeight: 140 }}
+                          value={rawVal}
+                          onChange={e => updateField(f.key, e.target.value)}
+                          placeholder="Write a custom paragraph that appears full-width below the hero image — as long as you want. Great for personal commentary, why you love this boat, or context for your client."
+                        />
+                      ) : (
+                        <input
+                          className="w-full rounded-lg text-sm p-2.5"
+                          style={{ background: "var(--input,#1e293b)", border: "1px solid var(--border)", color: "var(--foreground)" }}
+                          value={rawVal}
+                          onChange={e => updateField(f.key, e.target.value)}
+                          onBlur={e => blurField(f.key, e.target.value)}
+                          placeholder={isTank ? "e.g. 50.000 lt. or 13,209 gal" : "—"}
+                        />
+                      )}
                       {showHint && <p className="text-[10px] mt-1" style={{ color: "var(--brass-400)" }}>→ {converted}</p>}
                     </div>
                   );
@@ -1362,6 +1378,47 @@ export default function BrochuresPage() {
             </div>
           );
         })}
+
+        {/* Custom key/value fields builder */}
+        <div className="rounded-xl p-5 mb-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+          <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: "var(--brass-400)" }}>Custom Fields</p>
+          <p className="text-xs mb-4" style={{ color: "var(--navy-400)" }}>Add any label/value pairs you want shown in the spec table — electronics, refit notes, certifications, anything.</p>
+          {(vessel.customFields || []).map((cf, idx) => (
+            <div key={idx} className="flex gap-2 mb-2 items-center">
+              <input
+                className="rounded-lg text-sm p-2 flex-1"
+                style={{ background: "var(--input,#1e293b)", border: "1px solid var(--border)", color: "var(--foreground)" }}
+                value={cf.key}
+                onChange={e => {
+                  const updated = [...(vessel.customFields || [])];
+                  updated[idx] = { ...updated[idx], key: e.target.value };
+                  setVessel(v => v ? { ...v, customFields: updated } : v);
+                }}
+                placeholder="Label (e.g. Chartplotter)"
+              />
+              <input
+                className="rounded-lg text-sm p-2 flex-[2]"
+                style={{ background: "var(--input,#1e293b)", border: "1px solid var(--border)", color: "var(--foreground)" }}
+                value={cf.value}
+                onChange={e => {
+                  const updated = [...(vessel.customFields || [])];
+                  updated[idx] = { ...updated[idx], value: e.target.value };
+                  setVessel(v => v ? { ...v, customFields: updated } : v);
+                }}
+                placeholder="Value (e.g. Garmin 8616 MFD x2)"
+              />
+              <button onClick={() => {
+                const updated = (vessel.customFields || []).filter((_, i) => i !== idx);
+                setVessel(v => v ? { ...v, customFields: updated } : v);
+              }} className="text-xs px-2 py-1 rounded" style={{ background:"rgba(180,0,0,.15)", color:"#f87171" }}>✕</button>
+            </div>
+          ))}
+          <button onClick={() => setVessel(v => v ? { ...v, customFields: [...(v.customFields || []), { key: "", value: "" }] } : v)}
+            className="text-xs px-3 py-1.5 rounded-lg mt-1"
+            style={{ background: "rgba(184,147,58,.12)", color: "var(--brass-400)", border: "1px solid rgba(184,147,58,.2)" }}>
+            + Add Field
+          </button>
+        </div>
 
         {/* Broker selector */}
         <div className="rounded-xl p-5 mb-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
