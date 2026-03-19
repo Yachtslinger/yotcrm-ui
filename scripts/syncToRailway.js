@@ -39,14 +39,15 @@ async function sync() {
   let enrichment_profiles = []; try { enrichment_profiles = db.prepare('SELECT * FROM enrichment_profiles').all(); } catch {}
   let enrichment_sources = []; try { enrichment_sources = db.prepare('SELECT * FROM enrichment_sources').all(); } catch {}
   let score_weights = []; try { score_weights = db.prepare('SELECT * FROM score_weights').all(); } catch {}
+  let brochures = []; try { brochures = db.prepare('SELECT * FROM brochures').all(); } catch {}
   db.close();
 
-  console.log(`[SYNC] Pushing: ${leads.length} leads, ${boats.length} boats, ${listings.length} listings`);
+  console.log(`[SYNC] Pushing: ${leads.length} leads, ${boats.length} boats, ${listings.length} listings, ${brochures.length} brochures`);
 
   const res = await fetch(RAILWAY_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-sync-secret': SYNC_SECRET },
-    body: JSON.stringify({ leads, boats, todos, pocket_listings, iso_requests, marinas, listings, enrichment_profiles, enrichment_sources, score_weights }),
+    body: JSON.stringify({ leads, boats, todos, pocket_listings, iso_requests, marinas, listings, enrichment_profiles, enrichment_sources, score_weights, brochures }),
   });
   if (!res.ok) { const t = await res.text(); throw new Error(`Sync failed (${res.status}): ${t}`); }
   const result = await res.json();
