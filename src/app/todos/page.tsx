@@ -50,8 +50,8 @@ function parseMatchMeta(todo: { text: string; email_draft?: string | null }) {
 
 type Todo = {
   id: number; text: string; completed: number; priority: string;
-  lead_id: number | null; due_date: string | null; created_at: string;
-  completed_at: string | null; assignee: string;
+  lead_id: number | null; listing_id: number | null; due_date: string | null;
+  created_at: string; completed_at: string | null; assignee: string;
   email_draft?: string | null; lead_name?: string; lead_email?: string;
 };
 type Filter = "all" | "active" | "completed";
@@ -80,6 +80,12 @@ export default function TodosPage() {
   const [expandedDraft, setExpandedDraft] = React.useState<number | null>(null);
   const [copiedDraftId, setCopiedDraftId] = React.useState<number | null>(null);
   const [selected, setSelected] = React.useState<Set<number>>(new Set());
+  // Denison lookup state: todoId → { url, method, verified, loading }
+  const [denisonLookup, setDenisonLookup] = React.useState<Record<number, {
+    url: string; method: string; verified: boolean; loading: boolean;
+  }>>({});
+  // PDF generation state: todoId → loading bool
+  const [pdfLoading, setPdfLoading] = React.useState<Record<number, boolean>>({});
   const [selectMode, setSelectMode] = React.useState(false);
   // Follow-up modal state
   const [followUpTodo, setFollowUpTodo] = React.useState<Todo | null>(null);
@@ -90,6 +96,62 @@ export default function TodosPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = React.useRef<any>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
+
+  // ── Denison Lookup ──────────────────────────────────────────────────────────
+  async function lookupDenison(todo: Todo, meta: ReturnType<typeof parseMatchMeta>) {
+    setDenisonLookup(p => ({ ...p, [todo.id]: { url: "", method: "", verified: false, loading: true } }));
+    try {
+      const body: Record<string, string | number> = {};
+      if (meta.listingUrl) body.listing_url = meta.listingUrl;
+      if (todo.listing_id) body.listing_id  = todo.listing_id;
+      const yearMatch = meta.boatTitle.match(/\((\d{4})\)/);
+      if (yearMatch)  body.year = yearMatch[1];
+      if (meta.loa)   body.loa  = meta.loa.replace(/[^0-9]/g, "");
+      const titleParts = meta.boatTitle.split(/\s+/);
+      if (titleParts[0]) body.make = titleParts[0];
+      const res  = await fetch("/api/matches/denison-lookup", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setDenisonLookup(p => ({ ...p, [todo.id]: { url: data.url, method: data.method, verified: data.verified, loading: false } }));
+        toast(data.verified ? "✅ Denison listing found!" : "🔍 Filtered search ready — verify on Denison");
+      } else {
+        setDenisonLookup(p => { const n = { ...p }; delete n[todo.id]; return n; });
+        toast("Lookup failed", "error");
+      }
+    } catch {
+      setDenisonLookup(p => { const n = { ...p }; delete n[todo.id]; return n; });
+      toast("Lookup error", "error");
+    }
+  }
+
+  // ── Generate PDF via Denison URL ────────────────────────────────────────────
+  async function generatePdf(todo: Todo, meta: ReturnType<typeof parseMatchMeta>) {
+    const dl = denisonLookup[todo.id];
+    const denisonUrl = (dl?.url && dl.url.includes("denisonyachtsales.com"))
+      ? dl.url
+      : (meta.denisonUrl && meta.denisonUrl.includes("denisonyachtsales.com") ? meta.denisonUrl : null);
+    if (!denisonUrl) {
+      toast("Find the Denison listing first, then generate the PDF", "info");
+      return;
+    }
+    setPdfLoading(p => ({ ...p, [todo.id]: true }));
+    try {
+      const res  = await fetch("/api/pdf", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: denisonUrl, broker: todo.assignee || "will" }),
+      });
+      const data = await res.json();
+      if (data.ok && data.downloadUrl) {
+        const a = document.createElement("a");
+        a.href = data.downloadUrl; a.download = data.filename || "listing.pdf"; a.click();
+        toast("📄 PDF ready");
+      } else { toast(data.error || "PDF generation failed", "error"); }
+    } catch { toast("PDF error", "error"); }
+    finally { setPdfLoading(p => ({ ...p, [todo.id]: false })); }
+  }
 
   const fetchTodos = React.useCallback(async () => {
     try {
@@ -560,20 +622,42 @@ export default function TodosPage() {
                             ✉️ Email
                           </a>
                         )}
-                        {meta.denisonUrl && (
-                          <a href={meta.denisonUrl} target="_blank" rel="noopener noreferrer"
-                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold"
-                            style={{ background: "rgba(180,142,60,0.1)", color: "var(--brass-400)", minHeight: 44 }}>
-                            🏢 Search Denison
-                          </a>
-                        )}
-                        {meta.ywUrl && (
-                          <a href={meta.ywUrl} target="_blank" rel="noopener noreferrer"
-                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold"
-                            style={{ background: "rgba(14,116,144,0.1)", color: "#0e7490", minHeight: 44 }}>
-                            ⚓ Search YachtWorld
-                          </a>
-                        )}
+
+                        {/* ── Denison Lookup Button ── */}
+                        {(() => {
+                          const dl = denisonLookup[todo.id];
+                          if (dl && !dl.loading && dl.url) {
+                            // Already resolved — show the link
+                            return (
+                              <a href={dl.url} target="_blank" rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold"
+                                style={{ background: dl.verified ? "rgba(16,185,129,0.12)" : "rgba(180,142,60,0.1)", color: dl.verified ? "#059669" : "var(--brass-400)", minHeight: 44 }}>
+                                {dl.verified ? "✅ View on Denison" : "🔍 Search on Denison"} <ExternalLink className="w-3 h-3" />
+                              </a>
+                            );
+                          }
+                          return (
+                            <button
+                              onClick={() => lookupDenison(todo, meta)}
+                              disabled={dl?.loading}
+                              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all"
+                              style={{ background: "rgba(180,142,60,0.1)", color: "var(--brass-400)", minHeight: 44,
+                                       opacity: dl?.loading ? 0.6 : 1 }}>
+                              {dl?.loading ? "🔍 Looking up…" : "🏢 Find on Denison"}
+                            </button>
+                          );
+                        })()}
+
+                        {/* ── Generate PDF Button ── */}
+                        <button
+                          onClick={() => generatePdf(todo, meta)}
+                          disabled={pdfLoading[todo.id]}
+                          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all"
+                          style={{ background: "rgba(99,102,241,0.1)", color: "#6366f1", minHeight: 44,
+                                   opacity: pdfLoading[todo.id] ? 0.6 : 1 }}>
+                          {pdfLoading[todo.id] ? "⏳ Generating…" : "📄 Generate PDF"}
+                        </button>
+
                         <button onClick={() => deleteTodo(todo.id)}
                           className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold ml-auto"
                           style={{ background: "rgba(107,114,128,0.1)", color: "#6b7280", minHeight: 44 }}>

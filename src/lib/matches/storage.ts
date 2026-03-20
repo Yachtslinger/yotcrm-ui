@@ -198,7 +198,14 @@ function parseNum(s: string | null | undefined): number | null {
   return isNaN(n) ? null : n;
 }
 
-type MatchResult = { score: number; confidence: string; reasons: string[]; conflicts: string[] };
+type MatchResult = {
+  score: number;
+  confidence: string;
+  reasons: string[];
+  conflicts: string[];
+  /** Number of criteria that returned a REAL signal (not a neutral default) */
+  positiveHits: number;
+};
 
 // ── Geo helpers ───────────────────────────────────────────────────────────────
 // US coastal regions — vessels are usually trailered or sailed within region
@@ -373,6 +380,7 @@ export function scoreListingVsBuyer(
   }
 ): MatchResult {
   let score = 0;
+  let positiveHits = 0;   // incremented only when we have REAL data, not neutral defaults
   const reasons: string[] = [];
   const conflicts: string[] = [];
 
@@ -386,6 +394,7 @@ export function scoreListingVsBuyer(
   const bMin = parseNum(buyer.budget_min) || parseNum(buyer.boat_price);
   const bMax = parseNum(buyer.budget_max) || (bMin ? bMin * 1.3 : null);
   if (lPrice !== null && bMax !== null) {
+    positiveHits++;
     if (lPrice <= bMax && (!bMin || lPrice >= bMin * 0.7)) {
       score += 25; reasons.push(`Price $${(lPrice/1e6).toFixed(1)}M within budget`);
     } else if (lPrice <= bMax * 1.15) {
@@ -397,10 +406,11 @@ export function scoreListingVsBuyer(
     // Try to extract price signal from notes
     const noted = extractSpecsFromNotes(notes);
     if (noted.price && lPrice) {
+      positiveHits++;
       const impliedMax = noted.price * 1.3;
       if (lPrice <= impliedMax) { score += 12; reasons.push("Price may fit notes context"); }
       else { score += 6; }
-    } else { score += 12; } // neutral missing
+    } else { score += 12; } // neutral missing — no hit counted
   }
 
   // ── 2. LOA (20 pts) ────────────────────────────────────────────────────────
@@ -416,6 +426,7 @@ export function scoreListingVsBuyer(
     if (noted.length) { bLenMin = noted.length * 0.85; bLenMax = noted.length * 1.15; }
   }
   if (lLoa !== null && (bLenMin !== null || bLenMax !== null)) {
+    positiveHits++;
     const lo = bLenMin || 0;
     const hi = bLenMax || Infinity;
     if (lLoa >= lo && lLoa <= hi) {
@@ -439,6 +450,7 @@ export function scoreListingVsBuyer(
     if (noted.year) { bYearMin = noted.year - 5; bYearMax = noted.year + 5; }
   }
   if (lYear !== null && (bYearMin !== null || bYearMax !== null)) {
+    positiveHits++;
     const lo = bYearMin || 0;
     const hi = bYearMax || 9999;
     if (lYear >= lo && lYear <= hi) {
@@ -457,6 +469,7 @@ export function scoreListingVsBuyer(
     if (noted.make) bMake = noted.make;
   }
   if (lMake && bMake) {
+    positiveHits++;
     if (lMake === bMake || lMake.includes(bMake) || bMake.includes(lMake)) {
       score += 12; reasons.push(`Make match: ${listing.make}`);
     } else {
@@ -472,17 +485,20 @@ export function scoreListingVsBuyer(
     || "";
   const { pts: locPts, reason: locReason } = geoScore(listing.location || "", buyerLocRaw);
   score += locPts;
+  if (locPts >= 8) positiveHits++;   // only real geo signal counts
   if (locReason) reasons.push(locReason);
   else if (locPts >= 8) reasons.push(`Location proximity`);
 
   // ── 6. VESSEL TYPE (5 pts) ─────────────────────────────────────────────────
   const { pts: typePts, reason: typeReason } = vesselTypeScore(listing.vessel_type || "", notes);
   score += typePts;
+  if (typePts === 5) positiveHits++;  // explicit type match only
   if (typeReason) reasons.push(typeReason);
 
   // ── 7. NOTES INTENT SIGNALS (7 pts) ────────────────────────────────────────
   const { pts: intentPts, signal } = intentScore(notes);
   score += intentPts;
+  if (intentPts >= 4) positiveHits++;  // medium+ intent only
   if (signal) reasons.push(signal);
 
   // ── 8. LEAD QUALITY (3 pts) ────────────────────────────────────────────────
@@ -497,7 +513,7 @@ export function scoreListingVsBuyer(
   // Confidence bucket — adjusted for new 100-pt scale
   const confidence = score >= 70 ? "high" : score >= 45 ? "medium" : "low";
 
-  return { score, confidence, reasons, conflicts };
+  return { score, confidence, reasons, conflicts, positiveHits };
 }
 
 // ─── Run Matches for a Batch ────────────────────────────
@@ -622,13 +638,14 @@ export function runMatchesForBatch(batchId: number): number {
 // ─── Auto-Generate "Send Boat" Todos from Matches ──────
 
 // ── Thresholds ────────────────────────────────────────────────────────────────
-// score >= HUMAN_THRESHOLD  → human To Do queue (capped at TOP_N_HUMAN per batch)
-// score >= BOT_THRESHOLD    → bot queue (for future automation agent)
-// score <  BOT_THRESHOLD    → ignored
-const HUMAN_THRESHOLD = 85;
-const BOT_THRESHOLD   = 75;
-const TOP_N_HUMAN     = 8;   // max new human todos per batch
-const TOP_N_BOT       = 40;  // max bot queue items per batch
+// score >= HUMAN_THRESHOLD AND positiveHits >= MIN_POSITIVE_HITS → human To Do
+// score >= BOT_THRESHOLD (but below human or insufficient hits) → bot queue
+// score <  BOT_THRESHOLD → ignored entirely
+const HUMAN_THRESHOLD    = 88;   // raised from 85 — requires genuinely strong overlap
+const BOT_THRESHOLD      = 75;
+const MIN_POSITIVE_HITS  = 3;    // at least 3 real data-point matches, not neutral defaults
+const TOP_N_PER_PERSON   = 50;   // global cap: max open match todos per person across ALL batches
+const TOP_N_BOT          = 40;   // max bot queue items per batch
 
 export function generateMatchTodos(batchId: number): { human: number; bot: number } {
   const db = getDb();
@@ -637,15 +654,27 @@ export function generateMatchTodos(batchId: number): { human: number; bot: numbe
     try { db.exec("ALTER TABLE todos ADD COLUMN email_draft TEXT DEFAULT ''"); } catch {}
     try { db.exec("ALTER TABLE todos ADD COLUMN todo_type TEXT DEFAULT 'manual'"); } catch {}
     try { db.exec("ALTER TABLE todos ADD COLUMN queue TEXT DEFAULT 'human'"); } catch {}
+    try { db.exec("ALTER TABLE todos ADD COLUMN listing_id INTEGER"); } catch {}
 
     const now = new Date().toISOString();
     const today = now.slice(0, 10);
     let humanCreated = 0;
     let botCreated   = 0;
 
+    // ── Global cap: count current OPEN human match todos per person ───────────
+    const willOpen  = (db.prepare("SELECT COUNT(*) as c FROM todos WHERE assignee='will'  AND queue='human' AND todo_type='match' AND completed=0").get() as any).c as number;
+    const paoloOpen = (db.prepare("SELECT COUNT(*) as c FROM todos WHERE assignee='paolo' AND queue='human' AND todo_type='match' AND completed=0").get() as any).c as number;
+    let willSlots  = Math.max(0, TOP_N_PER_PERSON - willOpen);
+    let paoloSlots = Math.max(0, TOP_N_PER_PERSON - paoloOpen);
+
+    // Fetch matches for this batch, sorted best-first.
+    // Also pull denison_url from parsed_listings if already cached.
     const matches = db.prepare(`
-      SELECT lm.*, pl.make, pl.model, pl.year, pl.loa, pl.asking_price, pl.location, pl.section, pl.brokerage, pl.listing_url,
-        l.first_name, l.last_name, l.email AS lead_email, l.phone AS lead_phone
+      SELECT lm.*, pl.make, pl.model, pl.year, pl.loa, pl.asking_price,
+             pl.location, pl.section, pl.brokerage, pl.listing_url,
+             COALESCE(pl.denison_url,'') AS denison_url,
+             l.first_name, l.last_name,
+             l.email AS lead_email, l.phone AS lead_phone
       FROM listing_matches lm
       JOIN parsed_listings pl ON lm.listing_id = pl.id
       LEFT JOIN leads l ON lm.lead_id = l.id
@@ -654,12 +683,29 @@ export function generateMatchTodos(batchId: number): { human: number; bot: numbe
     `).all(batchId, BOT_THRESHOLD) as any[];
 
     for (const m of matches) {
-      const isHuman = m.match_score >= HUMAN_THRESHOLD;
+      // ── Re-score to get positiveHits (stored score used for ordering,
+      //    but we need hits to gate human vs bot) ────────────────────────────
+      // positiveHits is NOT stored in DB — derive from reasons count as proxy.
+      // reasons are only added when there's a real signal, so reasons.length ≈ positiveHits.
+      const storedReasons: string[] = (() => { try { return JSON.parse(m.reasons || "[]"); } catch { return []; } })();
+      const positiveHits = storedReasons.length;
+
+      // ── Human vs bot decision ─────────────────────────────────────────────
+      const qualifiesHuman = m.match_score >= HUMAN_THRESHOLD && positiveHits >= MIN_POSITIVE_HITS;
+      const isHuman = qualifiesHuman;
       const queue   = isHuman ? "human" : "bot";
 
-      // Cap: don't flood either queue per batch
-      if (isHuman  && humanCreated >= TOP_N_HUMAN) continue;
-      if (!isHuman && botCreated   >= TOP_N_BOT)   continue;
+      // Routing: section tag determines assignee
+      const section  = (m.section || "").toLowerCase();
+      const assignee = section.includes("global") || section.includes("outside") ? "paolo" : "will";
+
+      // ── Cap check ─────────────────────────────────────────────────────────
+      if (isHuman) {
+        if (assignee === "will"  && willSlots  <= 0) continue;
+        if (assignee === "paolo" && paoloSlots <= 0) continue;
+      } else {
+        if (botCreated >= TOP_N_BOT) continue;
+      }
 
       const boatLabel    = [m.make, m.model, m.year ? `(${m.year})` : "", m.loa ? `${m.loa}'` : ""]
         .filter(Boolean).join(" ").trim() || "Unknown vessel";
@@ -667,18 +713,18 @@ export function generateMatchTodos(batchId: number): { human: number; bot: numbe
       const firstName    = m.first_name || "there";
       const price        = m.asking_price ? `$${Number(m.asking_price).toLocaleString()}` : "";
 
-      // Dedup: skip if this boat+client already has ANY open todo in any queue
+      // Dedup: skip if this listing already has an open todo for this lead
       const dupCheck = db.prepare(
-        "SELECT id FROM todos WHERE lead_id=? AND text LIKE ? AND completed=0"
-      ).get(m.lead_id || -1, `%Send ${boatLabel}%`) as any;
+        "SELECT id FROM todos WHERE lead_id=? AND listing_id=? AND completed=0"
+      ).get(m.lead_id || -1, m.listing_id) as any;
       if (dupCheck) continue;
 
-      const reasons  = (() => { try { return JSON.parse(m.reasons || "[]"); } catch { return []; } })();
+      const reasons  = storedReasons;
       const topReason = reasons[0] || "";
 
       const todoText = `🚢 Send ${boatLabel}${price ? ` — ${price}` : ""} to ${prospectName}${topReason ? ` (${topReason})` : ""} [Score: ${m.match_score}]`;
 
-      // ── Build links ───────────────────────────────────────────────
+      // ── Build links ──────────────────────────────────────────────────────
       const cleanBoatWizardUrl = m.listing_url ? (() => {
         try {
           const u = new URL(m.listing_url);
@@ -687,15 +733,16 @@ export function generateMatchTodos(batchId: number): { human: number; bot: numbe
         } catch { return m.listing_url; }
       })() : null;
 
+      // Use cached denison_url if available, otherwise a filtered search URL
       const makeSlug = (m.make || "").toLowerCase().trim().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
-      const denisonLink = makeSlug
-        ? `🏢 Search ${m.make} on Denison: https://www.denisonyachtsales.com/used-${makeSlug}-yachts-for-sale/`
-        : `🏢 Search on Denison: https://www.denisonyachtsales.com/yachts-for-sale/`;
+      const denisonCached = (m.denison_url || "").trim();
+      const denisonFallback = makeSlug
+        ? `https://www.denisonyachtsales.com/yachts-for-sale/?make=${encodeURIComponent(m.make || "")}`
+        : `https://www.denisonyachtsales.com/yachts-for-sale/`;
+      const denisonLink = `🏢 Denison listing: ${denisonCached || denisonFallback}`;
 
-      const ywMake   = encodeURIComponent(m.make || "");
-      const ywYearMin = m.year ? parseInt(m.year, 10) - 2 : "";
-      const ywParams = [ywMake ? `make=${ywMake}` : "", ywYearMin ? `year_built_min=${ywYearMin}` : ""].filter(Boolean).join("&");
-      const yachtWorldLink = `⚓ Search ${m.make} on YachtWorld: https://www.yachtworld.com/boats-for-sale/${ywParams ? "?" + ywParams : ""}`;
+      // NO raw YachtWorld link — we never send prospects to outside brokers directly.
+      // The Denison URL (or filtered Denison search) is the only outbound link.
 
       const specLines = [
         m.year     ? `Year:      ${m.year}`     : null,
@@ -721,25 +768,28 @@ export function generateMatchTodos(batchId: number): { human: number; bot: numbe
         `→ Arrange a showing — if you want to get eyes on her in person, let's set it up`,
         ``,
         `Links:`,
-        cleanBoatWizardUrl ? `🔗 View listing: ${cleanBoatWizardUrl}` : "(No direct listing link)",
+        cleanBoatWizardUrl ? `🔗 BoatWizard listing: ${cleanBoatWizardUrl}` : "(No direct listing link)",
         denisonLink,
-        yachtWorldLink,
         ``,
         `Just reply with whatever works — no pressure, just thought you should know about this one.`,
         ``,
         `Best,\nWill Noftsinger\nDenison Yachting\n850.461.3342 | WN@DenisonYachting.com`,
       ].filter(l => l !== null).join("\n");
 
-      // Routing: one assignee only (not both)
-      const section  = (m.section || "").toLowerCase();
-      const assignee = section.includes("global") || section.includes("outside") ? "paolo" : "will";
-
+      // assignee is already set above (from section tag before cap check)
       db.prepare(`
-        INSERT INTO todos (text, priority, lead_id, due_date, assignee, email_draft, todo_type, queue, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, 'match', ?, ?, ?)
-      `).run(todoText, isHuman ? "high" : "normal", m.lead_id || null, today, assignee, emailDraft, queue, now, now);
+        INSERT INTO todos (text, priority, lead_id, listing_id, due_date, assignee, email_draft, todo_type, queue, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'match', ?, ?, ?)
+      `).run(todoText, isHuman ? "high" : "normal", m.lead_id || null, m.listing_id || null,
+             today, assignee, emailDraft, queue, now, now);
 
-      if (isHuman) humanCreated++; else botCreated++;
+      if (isHuman) {
+        humanCreated++;
+        if (assignee === "will")  willSlots--;
+        else                      paoloSlots--;
+      } else {
+        botCreated++;
+      }
     }
 
     return { human: humanCreated, bot: botCreated };
