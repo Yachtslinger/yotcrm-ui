@@ -101,14 +101,14 @@ JSON structure (all numbers are annual USD amounts):
     "tendersToys": {"low":0,"mid":0,"high":0},
     "other": {"low":0,"mid":0,"high":0}
   },
-  "assumptions": "2-3 sentences on usage assumptions",
-  "rangeExplanation": "2-3 sentences explaining the cost range",
-  "categoryBreakdown": "Paragraph covering each major category: what drives costs up and down",
-  "crewStructureNote": "Full crew breakdown with salaries and savings note if one crew removed",
-  "keyDrivers": "Top 3-5 cost drivers with explanation"
+  "assumptions": "1-2 sentences max on usage assumptions",
+  "rangeExplanation": "1-2 sentences max explaining the cost range",
+  "categoryBreakdown": "2-3 sentences max covering key cost categories",
+  "crewStructureNote": "2-3 sentences max: crew roles, total salary range, savings if one crew removed",
+  "keyDrivers": "Top 3 cost drivers, one sentence each"
 }
 
-Rules: use real operational logic, fuel based on burn rate and hours, dockage based on region, insurance 1-1.75% of vessel value, all values realistic and defensible.`;
+Rules: use real operational logic, fuel based on burn rate and hours, dockage based on region, insurance 1-1.75% of vessel value, all values realistic and defensible. Keep all text fields SHORT — 1-3 sentences maximum each.`;
 
     const message = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -117,6 +117,7 @@ Rules: use real operational logic, fuel based on burn rate and hours, dockage ba
         "x-api-key": process.env.ANTHROPIC_API_KEY || "",
         "anthropic-version": "2023-06-01",
       },
+      signal: AbortSignal.timeout(55000),
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 16000,
