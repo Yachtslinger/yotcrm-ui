@@ -25,7 +25,7 @@ function parseMatchMeta(todo: { text: string; email_draft?: string | null }) {
   const location  = get("Location:");
   const brokerage = get("Listed by:");
 
-  const bwLine = lines.find(l => l.includes("View listing:")) || lines.find(l => l.includes("BoatWizard listing:")) || "";
+  const bwLine = lines.find(l => l.includes("BoatWizard listing:")) || "";
   const listingUrl = (() => {
     const m = bwLine.match(/(https?:\/\/[^\s]+)/);
     return m ? m[1] : "";
@@ -35,17 +35,31 @@ function parseMatchMeta(todo: { text: string; email_draft?: string | null }) {
     const m = l.match(/(https?:\/\/[^\s]+)/);
     return m ? m[1] : "";
   })();
-  const ywUrl = (() => {
-    const l = lines.find(x => x.includes("yachtworld.com")) || "";
-    const m = l.match(/(https?:\/\/[^\s]+)/);
-    return m ? m[1] : "";
-  })();
 
-  // top reason — last (...) in todo text
-  const reasonMatch = todo.text.match(/\(([^)]+)\)\s*$/);
-  const topReason = reasonMatch ? reasonMatch[1] : "";
+  // ── Machine-readable metadata section ────────────────────────────────────
+  const metaStart = lines.indexOf("---match-metadata---");
+  let matchScore = 0;
+  let allSignals: string[] = [];
+  let allConflicts: string[] = [];
+  let allPenalties: string[] = [];
 
-  return { boatTitle, year, loa, price, location, brokerage, listingUrl, denisonUrl, ywUrl, topReason };
+  if (metaStart >= 0) {
+    const metaLines = lines.slice(metaStart + 1);
+    for (const ml of metaLines) {
+      if (ml.startsWith("---")) break;
+      if (ml.startsWith("score:"))     matchScore   = parseInt(ml.slice(6)) || 0;
+      if (ml.startsWith("signals:"))   allSignals   = ml.slice(8).split(" | ").filter(Boolean);
+      if (ml.startsWith("conflicts:")) allConflicts = ml.slice(10).split(" | ").filter(Boolean);
+      if (ml.startsWith("penalties:")) allPenalties = ml.slice(10).split(" | ").filter(Boolean);
+    }
+  }
+
+  // Fallback: top reason from todo text (pre-metadata todos)
+  const reasonMatch = todo.text.match(/\(([^)]+)\)\s*\[Score:/);
+  const topReason = allSignals[0] || (reasonMatch ? reasonMatch[1] : "");
+
+  return { boatTitle, year, loa, price, location, brokerage, listingUrl, denisonUrl,
+           topReason, matchScore, allSignals, allConflicts, allPenalties };
 }
 
 type Todo = {
@@ -291,11 +305,15 @@ export default function TodosPage() {
 
   function copyDraft(todo: Todo) {
     if (!todo.email_draft) return;
-    navigator.clipboard.writeText(todo.email_draft).then(() => {
+    // Strip the machine-readable metadata section before copying
+    const cleanDraft = todo.email_draft
+      .replace(/\n---match-metadata---[\s\S]*?---\n?/g, "")
+      .trimEnd();
+    navigator.clipboard.writeText(cleanDraft).then(() => {
       setCopiedDraftId(todo.id);
       setTimeout(() => setCopiedDraftId(null), 2500);
       toast("Email draft copied — paste into Apple Mail");
-    }, () => toast("Copy failed","error"));
+    }, () => toast("Copy failed", "error"));
   }
 
   // Selection helpers
@@ -549,14 +567,33 @@ export default function TodosPage() {
                         {meta.price ? ` · ${meta.price}` : ""}
                         {meta.location ? ` · ${meta.location}` : ""}
                       </p>
-                      {/* Reason + due date tags */}
+                      {/* Signal count + top reason tags (collapsed header) */}
                       <div className="flex flex-wrap gap-1 mt-2">
-                        {meta.topReason && (
+                        {meta.allSignals.length > 0 ? (
+                          <>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-medium"
+                              style={{ background: "rgba(16,185,129,0.08)", color: "#059669" }}>
+                              ✓ {meta.allSignals[0]}
+                            </span>
+                            {meta.allSignals.length > 1 && (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-medium"
+                                style={{ background: "rgba(16,185,129,0.06)", color: "#059669" }}>
+                                +{meta.allSignals.length - 1} more
+                              </span>
+                            )}
+                            {meta.allPenalties.length > 0 && (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-medium"
+                                style={{ background: "rgba(239,68,68,0.07)", color: "#ef4444" }}>
+                                ↓ {meta.allPenalties[0]}
+                              </span>
+                            )}
+                          </>
+                        ) : meta.topReason ? (
                           <span className="px-2 py-0.5 rounded text-[10px] font-medium"
                             style={{ background: "rgba(16,185,129,0.08)", color: "#059669" }}>
                             ✓ {meta.topReason}
                           </span>
-                        )}
+                        ) : null}
                         {todo.due_date && (
                           <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${todo.due_date < today && !todo.completed ? "bg-red-50 text-red-600" : ""}`}
                             style={!(todo.due_date < today && !todo.completed) ? { background: "var(--sand-100)", color: "var(--navy-500)" } : {}}>
@@ -619,13 +656,33 @@ export default function TodosPage() {
                         </div>
                       </div>
 
-                      {/* Match Reasoning */}
-                      {meta.topReason && (
+                      {/* Match Reasoning — all signals, conflicts, penalties */}
+                      {(meta.allSignals.length > 0 || meta.allConflicts.length > 0 || meta.allPenalties.length > 0) && (
+                        <div className="py-3" style={{ borderTop: "1px solid var(--border)" }}>
+                          <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--navy-400)" }}>
+                            Match Reasoning {meta.matchScore > 0 && <span className="ml-1 font-bold" style={{ color: meta.matchScore >= 88 ? "#059669" : "#d97706" }}>· Score {meta.matchScore}</span>}
+                          </h4>
+                          <div className="flex flex-wrap gap-1.5">
+                            {meta.allSignals.map((s, i) => (
+                              <span key={i} className="px-2 py-1 rounded text-xs"
+                                style={{ background: "rgba(16,185,129,0.08)", color: "#059669" }}>✓ {s}</span>
+                            ))}
+                            {meta.allConflicts.map((c, i) => (
+                              <span key={i} className="px-2 py-1 rounded text-xs"
+                                style={{ background: "rgba(245,158,11,0.08)", color: "#d97706" }}>⚠ {c}</span>
+                            ))}
+                            {meta.allPenalties.map((p, i) => (
+                              <span key={i} className="px-2 py-1 rounded text-xs"
+                                style={{ background: "rgba(239,68,68,0.07)", color: "#ef4444" }}>↓ {p}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {/* Fallback for pre-metadata todos */}
+                      {meta.allSignals.length === 0 && meta.topReason && (
                         <div className="py-3" style={{ borderTop: "1px solid var(--border)" }}>
                           <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--navy-400)" }}>Match Reasoning</h4>
-                          <div className="flex flex-wrap gap-1.5">
-                            <span className="px-2 py-1 rounded text-xs" style={{ background: "rgba(16,185,129,0.08)", color: "#059669" }}>✓ {meta.topReason}</span>
-                          </div>
+                          <span className="px-2 py-1 rounded text-xs" style={{ background: "rgba(16,185,129,0.08)", color: "#059669" }}>✓ {meta.topReason}</span>
                         </div>
                       )}
 

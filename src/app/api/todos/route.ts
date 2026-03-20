@@ -29,6 +29,15 @@ export async function POST(req: Request) {
     if (action === "update") {
       const todo = updateTodo(body.id, body.fields);
       if (!todo) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
+      // When marking a match todo complete, stamp last_contacted_at on the lead
+      if (body.fields?.completed === true && todo.lead_id) {
+        try {
+          const db2 = new Database(DB_PATH);
+          db2.prepare("UPDATE leads SET last_contacted_at = ? WHERE id = ?")
+            .run(new Date().toISOString(), todo.lead_id);
+          db2.close();
+        } catch { /* non-fatal */ }
+      }
       return NextResponse.json({ ok: true, todo });
     }
     if (action === "delete") {

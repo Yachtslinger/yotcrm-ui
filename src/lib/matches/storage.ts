@@ -88,6 +88,11 @@ export function initMatchTables() {
     try { db.exec("ALTER TABLE parsed_listings ADD COLUMN days_on_market INTEGER DEFAULT 0"); } catch {}
     // Phase 1: dismissal memory on leads
     try { db.exec("ALTER TABLE leads ADD COLUMN dismissed_listing_ids TEXT DEFAULT '[]'"); } catch {}
+    // Phase 2 behavioral: last contacted timestamp on leads
+    try { db.exec("ALTER TABLE leads ADD COLUMN last_contacted_at TEXT DEFAULT ''"); } catch {}
+    // Phase 1: penalty log + positive hits stored on matches
+    try { db.exec("ALTER TABLE listing_matches ADD COLUMN penalty_log TEXT DEFAULT '[]'"); } catch {}
+    try { db.exec("ALTER TABLE listing_matches ADD COLUMN positive_hits INTEGER DEFAULT 0"); } catch {}
     // Phase 1: exposure log table
     db.exec(`CREATE TABLE IF NOT EXISTS match_exposure_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -455,6 +460,7 @@ export function scoreListingVsBuyer(
     lead_city?: string; lead_state?: string;
     has_email?: boolean; has_phone?: boolean;
     lead_status?: string;
+    last_contacted_at?: string;  // ISO date string — for lead recency scoring
     // ── Extended ISO criteria (Phase 2) ───────────────────────────────────────
     vessel_type_pref?: string;   // motor_yacht | sailing | explorer | sport | catamaran | mega | any
     flybridge_pref?: string;     // yes | no | any
@@ -731,6 +737,26 @@ export function scoreListingVsBuyer(
     }
   }
 
+  // ── LEAD RECENCY (up to +6 / down to -3) ─────────────────────────────────
+  // Rewards recently active leads; lightly penalizes cold/stale leads.
+  if (buyer.last_contacted_at) {
+    const daysAgo = Math.floor(
+      (Date.now() - new Date(buyer.last_contacted_at).getTime()) / 86_400_000
+    );
+    if (daysAgo <= 14) {
+      score += 6; reasons.push(`Active lead (contacted ${daysAgo}d ago)`);
+      positiveHits++;
+    } else if (daysAgo <= 30) {
+      score += 3; // warm — no tag, just a soft bonus
+    } else if (daysAgo <= 60) {
+      // neutral — no adjustment
+    } else if (daysAgo <= 90) {
+      score -= 3; penaltyLog.push(`Cold lead -3 (${daysAgo}d since contact)`);
+    } else {
+      score -= 5; penaltyLog.push(`Stale lead -5 (${daysAgo}d since contact)`);
+    }
+  }
+
   // ── STALENESS DECAY ───────────────────────────────────────────────────────
   // New-to-market bonus: listed in last 7 days gets +6
   // Soft decay: 31–90 days = -2; 91–180 days = -5
@@ -828,6 +854,7 @@ export function runMatchesForBatch(batchId: number): number {
           has_email: !!(lead.email && lead.email.trim()),
           has_phone: !!(lead.phone && lead.phone.trim()),
           lead_status: lead.status || "new",
+          last_contacted_at: lead.last_contacted_at || "",
         };
 
         for (const boat of leadBoats) {
@@ -862,10 +889,13 @@ export function runMatchesForBatch(batchId: number): number {
         if (result.score >= THRESHOLD) {
           try {
             db.prepare(
-              `INSERT OR IGNORE INTO listing_matches (listing_id, lead_id, iso_id, batch_id, match_score, confidence, reasons, conflicts, status, created_at)
-               VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 'new', ?)`
+              `INSERT OR IGNORE INTO listing_matches
+               (listing_id, lead_id, iso_id, batch_id, match_score, confidence,
+                reasons, conflicts, penalty_log, positive_hits, status, created_at)
+               VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'new', ?)`
             ).run(listing.id, lead.id, batchId, result.score, result.confidence,
-              JSON.stringify(result.reasons), JSON.stringify(result.conflicts), now);
+              JSON.stringify(result.reasons), JSON.stringify(result.conflicts),
+              JSON.stringify(result.penaltyLog), result.positiveHits, now);
             totalMatches++;
           } catch {}
         }
@@ -897,10 +927,13 @@ export function runMatchesForBatch(batchId: number): number {
         if (result.score >= THRESHOLD) {
           try {
             db.prepare(
-              `INSERT OR IGNORE INTO listing_matches (listing_id, lead_id, iso_id, batch_id, match_score, confidence, reasons, conflicts, status, created_at)
-               VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 'new', ?)`
+              `INSERT OR IGNORE INTO listing_matches
+               (listing_id, lead_id, iso_id, batch_id, match_score, confidence,
+                reasons, conflicts, penalty_log, positive_hits, status, created_at)
+               VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)`
             ).run(listing.id, iso.id, batchId, result.score, result.confidence,
-              JSON.stringify(result.reasons), JSON.stringify(result.conflicts), now);
+              JSON.stringify(result.reasons), JSON.stringify(result.conflicts),
+              JSON.stringify(result.penaltyLog), result.positiveHits, now);
             totalMatches++;
           } catch {}
         }
@@ -1038,6 +1071,9 @@ export function generateMatchTodos(batchId: number): { human: number; bot: numbe
         m.brokerage ? `Listed by: ${m.brokerage}` : null,
       ].filter(Boolean) as string[];
 
+      const storedConflicts: string[] = (() => { try { return JSON.parse(m.conflicts || "[]"); } catch { return []; } })();
+      const storedPenalties: string[] = (() => { try { return JSON.parse(m.penalty_log || "[]"); } catch { return []; } })();
+
       const emailDraft = [
         `To: ${m.lead_email || "[client email]"}`,
         `Subject: ${boatLabel} — I Think This One's Worth a Look`,
@@ -1060,7 +1096,16 @@ export function generateMatchTodos(batchId: number): { human: number; bot: numbe
         `Just reply with whatever works — no pressure, just thought you should know about this one.`,
         ``,
         `Best,\nWill Noftsinger\nDenison Yachting\n850.461.3342 | WN@DenisonYachting.com`,
-      ].filter(l => l !== null).join("\n");
+        // ── Machine-readable metadata (stripped before copy, parsed for card display) ──
+        ``,
+        `---match-metadata---`,
+        `score:${m.match_score}`,
+        `hits:${positiveHits}`,
+        reasons.length  ? `signals:${reasons.join(" | ")}`  : "",
+        storedConflicts.length ? `conflicts:${storedConflicts.join(" | ")}` : "",
+        storedPenalties.length ? `penalties:${storedPenalties.join(" | ")}` : "",
+        `---`,
+      ].filter(l => l !== null && l !== undefined).join("\n");
 
       // assignee is already set above (from section tag before cap check)
       db.prepare(`
