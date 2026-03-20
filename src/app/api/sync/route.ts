@@ -36,18 +36,14 @@ export async function POST(req: Request) {
       db.pragma("foreign_keys = OFF");
 
       const sync = db.transaction(() => {
-        // Drop and recreate tables (leads, boats, pockets, iso — NOT todos initially)
+        // ── Leads: CREATE IF NOT EXISTS + upsert (preserve Railway-side mutable fields) ──
+        // Never drop leads — that wipes status, notes, dismissed_listing_ids, last_contacted_at
         db.exec(`
-          DROP TABLE IF EXISTS boats;
-          DROP TABLE IF EXISTS iso_requests;
-          DROP TABLE IF EXISTS pocket_listings;
-          DROP TABLE IF EXISTS leads;
-
-          CREATE TABLE leads (
+          CREATE TABLE IF NOT EXISTS leads (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             first_name TEXT DEFAULT '', last_name TEXT DEFAULT '',
             email TEXT, phone TEXT DEFAULT '', tags TEXT DEFAULT '',
-            notes TEXT DEFAULT '', source TEXT DEFAULT '', status TEXT DEFAULT 'other',
+            notes TEXT DEFAULT '', source TEXT DEFAULT '', status TEXT DEFAULT 'new',
             company TEXT DEFAULT '',
             occupation TEXT DEFAULT '', employer TEXT DEFAULT '',
             city TEXT DEFAULT '', state TEXT DEFAULT '', zip TEXT DEFAULT '',
@@ -64,83 +60,24 @@ export async function POST(req: Request) {
             primary_address TEXT DEFAULT '', secondary_addresses TEXT DEFAULT '[]',
             identity_confidence INTEGER DEFAULT 0, identity_verifications TEXT DEFAULT '[]',
             manual_corrections TEXT DEFAULT '[]',
-            court_records TEXT DEFAULT '',
-            professional_history TEXT DEFAULT '',
-            relatives TEXT DEFAULT '',
-            additional_properties TEXT DEFAULT '',
-            reverify_status TEXT DEFAULT '',
+            court_records TEXT DEFAULT '', professional_history TEXT DEFAULT '',
+            relatives TEXT DEFAULT '', additional_properties TEXT DEFAULT '',
+            reverify_status TEXT DEFAULT '', broker_notes TEXT DEFAULT '',
+            dismissed_listing_ids TEXT DEFAULT '[]',
+            last_contacted_at TEXT DEFAULT '',
             created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-          );
-          CREATE TABLE boats (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            lead_id INTEGER, make TEXT DEFAULT '', model TEXT DEFAULT '',
-            year TEXT DEFAULT '', length TEXT DEFAULT '', price TEXT DEFAULT '',
-            location TEXT DEFAULT '', listing_url TEXT DEFAULT '',
-            source_email TEXT DEFAULT '', added_at TEXT NOT NULL,
-            FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE
-          );
-
-          CREATE TABLE IF NOT EXISTS todos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            text TEXT NOT NULL,
-            completed INTEGER DEFAULT 0,
-            priority TEXT DEFAULT 'normal',
-            lead_id INTEGER,
-            due_date TEXT,
-            created_at TEXT NOT NULL,
-            completed_at TEXT,
-            assignee TEXT DEFAULT 'will',
-            updated_at TEXT,
-            FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE SET NULL
-          );
-          CREATE INDEX IF NOT EXISTS idx_todos_completed ON todos(completed);
-          CREATE INDEX IF NOT EXISTS idx_todos_lead_id ON todos(lead_id);
-
-          CREATE TABLE pocket_listings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            make TEXT DEFAULT '', model TEXT DEFAULT '', year TEXT DEFAULT '',
-            length TEXT DEFAULT '', price TEXT DEFAULT '', location TEXT DEFAULT '',
-            description TEXT DEFAULT '', seller_name TEXT DEFAULT '',
-            seller_contact TEXT DEFAULT '', status TEXT DEFAULT 'active',
-            notes TEXT DEFAULT '', listing_url TEXT DEFAULT '',
-            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-          );
-
-          CREATE TABLE iso_requests (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            buyer_name TEXT DEFAULT '', buyer_email TEXT DEFAULT '',
-            buyer_phone TEXT DEFAULT '', make TEXT DEFAULT '', model TEXT DEFAULT '',
-            year_min TEXT DEFAULT '', year_max TEXT DEFAULT '',
-            length_min TEXT DEFAULT '', length_max TEXT DEFAULT '',
-            budget_min TEXT DEFAULT '', budget_max TEXT DEFAULT '',
-            preferences TEXT DEFAULT '', status TEXT DEFAULT 'active',
-            notes TEXT DEFAULT '', lead_id INTEGER,
-            created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-            FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE SET NULL
-          );
-
-          CREATE TABLE IF NOT EXISTS marinas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL DEFAULT '',
-            address TEXT DEFAULT '',
-            city TEXT DEFAULT '',
-            state TEXT DEFAULT '',
-            gate_code TEXT DEFAULT '',
-            dockmaster_name TEXT DEFAULT '',
-            dockmaster_phone TEXT DEFAULT '',
-            office_phone TEXT DEFAULT '',
-            notes TEXT DEFAULT '',
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
+          )
         `);
+        // Safe migrations for new columns on existing Railway DB
+        try { db.exec("ALTER TABLE leads ADD COLUMN broker_notes TEXT DEFAULT ''"); } catch {}
+        try { db.exec("ALTER TABLE leads ADD COLUMN dismissed_listing_ids TEXT DEFAULT '[]'"); } catch {}
+        try { db.exec("ALTER TABLE leads ADD COLUMN last_contacted_at TEXT DEFAULT ''"); } catch {}
 
-        // Ensure updated_at column exists on older tables
-        try { db.exec("ALTER TABLE todos ADD COLUMN updated_at TEXT"); } catch { /* already exists */ }
-
-        // Insert leads
-        const insertLead = db.prepare(
-          `INSERT INTO leads (id, first_name, last_name, email, phone, tags, notes, source, status,
+        // Upsert leads: insert new ones, update non-mutable fields on existing ones.
+        // NEVER overwrite: status, notes, dismissed_listing_ids, last_contacted_at, broker_notes
+        // (those are set on Railway by broker actions and must be preserved)
+        const upsertLead = db.prepare(`
+          INSERT INTO leads (id, first_name, last_name, email, phone, tags, notes, source, status,
             company, occupation, employer, city, state, zip,
             linkedin_url, facebook_url, instagram_url, twitter_url,
             net_worth_range, net_worth_confidence, board_positions, yacht_clubs,
@@ -149,12 +86,39 @@ export async function POST(req: Request) {
             spouse_name, spouse_employer, primary_address, secondary_addresses,
             identity_confidence, identity_verifications, manual_corrections,
             court_records, professional_history, relatives, additional_properties, reverify_status,
+            broker_notes, dismissed_listing_ids, last_contacted_at,
             created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        );
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            first_name=excluded.first_name, last_name=excluded.last_name,
+            email=excluded.email, phone=excluded.phone, tags=excluded.tags,
+            source=excluded.source,
+            company=excluded.company, occupation=excluded.occupation, employer=excluded.employer,
+            city=excluded.city, state=excluded.state, zip=excluded.zip,
+            linkedin_url=excluded.linkedin_url, facebook_url=excluded.facebook_url,
+            instagram_url=excluded.instagram_url, twitter_url=excluded.twitter_url,
+            net_worth_range=excluded.net_worth_range, net_worth_confidence=excluded.net_worth_confidence,
+            board_positions=excluded.board_positions, yacht_clubs=excluded.yacht_clubs,
+            nonprofit_roles=excluded.nonprofit_roles, total_donations=excluded.total_donations,
+            property_summary=excluded.property_summary, wikipedia_url=excluded.wikipedia_url,
+            website_url=excluded.website_url, media_mentions=excluded.media_mentions,
+            estimated_net_worth=excluded.estimated_net_worth, net_worth_breakdown=excluded.net_worth_breakdown,
+            date_of_birth=excluded.date_of_birth, age=excluded.age,
+            spouse_name=excluded.spouse_name, spouse_employer=excluded.spouse_employer,
+            primary_address=excluded.primary_address, secondary_addresses=excluded.secondary_addresses,
+            identity_confidence=excluded.identity_confidence,
+            identity_verifications=excluded.identity_verifications,
+            manual_corrections=excluded.manual_corrections,
+            court_records=excluded.court_records, professional_history=excluded.professional_history,
+            relatives=excluded.relatives, additional_properties=excluded.additional_properties,
+            reverify_status=excluded.reverify_status,
+            updated_at=excluded.updated_at
+            -- NOT updating: notes, status, broker_notes, dismissed_listing_ids, last_contacted_at
+        `);
         for (const l of leads) {
-          insertLead.run(l.id, l.first_name||'', l.last_name||'', l.email||null, l.phone||'',
-            l.tags||'', l.notes||'', l.source||'', l.status||'other',
+          upsertLead.run(
+            l.id, l.first_name||'', l.last_name||'', l.email||null, l.phone||'',
+            l.tags||'', l.notes||'', l.source||'', l.status||'new',
             l.company||'', l.occupation||'', l.employer||'', l.city||'', l.state||'', l.zip||'',
             l.linkedin_url||'', l.facebook_url||'', l.instagram_url||'', l.twitter_url||'',
             l.net_worth_range||'', l.net_worth_confidence||'', l.board_positions||'', l.yacht_clubs||'',
@@ -163,34 +127,76 @@ export async function POST(req: Request) {
             l.spouse_name||'', l.spouse_employer||'', l.primary_address||'', l.secondary_addresses||'[]',
             l.identity_confidence||0, l.identity_verifications||'[]', l.manual_corrections||'[]',
             l.court_records||'', l.professional_history||'', l.relatives||'', l.additional_properties||'', l.reverify_status||'',
-            l.created_at||new Date().toISOString(), l.updated_at||new Date().toISOString());
+            l.broker_notes||'', l.dismissed_listing_ids||'[]', l.last_contacted_at||'',
+            l.created_at||new Date().toISOString(), l.updated_at||new Date().toISOString()
+          );
         }
 
-        // Insert boats
-        const insertBoat = db.prepare(
-          `INSERT INTO boats (id, lead_id, make, model, year, length, price, location, listing_url, source_email, added_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        );
-        for (const b of boats) {
-          insertBoat.run(b.id, b.lead_id, b.make||'', b.model||'', b.year||'', b.length||'',
-            b.price||'', b.location||'', b.listing_url||'', b.source_email||'',
-            b.added_at||new Date().toISOString());
-        }
+        // ── Boats: drop/recreate (no mutable fields, keyed to leads) ──
+        db.exec(`
+          DROP TABLE IF EXISTS boats;
+          CREATE TABLE boats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_id INTEGER, make TEXT DEFAULT '', model TEXT DEFAULT '',
+            year TEXT DEFAULT '', length TEXT DEFAULT '', price TEXT DEFAULT '',
+            location TEXT DEFAULT '', listing_url TEXT DEFAULT '',
+            source_email TEXT DEFAULT '', added_at TEXT NOT NULL,
+            FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE
+          )
+        `);
 
-        // ── Sync todos: delete all and re-insert from merged local state ──
-        db.prepare("DELETE FROM todos").run();
+        // ── Todos: merge — add new, preserve Railway-side completions ──
+        // Ensure todos table + new columns exist
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS todos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL,
+            completed INTEGER DEFAULT 0, priority TEXT DEFAULT 'normal',
+            lead_id INTEGER, due_date TEXT, created_at TEXT NOT NULL,
+            completed_at TEXT, assignee TEXT DEFAULT 'will', updated_at TEXT,
+            FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE SET NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_todos_completed ON todos(completed);
+          CREATE INDEX IF NOT EXISTS idx_todos_lead_id ON todos(lead_id);
+        `);
+        try { db.exec("ALTER TABLE todos ADD COLUMN updated_at TEXT"); } catch {}
+        try { db.exec("ALTER TABLE todos ADD COLUMN email_draft TEXT DEFAULT ''"); } catch {}
+        try { db.exec("ALTER TABLE todos ADD COLUMN todo_type TEXT DEFAULT 'manual'"); } catch {}
+        try { db.exec("ALTER TABLE todos ADD COLUMN queue TEXT DEFAULT 'human'"); } catch {}
+        try { db.exec("ALTER TABLE todos ADD COLUMN listing_id INTEGER"); } catch {}
 
-        const insertTodo = db.prepare(
-          `INSERT INTO todos (id, text, completed, priority, lead_id, due_date, created_at, completed_at, assignee, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        );
+        // Clear stale bot-queue match todos (old engine noise — pre-Phase1 scoring)
+        // Keep: human-queue todos, manual todos, todos created after Phase-1 deploy date
+        db.prepare(`
+          DELETE FROM todos
+          WHERE queue = 'bot' AND todo_type = 'match'
+          AND created_at < '2026-01-01T00:00:00'
+        `).run();
+
+        // Upsert todos from local: insert new, update existing if text/priority changed
+        const upsertTodo = db.prepare(`
+          INSERT INTO todos (id, text, completed, priority, lead_id, listing_id, due_date,
+            created_at, completed_at, assignee, updated_at, email_draft, todo_type, queue)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            text=excluded.text, priority=excluded.priority,
+            lead_id=excluded.lead_id, due_date=excluded.due_date,
+            assignee=excluded.assignee, email_draft=excluded.email_draft,
+            todo_type=excluded.todo_type, queue=excluded.queue,
+            updated_at=excluded.updated_at
+            -- NOT updating: completed, completed_at (preserve Railway-side completion state)
+        `);
         for (const t of todos) {
-          insertTodo.run(t.id, t.text||'', t.completed||0, t.priority||'normal',
-            t.lead_id||null, t.due_date||null, t.created_at||new Date().toISOString(),
-            t.completed_at||null, t.assignee||'will', t.updated_at||t.created_at||new Date().toISOString());
+          upsertTodo.run(
+            t.id, t.text||'', t.completed||0, t.priority||'normal',
+            t.lead_id||null, t.listing_id||null, t.due_date||null,
+            t.created_at||new Date().toISOString(), t.completed_at||null,
+            t.assignee||'will', t.updated_at||t.created_at||new Date().toISOString(),
+            t.email_draft||'', t.todo_type||'manual', t.queue||'human'
+          );
         }
 
         // Insert pocket listings
+        db.prepare("DELETE FROM pocket_listings").run();
         const insertPocket = db.prepare(
           `INSERT INTO pocket_listings (id, make, model, year, length, price, location, description, seller_name, seller_contact, status, notes, listing_url, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -198,10 +204,12 @@ export async function POST(req: Request) {
         for (const p of pocket_listings) {
           insertPocket.run(p.id, p.make||'', p.model||'', p.year||'', p.length||'', p.price||'',
             p.location||'', p.description||'', p.seller_name||'', p.seller_contact||'',
-            p.status||'active', p.notes||'', p.listing_url||'', p.created_at||new Date().toISOString(), p.updated_at||new Date().toISOString());
+            p.status||'active', p.notes||'', p.listing_url||'',
+            p.created_at||new Date().toISOString(), p.updated_at||new Date().toISOString());
         }
 
         // Insert ISO requests
+        db.prepare("DELETE FROM iso_requests").run();
         const insertIso = db.prepare(
           `INSERT INTO iso_requests (id, buyer_name, buyer_email, buyer_phone, make, model, year_min, year_max, length_min, length_max, budget_min, budget_max, preferences, status, notes, lead_id, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -214,7 +222,7 @@ export async function POST(req: Request) {
             i.created_at||new Date().toISOString(), i.updated_at||new Date().toISOString());
         }
 
-        // Insert marinas
+        // Marinas
         db.prepare("DELETE FROM marinas").run();
         const insertMarina = db.prepare(
           `INSERT INTO marinas (id, name, address, city, state, gate_code, dockmaster_name, dockmaster_phone, office_phone, notes, created_at, updated_at)

@@ -87,21 +87,24 @@ function sectionTotal(items: Scenario[]): Scenario {
   };
 }
 
-function Row({ label, s, bold }: { label: string; s: Scenario; bold?: boolean }) {
+type ShowScenarios = { low: boolean; mid: boolean; high: boolean };
+function colCount(show: ShowScenarios) { return 1 + (show.low ? 1 : 0) + (show.mid ? 1 : 0) + (show.high ? 1 : 0); }
+
+function Row({ label, s, bold, show }: { label: string; s: Scenario; bold?: boolean; show: ShowScenarios }) {
   return (
     <tr style={{ borderBottom: "1px solid rgba(255,255,255,.04)" }}>
       <td className="py-2 pr-4 text-sm" style={{ color: bold ? "var(--brass-400)" : "var(--foreground)", fontWeight: bold ? 700 : 400 }}>{label}</td>
-      <td className="py-2 px-3 text-sm text-right" style={{ color: bold ? "#4ade80" : "var(--foreground)", fontWeight: bold ? 700 : 400 }}>{fmt(s.low)}</td>
-      <td className="py-2 px-3 text-sm text-right" style={{ color: bold ? "#facc15" : "var(--foreground)", fontWeight: bold ? 700 : 400 }}>{fmt(s.mid)}</td>
-      <td className="py-2 px-3 text-sm text-right" style={{ color: bold ? "#f87171" : "var(--foreground)", fontWeight: bold ? 700 : 400 }}>{fmt(s.high)}</td>
+      {show.low  && <td className="py-2 px-3 text-sm text-right" style={{ color: bold ? "#4ade80" : "var(--foreground)", fontWeight: bold ? 700 : 400 }}>{fmt(s.low)}</td>}
+      {show.mid  && <td className="py-2 px-3 text-sm text-right" style={{ color: bold ? "#facc15" : "var(--foreground)", fontWeight: bold ? 700 : 400 }}>{fmt(s.mid)}</td>}
+      {show.high && <td className="py-2 px-3 text-sm text-right" style={{ color: bold ? "#f87171" : "var(--foreground)", fontWeight: bold ? 700 : 400 }}>{fmt(s.high)}</td>}
     </tr>
   );
 }
 
-function SectionHeader({ label }: { label: string }) {
+function SectionHeader({ label, show }: { label: string; show: ShowScenarios }) {
   return (
     <tr>
-      <td colSpan={4} className="pt-6 pb-1 text-xs font-bold uppercase tracking-widest" style={{ color: "var(--brass-400)" }}>{label}</td>
+      <td colSpan={colCount(show)} className="pt-6 pb-1 text-xs font-bold uppercase tracking-widest" style={{ color: "var(--brass-400)" }}>{label}</td>
     </tr>
   );
 }
@@ -120,7 +123,7 @@ export default function OwnershipPage() {
       const res = await fetch("/api/ownership/pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model }),
+        body: JSON.stringify({ model, scenarios: showScenarios }),
       });
       if (!res.ok) throw new Error("PDF generation failed");
       const blob = await res.blob();
@@ -138,6 +141,16 @@ export default function OwnershipPage() {
     }
   }
   const [activeTab, setActiveTab] = React.useState<"table" | "analysis">("table");
+  const [showScenarios, setShowScenarios] = React.useState<ShowScenarios>({ low: false, mid: true, high: false });
+
+  function toggleScenario(key: keyof ShowScenarios) {
+    setShowScenarios(prev => {
+      const next = { ...prev, [key]: !prev[key] };
+      // keep at least one active
+      if (!next.low && !next.mid && !next.high) return prev;
+      return next;
+    });
+  }
 
   async function generate() {
     if (!url.trim()) return;
@@ -297,8 +310,33 @@ export default function OwnershipPage() {
               </div>
 
               {/* Grand total banner */}
-              <div className="grid grid-cols-3 gap-3 mb-6">
-                {([["LOW", gt.low, "#4ade80"], ["MID", gt.mid, "#facc15"], ["HIGH", gt.high, "#f87171"]] as [string, number, string][]).map(([label, val, color]) => (
+              {/* Scenario toggles */}
+              <div className="flex items-center gap-1 mb-4">
+                <span className="text-xs mr-2" style={{ color: "var(--navy-400)" }}>Show:</span>
+                {([["low", "#4ade80", "Low"], ["mid", "#facc15", "Mid"], ["high", "#f87171", "High"]] as [keyof ShowScenarios, string, string][]).map(([key, color, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => toggleScenario(key)}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all"
+                    style={{
+                      background: showScenarios[key] ? `${color}20` : "var(--card)",
+                      color: showScenarios[key] ? color : "var(--navy-400)",
+                      border: `1px solid ${showScenarios[key] ? color + "60" : "var(--border)"}`,
+                    }}>
+                    <span style={{
+                      width: 12, height: 12, borderRadius: 3, border: `1.5px solid ${showScenarios[key] ? color : "var(--navy-400)"}`,
+                      background: showScenarios[key] ? color : "transparent",
+                      display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                    }}>
+                      {showScenarios[key] && <span style={{ color: "#000", fontSize: 8, fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                    </span>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid gap-3 mb-6" style={{ gridTemplateColumns: `repeat(${colCount(showScenarios) - 1 || 1}, 1fr)` }}>
+                {([["low", "LOW", gt.low, "#4ade80"], ["mid", "MID", gt.mid, "#facc15"], ["high", "HIGH", gt.high, "#f87171"]] as [keyof ShowScenarios, string, number, string][]).filter(([key]) => showScenarios[key]).map(([, label, val, color]) => (
                   <div key={label} className="rounded-xl p-4 text-center" style={{ background: "var(--card)", border: `1px solid ${color}40` }}>
                     <p className="text-xs uppercase tracking-widest mb-1" style={{ color }}>{label} SCENARIO</p>
                     <p className="text-2xl font-bold" style={{ color }}>{fmt(val)}</p>
@@ -313,79 +351,79 @@ export default function OwnershipPage() {
                     <thead>
                       <tr style={{ borderBottom: "1px solid rgba(184,147,58,.3)" }}>
                         <th className="text-left pb-2 text-xs uppercase tracking-wider" style={{ color: "var(--navy-400)" }}>Category</th>
-                        <th className="text-right pb-2 text-xs uppercase tracking-wider px-3" style={{ color: "#4ade80" }}>Low</th>
-                        <th className="text-right pb-2 text-xs uppercase tracking-wider px-3" style={{ color: "#facc15" }}>Mid</th>
-                        <th className="text-right pb-2 text-xs uppercase tracking-wider px-3" style={{ color: "#f87171" }}>High</th>
+                        {showScenarios.low  && <th className="text-right pb-2 text-xs uppercase tracking-wider px-3" style={{ color: "#4ade80" }}>Low</th>}
+                        {showScenarios.mid  && <th className="text-right pb-2 text-xs uppercase tracking-wider px-3" style={{ color: "#facc15" }}>Mid</th>}
+                        {showScenarios.high && <th className="text-right pb-2 text-xs uppercase tracking-wider px-3" style={{ color: "#f87171" }}>High</th>}
                       </tr>
                     </thead>
                     <tbody>
-                      <SectionHeader label="CREW" />
+                      <SectionHeader show={showScenarios} label="CREW" />
                       {model.crew.salaries.breakdown?.map(r => (
-                        <Row key={r.role} label={`  ${r.role}`} s={r} />
+                        <Row show={showScenarios} key={r.role} label={`  ${r.role}`} s={r} />
                       ))}
-                      <Row label="Recruitment Fees" s={model.crew.recruitment} />
-                      <Row label="Travel" s={model.crew.travel} />
-                      <Row label="Accommodation" s={model.crew.accommodation} />
-                      <Row label="Uniforms" s={model.crew.uniforms} />
-                      <Row label="Training & Certification" s={model.crew.training} />
-                      <Row label="Food & Beverages" s={model.crew.foodBeverage} />
-                      <Row label="Medical Expenses" s={model.crew.medical} />
-                      <Row label="Day Workers & Delivery Crew" s={model.crew.dayWorkers} />
-                      <Row label="Entertainment" s={model.crew.entertainment} />
-                      <Row label="TOTAL CREW" s={crewTotal} bold />
+                      <Row show={showScenarios} label="Recruitment Fees" s={model.crew.recruitment} />
+                      <Row show={showScenarios} label="Travel" s={model.crew.travel} />
+                      <Row show={showScenarios} label="Accommodation" s={model.crew.accommodation} />
+                      <Row show={showScenarios} label="Uniforms" s={model.crew.uniforms} />
+                      <Row show={showScenarios} label="Training & Certification" s={model.crew.training} />
+                      <Row show={showScenarios} label="Food & Beverages" s={model.crew.foodBeverage} />
+                      <Row show={showScenarios} label="Medical Expenses" s={model.crew.medical} />
+                      <Row show={showScenarios} label="Day Workers & Delivery Crew" s={model.crew.dayWorkers} />
+                      <Row show={showScenarios} label="Entertainment" s={model.crew.entertainment} />
+                      <Row show={showScenarios} label="TOTAL CREW" s={crewTotal} bold />
 
-                      <SectionHeader label="COMMUNICATIONS" />
-                      <Row label="Phone & Cellular" s={model.communications.phone} />
-                      <Row label="Sat TV" s={model.communications.satTV} />
-                      <Row label="Satcom / Data (Starlink or equivalent)" s={model.communications.satcom} />
-                      <Row label="TOTAL COMMUNICATIONS" s={commTotal} bold />
+                      <SectionHeader show={showScenarios} label="COMMUNICATIONS" />
+                      <Row show={showScenarios} label="Phone & Cellular" s={model.communications.phone} />
+                      <Row show={showScenarios} label="Sat TV" s={model.communications.satTV} />
+                      <Row show={showScenarios} label="Satcom / Data (Starlink or equivalent)" s={model.communications.satcom} />
+                      <Row show={showScenarios} label="TOTAL COMMUNICATIONS" s={commTotal} bold />
 
-                      <SectionHeader label="OPERATIONS" />
-                      <Row label="Agency" s={model.operations.agency} />
-                      <Row label="Audio Visual" s={model.operations.audioVisual} />
-                      <Row label="Auto" s={model.operations.auto} />
-                      <Row label="Bridge" s={model.operations.bridge} />
-                      <Row label="Computer" s={model.operations.computer} />
-                      <Row label="Deck" s={model.operations.deck} />
-                      <Row label="Dock Express / Shipping" s={model.operations.dockExpress} />
-                      <Row label="Engineering" s={model.operations.engineering} />
-                      <Row label="Fuels & Lubricants" s={model.operations.fuels} />
-                      <Row label="Galley" s={model.operations.galley} />
-                      <Row label="Interior" s={model.operations.interior} />
-                      <Row label="Launches & Tenders" s={model.operations.launches} />
-                      <Row label="Mail & Freight" s={model.operations.mailFreight} />
-                      <Row label="Office" s={model.operations.office} />
-                      <Row label="Ports, Dockage & Customs" s={model.operations.dockage} />
-                      <Row label="Safety & Medical" s={model.operations.safetyMedical} />
-                      <Row label="Security" s={model.operations.security} />
-                      <Row label="Survey & Certification" s={model.operations.survey} />
-                      <Row label="Warehousing & Storage" s={model.operations.warehousing} />
-                      <Row label="TOTAL OPERATIONS" s={opTotal} bold />
+                      <SectionHeader show={showScenarios} label="OPERATIONS" />
+                      <Row show={showScenarios} label="Agency" s={model.operations.agency} />
+                      <Row show={showScenarios} label="Audio Visual" s={model.operations.audioVisual} />
+                      <Row show={showScenarios} label="Auto" s={model.operations.auto} />
+                      <Row show={showScenarios} label="Bridge" s={model.operations.bridge} />
+                      <Row show={showScenarios} label="Computer" s={model.operations.computer} />
+                      <Row show={showScenarios} label="Deck" s={model.operations.deck} />
+                      <Row show={showScenarios} label="Dock Express / Shipping" s={model.operations.dockExpress} />
+                      <Row show={showScenarios} label="Engineering" s={model.operations.engineering} />
+                      <Row show={showScenarios} label="Fuels & Lubricants" s={model.operations.fuels} />
+                      <Row show={showScenarios} label="Galley" s={model.operations.galley} />
+                      <Row show={showScenarios} label="Interior" s={model.operations.interior} />
+                      <Row show={showScenarios} label="Launches & Tenders" s={model.operations.launches} />
+                      <Row show={showScenarios} label="Mail & Freight" s={model.operations.mailFreight} />
+                      <Row show={showScenarios} label="Office" s={model.operations.office} />
+                      <Row show={showScenarios} label="Ports, Dockage & Customs" s={model.operations.dockage} />
+                      <Row show={showScenarios} label="Safety & Medical" s={model.operations.safetyMedical} />
+                      <Row show={showScenarios} label="Security" s={model.operations.security} />
+                      <Row show={showScenarios} label="Survey & Certification" s={model.operations.survey} />
+                      <Row show={showScenarios} label="Warehousing & Storage" s={model.operations.warehousing} />
+                      <Row show={showScenarios} label="TOTAL OPERATIONS" s={opTotal} bold />
 
-                      <SectionHeader label="INSURANCE" />
-                      <Row label="Hull & Machinery" s={model.insurance.hull} />
-                      <Row label="Protection & Indemnity" s={model.insurance.pi} />
-                      <Row label="Crew Health Insurance" s={model.insurance.crewHealth} />
-                      <Row label="TOTAL INSURANCE" s={insTotal} bold />
+                      <SectionHeader show={showScenarios} label="INSURANCE" />
+                      <Row show={showScenarios} label="Hull & Machinery" s={model.insurance.hull} />
+                      <Row show={showScenarios} label="Protection & Indemnity" s={model.insurance.pi} />
+                      <Row show={showScenarios} label="Crew Health Insurance" s={model.insurance.crewHealth} />
+                      <Row show={showScenarios} label="TOTAL INSURANCE" s={insTotal} bold />
 
-                      <SectionHeader label="ADMINISTRATIVE" />
-                      <Row label="Professional Fees" s={model.administrative.professionalFees} />
-                      <Row label="Bank Charges" s={model.administrative.bankCharges} />
-                      <Row label="Management Fee" s={model.administrative.managementFee} />
-                      <Row label="Management Travel" s={model.administrative.managementTravel} />
-                      <Row label="TOTAL ADMINISTRATIVE" s={adminTotal} bold />
+                      <SectionHeader show={showScenarios} label="ADMINISTRATIVE" />
+                      <Row show={showScenarios} label="Professional Fees" s={model.administrative.professionalFees} />
+                      <Row show={showScenarios} label="Bank Charges" s={model.administrative.bankCharges} />
+                      <Row show={showScenarios} label="Management Fee" s={model.administrative.managementFee} />
+                      <Row show={showScenarios} label="Management Travel" s={model.administrative.managementTravel} />
+                      <Row show={showScenarios} label="TOTAL ADMINISTRATIVE" s={adminTotal} bold />
 
-                      <SectionHeader label="CAPITAL IMPROVEMENTS" />
-                      <Row label="AV" s={model.capital.av} />
-                      <Row label="Engineering / Deck" s={model.capital.engineeringDeck} />
-                      <Row label="Interior" s={model.capital.interior} />
-                      <Row label="Paint" s={model.capital.paint} />
-                      <Row label="Tenders / Toys" s={model.capital.tendersToys} />
-                      <Row label="Other" s={model.capital.other} />
-                      <Row label="TOTAL CAPITAL" s={capTotal} bold />
+                      <SectionHeader show={showScenarios} label="CAPITAL IMPROVEMENTS" />
+                      <Row show={showScenarios} label="AV" s={model.capital.av} />
+                      <Row show={showScenarios} label="Engineering / Deck" s={model.capital.engineeringDeck} />
+                      <Row show={showScenarios} label="Interior" s={model.capital.interior} />
+                      <Row show={showScenarios} label="Paint" s={model.capital.paint} />
+                      <Row show={showScenarios} label="Tenders / Toys" s={model.capital.tendersToys} />
+                      <Row show={showScenarios} label="Other" s={model.capital.other} />
+                      <Row show={showScenarios} label="TOTAL CAPITAL" s={capTotal} bold />
 
-                      <tr><td colSpan={4} className="pt-6" /></tr>
-                      <Row label="GRAND TOTAL" s={gt} bold />
+                      <tr><td colSpan={colCount(showScenarios)} className="pt-6" /></tr>
+                      <Row show={showScenarios} label="GRAND TOTAL" s={gt} bold />
                     </tbody>
                   </table>
                 </div>
