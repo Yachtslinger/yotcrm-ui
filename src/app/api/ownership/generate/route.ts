@@ -44,9 +44,9 @@ CALIBRATION RULES — apply every figure against these:
 - Captain salary: scales with vessel size. Under 40m = $100-130k. 40-55m = $140-180k. 55m+ = $180-230k. Do not underestimate.
 - Fuel: displacement hulls burn LESS than planing hulls. Use realistic burn rates: under 30m = 40-80 L/hr; 30-45m = 80-150 L/hr; 45-60m = 120-220 L/hr; 60m+ = 200-350 L/hr. Mid scenario = moderate hours, not heavy use.
 - Dockage: Mid = home port contract + occasional cruising. NOT a full premium Med season. For a Florida/US home port mid = $80-150/ft/year. Med home port mid = €120-200/ft/year.
-- Insurance hull: 1.0-1.25% of vessel value for mid private use. 1.5-1.75% only for high scenario or charter.
+- Insurance hull: base on replacement/insured value, NOT current asking price. Use approximately €1,500-€2,500/GT for replacement value on a quality build, then apply 1.0-1.25% mid / 1.5-1.75% high.
 - Capital improvements: annualize realistically. Paint on a GRP hull every 5-7 years, steel every 3-5 years. Engineering reserves based on engine hours and age. Mid should NOT assume everything happens in year one.
-- Total annual cost sanity check: should be roughly 8-12% of vessel value for mid private ownership. Flag mentally if you are outside this range.
+- DO NOT use current asking/sale price as a basis for any calculation. A vessel's sale price reflects depreciation; operating costs do not depreciate with it.
 
 JSON structure (all numbers are annual USD amounts):
 {
