@@ -82,6 +82,15 @@ export function initMatchTables() {
     try { db.exec("ALTER TABLE parsed_listings ADD COLUMN section TEXT DEFAULT ''"); } catch {}
     try { db.exec("ALTER TABLE parsed_listings ADD COLUMN brokerage TEXT DEFAULT ''"); } catch {}
     try { db.exec("ALTER TABLE parsed_listings ADD COLUMN client_name TEXT DEFAULT ''"); } catch {}
+    try { db.exec("ALTER TABLE parsed_listings ADD COLUMN denison_url TEXT DEFAULT ''"); } catch {}
+    // Extended buyer_searches criteria columns (Phase 2)
+    try { db.exec("ALTER TABLE buyer_searches ADD COLUMN vessel_type_pref TEXT DEFAULT ''"); } catch {}
+    try { db.exec("ALTER TABLE buyer_searches ADD COLUMN flybridge_pref TEXT DEFAULT ''"); } catch {}
+    try { db.exec("ALTER TABLE buyer_searches ADD COLUMN stabilizers_pref TEXT DEFAULT ''"); } catch {}
+    try { db.exec("ALTER TABLE buyer_searches ADD COLUMN condition_pref TEXT DEFAULT ''"); } catch {}
+    try { db.exec("ALTER TABLE buyer_searches ADD COLUMN min_cabins TEXT DEFAULT ''"); } catch {}
+    try { db.exec("ALTER TABLE buyer_searches ADD COLUMN engine_type_pref TEXT DEFAULT ''"); } catch {}
+    try { db.exec("ALTER TABLE buyer_searches ADD COLUMN hull_material_pref TEXT DEFAULT ''"); } catch {}
   } finally { db.close(); }
 }
 
@@ -337,6 +346,53 @@ function extractSpecsFromNotes(notes: string): { make?: string; length?: number;
   return result;
 }
 
+// ── Feature extraction from listing text ─────────────────────────────────────
+// Mines both the features field and raw_text for physical attributes.
+// Returns presence/absence — null means "not mentioned" (neutral).
+function extractListingFeatures(listing: ParsedListing): {
+  hasFlybridge: boolean | null;
+  hasStabilizers: boolean | null;
+  engineType: "diesel" | "gas" | "hybrid" | null;
+  cabins: number | null;
+  hullMaterial: "fiberglass" | "aluminum" | "steel" | "composite" | null;
+  condition: "new" | "excellent" | "good" | "fair" | null;
+} {
+  const text = [(listing.features || ""), (listing.raw_text || ""), (listing.broker_notes || "")]
+    .join(" ").toLowerCase();
+
+  const hasFlybridge =
+    /flybridge|fly\s*bridge|fly\s*deck/.test(text) ? true :
+    /no flybridge|without flybridge|express(?!\s+flybridge)/.test(text) ? false : null;
+
+  const hasStabilizers =
+    /stabiliz|gyrostabiliz|seakeeper|active fins|fin stabiliz|zero[\s-]speed stabiliz/.test(text) ? true :
+    /no stabiliz|without stabiliz/.test(text) ? false : null;
+
+  const engineTypeMatch =
+    /\bhybrid\b/.test(text) ? "hybrid" as const :
+    /\bdiesel\b|mtu\b|man\b engines|caterpillar|volvo\s*penta\s*diesel|cummins/.test(text) ? "diesel" as const :
+    /\bgas(?:oline)?\b|petrol|mercruiser|gasoline engines/.test(text) ? "gas" as const : null;
+
+  let cabins: number | null = null;
+  const cabinMatch = text.match(/(\d)\s*(?:cabin|stateroom|guest room|berth)/);
+  if (cabinMatch) cabins = parseInt(cabinMatch[1]);
+
+  const hullMaterial =
+    /\baluminum\b|\baluminium\b/.test(text) ? "aluminum" as const :
+    /\bsteel\b\s*hull|steel\s*hull/.test(text) ? "steel" as const :
+    /\bcomposite\b/.test(text) ? "composite" as const :
+    /\bfiber\s*glass\b|\bfiberglass\b|\bGRP\b/.test(text) ? "fiberglass" as const : null;
+
+  // Condition rough mapping (new/excellent/good from listing text)
+  const condition =
+    /\bnew\b|\bbrand[\s-]new\b|\bnew build\b/.test(text) ? "new" as const :
+    /\bexcellent\b|\bpristine\b|\bimmaculate\b/.test(text) ? "excellent" as const :
+    /\bgood condition\b|\bwell[\s-]maintained\b|\bgood order\b/.test(text) ? "good" as const :
+    /\bfair condition\b|\bneeds work\b|\bproject\b/.test(text) ? "fair" as const : null;
+
+  return { hasFlybridge, hasStabilizers, engineType: engineTypeMatch, cabins, hullMaterial, condition };
+}
+
 // ── Vessel type matching ──────────────────────────────────────────────────────
 function vesselTypeScore(lType: string, notes: string): { pts: number; reason: string | null } {
   const lt = (lType || "").toLowerCase();
@@ -377,6 +433,14 @@ export function scoreListingVsBuyer(
     lead_city?: string; lead_state?: string;
     has_email?: boolean; has_phone?: boolean;
     lead_status?: string;
+    // ── Extended ISO criteria (Phase 2) ───────────────────────────────────────
+    vessel_type_pref?: string;   // motor_yacht | sailing | explorer | sport | catamaran | mega | any
+    flybridge_pref?: string;     // yes | no | any
+    stabilizers_pref?: string;   // yes | no | any
+    condition_pref?: string;     // new | excellent | good | any
+    min_cabins?: string;         // "4" etc
+    engine_type_pref?: string;   // diesel | gas | hybrid | any
+    hull_material_pref?: string; // fiberglass | aluminum | steel | composite | any
   }
 ): MatchResult {
   let score = 0;
@@ -510,7 +574,92 @@ export function scoreListingVsBuyer(
   score += qualPts;
   if (qualPts >= 2) reasons.push("Verified contact info");
 
-  // Confidence bucket — adjusted for new 100-pt scale
+  // ── 9. EXTENDED CRITERIA (up to 17 additional pts) ─────────────────────────
+  // Mine the listing for physical attributes
+  const lf = extractListingFeatures(listing);
+
+  // ── 9a. Vessel type explicit pref (5 pts — bonus on top of notes-based type) ─
+  const vtPref = (buyer.vessel_type_pref || "").toLowerCase().trim();
+  if (vtPref && vtPref !== "any") {
+    const typeKeywords: Record<string, string[]> = {
+      motor_yacht:  ["motor", "motor_yacht", "motoryacht", "flybridge", "pilothouse"],
+      sailing:      ["sail", "sailing", "sloop", "ketch", "yawl"],
+      explorer:     ["explorer", "expedition", "trawler"],
+      sport:        ["sport", "sportfish", "fishing"],
+      catamaran:    ["catamaran", "cat", "multihull"],
+      mega:         ["superyacht", "mega"],
+    };
+    const lType = (listing.vessel_type || "").toLowerCase();
+    for (const [key, terms] of Object.entries(typeKeywords)) {
+      if (vtPref.includes(key.replace("_"," ")) || terms.some(t => vtPref.includes(t))) {
+        if (terms.some(t => lType.includes(t))) {
+          score += 5; positiveHits++; reasons.push(`Vessel type match: ${vtPref}`);
+        } else if (lType) {
+          conflicts.push(`Type mismatch: want ${vtPref}, listing is ${lType}`);
+        }
+        break;
+      }
+    }
+  }
+
+  // ── 9b. Flybridge preference (4 pts) ────────────────────────────────────────
+  const fbPref = (buyer.flybridge_pref || "").toLowerCase().trim();
+  if (fbPref && fbPref !== "any" && lf.hasFlybridge !== null) {
+    positiveHits++;
+    if (fbPref === "yes" && lf.hasFlybridge) {
+      score += 4; reasons.push("Flybridge match");
+    } else if (fbPref === "no" && !lf.hasFlybridge) {
+      score += 4; reasons.push("Express layout match");
+    } else {
+      conflicts.push(`Flybridge: buyer wants ${fbPref}, listing has ${lf.hasFlybridge ? "flybridge" : "no flybridge"}`);
+    }
+  }
+
+  // ── 9c. Stabilizers preference (4 pts) ──────────────────────────────────────
+  const stabPref = (buyer.stabilizers_pref || "").toLowerCase().trim();
+  if (stabPref === "yes" && lf.hasStabilizers !== null) {
+    positiveHits++;
+    if (lf.hasStabilizers) {
+      score += 4; reasons.push("Stabilizers match");
+    } else {
+      conflicts.push("Buyer wants stabilizers — not mentioned in listing");
+    }
+  }
+
+  // ── 9d. Min cabins (3 pts) ──────────────────────────────────────────────────
+  const minCabins = parseInt(buyer.min_cabins || "0");
+  if (minCabins > 0 && lf.cabins !== null) {
+    positiveHits++;
+    if (lf.cabins >= minCabins) {
+      score += 3; reasons.push(`${lf.cabins} cabins meets ${minCabins}+ requirement`);
+    } else {
+      conflicts.push(`${lf.cabins} cabins below ${minCabins} minimum`);
+    }
+  }
+
+  // ── 9e. Engine type preference (3 pts) ──────────────────────────────────────
+  const engPref = (buyer.engine_type_pref || "").toLowerCase().trim();
+  if (engPref && engPref !== "any" && lf.engineType !== null) {
+    positiveHits++;
+    if (lf.engineType === engPref) {
+      score += 3; reasons.push(`${engPref} engines match`);
+    } else {
+      conflicts.push(`Engine: want ${engPref}, listing has ${lf.engineType}`);
+    }
+  }
+
+  // ── 9f. Hull material preference (2 pts) ────────────────────────────────────
+  const hullPref = (buyer.hull_material_pref || "").toLowerCase().trim();
+  if (hullPref && hullPref !== "any" && lf.hullMaterial !== null) {
+    positiveHits++;
+    if (lf.hullMaterial === hullPref) {
+      score += 2; reasons.push(`${hullPref} hull match`);
+    } else {
+      conflicts.push(`Hull: want ${hullPref}, listing is ${lf.hullMaterial}`);
+    }
+  }
+
+  // Confidence bucket — adjusted for new max ~117 pts
   const confidence = score >= 70 ? "high" : score >= 45 ? "medium" : "low";
 
   return { score, confidence, reasons, conflicts, positiveHits };
@@ -602,10 +751,18 @@ export function runMatchesForBatch(batchId: number): number {
           year_min: iso.year_min, year_max: iso.year_max,
           make: iso.make, model: iso.model,
           preferred_location: iso.preferred_location,
-          notes: iso.notes || iso.preferences || "",
+          notes: iso.notes || iso.preferences || iso.description || "",
           has_email: !!(iso.buyer_email?.trim()),
           has_phone: !!(iso.buyer_phone?.trim()),
-          lead_status: "active", // ISOs are always active
+          lead_status: "active",
+          // ── Extended Phase 2 criteria ─────────────────────────────────────
+          vessel_type_pref:   iso.vessel_type_pref   || "",
+          flybridge_pref:     iso.flybridge_pref     || "",
+          stabilizers_pref:   iso.stabilizers_pref   || "",
+          condition_pref:     iso.condition_pref     || "",
+          min_cabins:         iso.min_cabins         || "",
+          engine_type_pref:   iso.engine_type_pref   || "",
+          hull_material_pref: iso.hull_material_pref || "",
         });
 
         if (result.score >= THRESHOLD) {

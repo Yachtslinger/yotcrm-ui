@@ -91,6 +91,14 @@ export function initMarketTables() {
         UNIQUE(owner_id, iso_id)
       );
     `);
+    // ── Safe column migrations for buyer_searches extended criteria ────────
+    try { db.exec("ALTER TABLE buyer_searches ADD COLUMN vessel_type_pref TEXT DEFAULT ''"); } catch {}
+    try { db.exec("ALTER TABLE buyer_searches ADD COLUMN flybridge_pref TEXT DEFAULT ''"); } catch {}
+    try { db.exec("ALTER TABLE buyer_searches ADD COLUMN stabilizers_pref TEXT DEFAULT ''"); } catch {}
+    try { db.exec("ALTER TABLE buyer_searches ADD COLUMN condition_pref TEXT DEFAULT ''"); } catch {}
+    try { db.exec("ALTER TABLE buyer_searches ADD COLUMN min_cabins TEXT DEFAULT ''"); } catch {}
+    try { db.exec("ALTER TABLE buyer_searches ADD COLUMN engine_type_pref TEXT DEFAULT ''"); } catch {}
+    try { db.exec("ALTER TABLE buyer_searches ADD COLUMN hull_material_pref TEXT DEFAULT ''"); } catch {}
   } finally {
     db.close();
   }
@@ -111,6 +119,14 @@ export type BuyerSearch = {
   length_min: string; length_max: string; budget_min: string; budget_max: string;
   preferred_location: string; description: string; status: string; notes: string;
   lead_id: number | null; created_at: string; updated_at: string;
+  // ── Extended criteria (Phase 2) ────────────────────────────────────────────
+  vessel_type_pref: string;   // motor_yacht | sailing | explorer | sport | catamaran | mega | any
+  flybridge_pref: string;     // yes | no | any
+  stabilizers_pref: string;   // yes | no | any
+  condition_pref: string;     // new | excellent | good | any
+  min_cabins: string;         // numeric string e.g. "4"
+  engine_type_pref: string;   // diesel | gas | hybrid | any
+  hull_material_pref: string; // fiberglass | aluminum | steel | composite | any
 };
 
 export type VesselOwner = {
@@ -201,14 +217,20 @@ export function createBuyerSearch(input: Partial<BuyerSearch>): BuyerSearch {
     initMarketTables();
     const now = new Date().toISOString();
     const result = db.prepare(
-      `INSERT INTO buyer_searches (buyer_name, buyer_email, buyer_phone, make, model, year_min, year_max, length_min, length_max, budget_min, budget_max, preferred_location, description, status, notes, lead_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO buyer_searches (buyer_name, buyer_email, buyer_phone, make, model, year_min, year_max,
+        length_min, length_max, budget_min, budget_max, preferred_location, description, status, notes,
+        lead_id, vessel_type_pref, flybridge_pref, stabilizers_pref, condition_pref,
+        min_cabins, engine_type_pref, hull_material_pref, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       input.buyer_name||"", input.buyer_email||"", input.buyer_phone||"",
       input.make||"", input.model||"", input.year_min||"", input.year_max||"",
       input.length_min||"", input.length_max||"", input.budget_min||"", input.budget_max||"",
       input.preferred_location||"", input.description||"",
-      input.status||"active", input.notes||"", input.lead_id||null, now, now
+      input.status||"active", input.notes||"", input.lead_id||null,
+      input.vessel_type_pref||"", input.flybridge_pref||"", input.stabilizers_pref||"",
+      input.condition_pref||"", input.min_cabins||"", input.engine_type_pref||"",
+      input.hull_material_pref||"", now, now
     );
     return db.prepare("SELECT * FROM buyer_searches WHERE id = ?").get(result.lastInsertRowid) as BuyerSearch;
   } finally { db.close(); }
@@ -219,7 +241,10 @@ export function updateBuyerSearch(id: number, updates: Partial<BuyerSearch>): Bu
   try {
     const fields: string[] = [];
     const values: any[] = [];
-    const allowed = ["buyer_name","buyer_email","buyer_phone","make","model","year_min","year_max","length_min","length_max","budget_min","budget_max","preferred_location","description","status","notes","lead_id"];
+    const allowed = ["buyer_name","buyer_email","buyer_phone","make","model","year_min","year_max",
+      "length_min","length_max","budget_min","budget_max","preferred_location","description","status",
+      "notes","lead_id","vessel_type_pref","flybridge_pref","stabilizers_pref","condition_pref",
+      "min_cabins","engine_type_pref","hull_material_pref"];
     for (const f of allowed) {
       if (f in updates && (updates as any)[f] !== undefined) {
         fields.push(`${f} = ?`);

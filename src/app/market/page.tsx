@@ -477,8 +477,17 @@ function PocketForm({ onClose, onSuccess }: { onClose: () => void; onSuccess: ()
 function IsoForm({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [f, setF] = useState({ buyer_name: "", buyer_email: "", buyer_phone: "", make: "", model: "", year_min: "", year_max: "", length_min: "", length_max: "", budget_min: "", budget_max: "", description: "", notes: "" });
-  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
+  const [f, setF] = useState({
+    buyer_name: "", buyer_email: "", buyer_phone: "",
+    make: "", model: "", year_min: "", year_max: "",
+    length_min: "", length_max: "", budget_min: "", budget_max: "",
+    preferred_location: "", description: "", notes: "",
+    // Extended criteria
+    vessel_type_pref: "", flybridge_pref: "", stabilizers_pref: "",
+    condition_pref: "", min_cabins: "", engine_type_pref: "", hull_material_pref: "",
+  });
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+    setF({ ...f, [k]: e.target.value });
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!f.buyer_name && !f.make && !f.description) { setError("Add buyer or vessel details"); return; }
@@ -493,29 +502,103 @@ function IsoForm({ onClose, onSuccess }: { onClose: () => void; onSuccess: () =>
     <ModalShell title="Add Buyer Search (ISO)" onClose={onClose}>
       <form onSubmit={handleSubmit} className="modal-body space-y-3">
         {error && <p className="text-sm text-[var(--coral-500)] bg-[var(--coral-500)]/8 px-3 py-2 rounded-xl">{error}</p>}
+
+        <div className="form-section-title">Buyer Info</div>
         <div className="grid grid-cols-3 gap-3">
           <div><label className={labelClass}>Buyer Name</label><input value={f.buyer_name} onChange={set("buyer_name")} className={inputClass} placeholder="John Smith" /></div>
           <div><label className={labelClass}>Email</label><input value={f.buyer_email} onChange={set("buyer_email")} className={inputClass} placeholder="john@email.com" /></div>
           <div><label className={labelClass}>Phone</label><input value={f.buyer_phone} onChange={set("buyer_phone")} className={inputClass} placeholder="+1 555-1234" /></div>
         </div>
+
+        <div className="form-section-title">Vessel Requirements</div>
         <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelClass}>Make</label><input value={f.make} onChange={set("make")} className={inputClass} placeholder="Sunseeker" /></div>
-          <div><label className={labelClass}>Model</label><input value={f.model} onChange={set("model")} className={inputClass} placeholder="Predator" /></div>
+          <div><label className={labelClass}>Make / Builder</label><input value={f.make} onChange={set("make")} className={inputClass} placeholder="Sunseeker, Azimut…" /></div>
+          <div><label className={labelClass}>Model</label><input value={f.model} onChange={set("model")} className={inputClass} placeholder="Predator 74" /></div>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelClass}>Year (min)</label><input value={f.year_min} onChange={set("year_min")} className={inputClass} placeholder="2018" /></div>
-          <div><label className={labelClass}>Year (max)</label><input value={f.year_max} onChange={set("year_max")} className={inputClass} placeholder="2025" /></div>
+          <div><label className={labelClass}>Year Min</label><input value={f.year_min} onChange={set("year_min")} className={inputClass} placeholder="2018" type="number" /></div>
+          <div><label className={labelClass}>Year Max</label><input value={f.year_max} onChange={set("year_max")} className={inputClass} placeholder="2025" type="number" /></div>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelClass}>Length (min)</label><input value={f.length_min} onChange={set("length_min")} className={inputClass} placeholder="60'" /></div>
-          <div><label className={labelClass}>Length (max)</label><input value={f.length_max} onChange={set("length_max")} className={inputClass} placeholder="90'" /></div>
+          <div><label className={labelClass}>Length Min (ft)</label><input value={f.length_min} onChange={set("length_min")} className={inputClass} placeholder="60" type="number" /></div>
+          <div><label className={labelClass}>Length Max (ft)</label><input value={f.length_max} onChange={set("length_max")} className={inputClass} placeholder="90" type="number" /></div>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelClass}>Budget (min)</label><input value={f.budget_min} onChange={set("budget_min")} className={inputClass} placeholder="$1,000,000" /></div>
-          <div><label className={labelClass}>Budget (max)</label><input value={f.budget_max} onChange={set("budget_max")} className={inputClass} placeholder="$3,000,000" /></div>
+          <div><label className={labelClass}>Budget Min ($)</label><input value={f.budget_min} onChange={set("budget_min")} className={inputClass} placeholder="1000000" type="number" /></div>
+          <div><label className={labelClass}>Budget Max ($)</label><input value={f.budget_max} onChange={set("budget_max")} className={inputClass} placeholder="3000000" type="number" /></div>
         </div>
-        <div><label className={labelClass}>Preferences / Requirements</label><textarea value={f.description} onChange={set("description")} className={`${inputClass} min-h-[60px]`} placeholder="Location, features, must-haves…" /></div>
-        <div><label className={labelClass}>Notes</label><textarea value={f.notes} onChange={set("notes")} className={`${inputClass} min-h-[40px]`} /></div>
+        <div><label className={labelClass}>Preferred Location</label><input value={f.preferred_location} onChange={set("preferred_location")} className={inputClass} placeholder="Florida, Mediterranean…" /></div>
+
+        <div className="form-section-title">Detailed Preferences</div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelClass}>Vessel Type</label>
+            <select value={f.vessel_type_pref} onChange={set("vessel_type_pref")} className={inputClass}>
+              <option value="">Any type</option>
+              <option value="motor_yacht">Motor Yacht</option>
+              <option value="sailing">Sailing / Sail Yacht</option>
+              <option value="explorer">Explorer / Expedition</option>
+              <option value="sport">Sport / Sportfish</option>
+              <option value="catamaran">Catamaran</option>
+              <option value="mega">Superyacht / Mega</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelClass}>Flybridge</label>
+            <select value={f.flybridge_pref} onChange={set("flybridge_pref")} className={inputClass}>
+              <option value="">No preference</option>
+              <option value="yes">Must have flybridge</option>
+              <option value="no">No flybridge (express)</option>
+            </select>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelClass}>Stabilizers</label>
+            <select value={f.stabilizers_pref} onChange={set("stabilizers_pref")} className={inputClass}>
+              <option value="">No preference</option>
+              <option value="yes">Must have stabilizers</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelClass}>Condition</label>
+            <select value={f.condition_pref} onChange={set("condition_pref")} className={inputClass}>
+              <option value="">Any condition</option>
+              <option value="new">New / Brand new</option>
+              <option value="excellent">Excellent / Pristine</option>
+              <option value="good">Good / Well maintained</option>
+            </select>
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <label className={labelClass}>Min Cabins</label>
+            <input value={f.min_cabins} onChange={set("min_cabins")} className={inputClass} placeholder="3" type="number" min="1" max="12" />
+          </div>
+          <div>
+            <label className={labelClass}>Engine Type</label>
+            <select value={f.engine_type_pref} onChange={set("engine_type_pref")} className={inputClass}>
+              <option value="">Any</option>
+              <option value="diesel">Diesel</option>
+              <option value="gas">Gas / Petrol</option>
+              <option value="hybrid">Hybrid</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelClass}>Hull Material</label>
+            <select value={f.hull_material_pref} onChange={set("hull_material_pref")} className={inputClass}>
+              <option value="">Any</option>
+              <option value="fiberglass">Fiberglass / GRP</option>
+              <option value="aluminum">Aluminum</option>
+              <option value="steel">Steel</option>
+              <option value="composite">Composite</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="form-section-title">Notes</div>
+        <div><label className={labelClass}>Additional Requirements / Preferences</label><textarea value={f.description} onChange={set("description")} className={`${inputClass} min-h-[60px]`} placeholder="Any other must-haves, nice-to-haves, or context…" /></div>
+        <div><label className={labelClass}>Internal Notes</label><textarea value={f.notes} onChange={set("notes")} className={`${inputClass} min-h-[40px]`} /></div>
         <FormButtons onClose={onClose} saving={saving} label="Add Search" />
       </form>
     </ModalShell>
