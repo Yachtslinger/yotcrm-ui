@@ -10,48 +10,37 @@ export type MatchEmailTone = "search" | "mls" | "new-listing" | "price-drop";
 
 export interface MatchEmailData {
   // Vessel
-  year:         number | string;
-  make:         string;
-  model:        string;
-  loa?:         string;       // "34m / 111ft"
-  price?:       string;       // "$4,250,000"
-  location?:    string;       // "Fort Lauderdale, FL"
-  listingUrl?:  string;       // direct link if available (BoatWizard/Denison/YW)
+  year:          number | string;
+  make:          string;
+  model:         string;
+  vesselName?:   string;       // optional display name, e.g. "M/Y Serenity"
+  loa?:          string;       // "34m / 111ft"
+  price?:        string;       // "$4,250,000"
+  location?:     string;       // "Fort Lauderdale, FL"
+  listingUrl?:   string;       // direct listing link
+  brochureUrl?:  string;       // optional PDF brochure link
   heroImageUrl?: string;
-  features?:    string;       // raw features text from parsed listing
-  brokerNotes?: string;       // notes from listing broker
-  brokerage?:   string;       // listing brokerage name
-  vesselType?:  string;
+  features?:     string;       // raw features text from parsed listing
+  brokerNotes?:  string;
+  brokerage?:    string;
+  vesselType?:   string;
+
+  // Match reasons — AI-generated bullets tied to buyer preferences
+  matchReasons?: string[];     // ["Reason 1", "Reason 2", "Reason 3"]
 
   // Client
   clientFirstName: string;
 
   // Broker
-  brokerName:  string;
-  brokerFull:  string;
-  brokerTitle: string;
-  brokerEmail: string;
-  brokerPhone: string;
+  brokerName:    string;
+  brokerFull:    string;
+  brokerTitle:   string;
+  brokerEmail:   string;
+  brokerPhone:   string;
   brokerCompany: string;
 
   // Optional personal note the broker writes before sending
   personalNote?: string;
-}
-
-// ── URL builders ──────────────────────────────────────────────────────────────
-
-function denisonSearchUrl(make: string): string {
-  const slug = make.toLowerCase().trim().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
-  return slug
-    ? `https://www.denisonyachtsales.com/used-${slug}-yachts-for-sale/`
-    : `https://www.denisonyachtsales.com/yachts-for-sale/`;
-}
-
-function yachtWorldSearchUrl(make: string, year: number | string): string {
-  const m = encodeURIComponent(make || "");
-  const y = year ? parseInt(String(year), 10) - 2 : "";
-  const params = [m ? `make=${m}` : "", y ? `year_built_min=${y}` : ""].filter(Boolean).join("&");
-  return `https://www.yachtworld.com/boats-for-sale/${params ? "?" + params : ""}`;
 }
 
 // ── Subject lines ─────────────────────────────────────────────────────────────
@@ -59,27 +48,34 @@ function yachtWorldSearchUrl(make: string, year: number | string): string {
 export function buildSubjectLine(data: MatchEmailData, tone: MatchEmailTone): string {
   const vessel = `${data.year} ${data.make} ${data.model}`.trim();
   switch (tone) {
+    case "new-listing": return "A new listing that may fit what you've been looking for";
+    case "price-drop":  return `Price reduced — ${vessel}${data.price ? `, now ${data.price}` : ""}`;
     case "search":      return `Found something worth your time — ${vessel}`;
     case "mls":         return `This one caught my eye — ${vessel}`;
-    case "new-listing": return `Just listed: ${vessel}${data.location ? ` · ${data.location}` : ""}`;
-    case "price-drop":  return `Price reduced — ${vessel}${data.price ? `, now ${data.price}` : ""}`;
   }
 }
 
 // ── Opening paragraphs ────────────────────────────────────────────────────────
 
 function openingParagraph(data: MatchEmailData, tone: MatchEmailTone): string {
-  const vessel = `${data.year} ${data.make} ${data.model}`.trim();
   switch (tone) {
-    case "search":
-      return `I was running a search with your criteria in mind and this ${vessel} stopped me. It checks a lot of the boxes we've talked about${data.location ? ` and it's sitting in ${data.location}` : ""}, so I wanted to get it in front of you before you see it somewhere else.`;
-    case "mls":
-      return `I was combing through the MLS and this ${vessel} genuinely caught my eye. It doesn't make a lot of noise — but the specs and the price point make it worth a serious look. I thought of you immediately.`;
     case "new-listing":
-      return `This ${vessel} just came to market and I wanted you to be one of the first to see it. Based on what you've told me, I think it warrants a conversation.`;
+    case "search":
+      return `A boat just hit the market that I thought was worth putting in front of you based on what you've been looking for.`;
+    case "mls":
+      return `I was combing through the MLS and this one genuinely caught my eye. I thought of you immediately.`;
     case "price-drop":
-      return `The ${vessel} we've been watching had a meaningful price adjustment${data.price ? ` — now listed at ${data.price}` : ""}. That changes the story a bit and I think it's worth revisiting.`;
+      return `The ${data.year} ${data.make} ${data.model} we've been watching had a meaningful price adjustment${data.price ? ` — now listed at ${data.price}` : ""}. That changes the story and I think it's worth revisiting.`;
   }
+}
+
+// ── Vessel descriptor line ────────────────────────────────────────────────────
+
+function vesselLine(data: MatchEmailData): string {
+  const name   = data.vesselName ? `<em>${data.vesselName}</em> is a` : "She's a";
+  const price  = data.price    ? ` currently asking ${data.price}` : "";
+  const loc    = data.location ? ` and located in ${data.location}` : "";
+  return `${name} ${data.year} ${data.make} ${data.model}${price}${loc}.`;
 }
 
 // ── Feature bullets (clean up raw features text) ─────────────────────────────
@@ -96,104 +92,45 @@ function parseFeatures(raw: string): string[] {
 // ── HTML email ────────────────────────────────────────────────────────────────
 
 export function buildMatchEmail(data: MatchEmailData, tone: MatchEmailTone): string {
-  const vessel   = `${data.year} ${data.make} ${data.model}`.trim();
   const subject  = buildSubjectLine(data, tone);
   const opening  = openingParagraph(data, tone);
-  const features = parseFeatures(data.features || "");
+  const descLine = vesselLine(data);
 
-  const denisonUrl  = denisonSearchUrl(data.make);
-  const ywUrl       = yachtWorldSearchUrl(data.make, data.year);
-  const directUrl   = data.listingUrl || "";
+  // Reasons bullets (AI-generated or fallback to parsed features)
+  const reasons: string[] = data.matchReasons?.length
+    ? data.matchReasons.slice(0, 3)
+    : parseFeatures(data.features || "").slice(0, 3);
 
-  // Hero image (linked if we have a direct URL)
-  const heroBlock = data.heroImageUrl ? `
-    <a href="${directUrl || denisonUrl}" style="display:block;text-decoration:none;margin-bottom:24px">
-      <img src="${data.heroImageUrl}" alt="${vessel}"
-           style="width:100%;max-height:320px;object-fit:cover;border-radius:6px;display:block">
-    </a>` : "";
+  const reasonsHtml = reasons.length ? `
+    <p style="font-size:15px;line-height:1.7;color:#222;margin:0 0 8px">A few reasons it stood out to me:</p>
+    <ul style="margin:0 0 24px;padding:0 0 0 20px">
+      ${reasons.map(r => `<li style="font-size:15px;color:#333;line-height:1.7;margin-bottom:6px">${r}</li>`).join("")}
+    </ul>` : "";
 
-  // Specs strip
-  const specs = [
-    data.loa      && `LOA: ${data.loa}`,
-    data.price    && `${data.price}`,
-    data.location && `📍 ${data.location}`,
-    data.brokerage && `Listed by ${data.brokerage}`,
-  ].filter(Boolean);
+  // Listing link
+  const listingHtml = data.listingUrl ? `
+    <p style="font-size:15px;line-height:1.7;color:#222;margin:0 0 16px">
+      You can take a look here:<br>
+      <a href="${data.listingUrl}" style="color:#b8933a;font-weight:500;text-decoration:none">${data.listingUrl}</a>
+    </p>` : "";
 
-  const specsHtml = specs.length ? `
-    <div style="background:#f5f5f5;border-radius:6px;padding:12px 16px;margin-bottom:20px">
-      ${specs.map(s => `<span style="display:inline-block;font-size:13px;color:#444;margin-right:20px;margin-bottom:4px">${s}</span>`).join("")}
-    </div>` : "";
-
-  // Features
-  const featuresHtml = features.length ? `
-    <div style="margin-bottom:20px">
-      <div style="font-size:11px;font-weight:600;letter-spacing:.08em;color:#b8933a;text-transform:uppercase;margin-bottom:8px">Key features</div>
-      <ul style="margin:0;padding:0 0 0 18px">
-        ${features.map(f => `<li style="font-size:14px;color:#333;line-height:1.7;margin-bottom:2px">${f}</li>`).join("")}
-      </ul>
-    </div>` : "";
+  // Optional brochure line
+  const brochureHtml = data.brochureUrl ? `
+    <p style="font-size:15px;line-height:1.7;color:#222;margin:0 0 24px">
+      I also have the brochure here if you'd like a deeper look:
+      <a href="${data.brochureUrl}" style="color:#b8933a;font-weight:500;text-decoration:none">${data.brochureUrl}</a>
+    </p>` : `<div style="margin-bottom:24px"></div>`;
 
   // Personal note
   const noteHtml = data.personalNote ? `
-    <p style="font-size:15px;line-height:1.7;color:#222;margin:0 0 20px;padding:14px 16px;background:#fafaf7;border-left:3px solid #b8933a;border-radius:0 4px 4px 0">${data.personalNote}</p>
-    ` : "";
+    <p style="font-size:15px;line-height:1.7;color:#222;margin:0 0 20px;padding:14px 16px;background:#fafaf7;border-left:3px solid #b8933a;border-radius:0 4px 4px 0">${data.personalNote}</p>` : "";
 
-  // Next steps block
-  const nextStepsHtml = `
-    <div style="background:#f8f8f8;border-radius:8px;padding:20px 24px;margin-bottom:24px">
-      <div style="font-size:13px;font-weight:600;color:#050d1a;margin-bottom:12px">A few ways I can help from here:</div>
-      <table cellpadding="0" cellspacing="0" width="100%">
-        <tr>
-          <td style="padding:7px 0;font-size:14px;color:#333;line-height:1.5">
-            <span style="color:#b8933a;font-weight:700;margin-right:8px">→</span>
-            <strong>Schedule a call</strong> — I can walk you through everything I know about this one and answer any questions
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:7px 0;font-size:14px;color:#333;line-height:1.5">
-            <span style="color:#b8933a;font-weight:700;margin-right:8px">→</span>
-            <strong>Get videos or a virtual tour</strong> — I can reach out to the listing broker and request footage or set up a live walkthrough
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:7px 0;font-size:14px;color:#333;line-height:1.5">
-            <span style="color:#b8933a;font-weight:700;margin-right:8px">→</span>
-            <strong>Arrange a showing</strong> — if you want to get eyes on her in person, let's set it up
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:7px 0;font-size:14px;color:#333;line-height:1.5">
-            <span style="color:#b8933a;font-weight:700;margin-right:8px">→</span>
-            <strong>Dig deeper</strong> — I can pull survey history, request full specs, or reach out to the broker for anything specific
-          </td>
-        </tr>
-      </table>
-      <p style="font-size:13px;color:#777;margin:12px 0 0">Just reply and let me know what you'd like to do — no pressure at all.</p>
-    </div>`;
-
-  // Links block
-  const linksHtml = `
-    <div style="margin-bottom:28px">
-      <div style="font-size:11px;font-weight:600;letter-spacing:.08em;color:#b8933a;text-transform:uppercase;margin-bottom:10px">Find the listing</div>
-      <table cellpadding="0" cellspacing="0">
-        ${directUrl ? `<tr><td style="padding:4px 0">
-          <a href="${directUrl}" style="font-size:14px;color:#050d1a;text-decoration:none;font-weight:500">
-            🔗 View listing directly →
-          </a>
-        </td></tr>` : ""}
-        <tr><td style="padding:4px 0">
-          <a href="${denisonUrl}" style="font-size:14px;color:#1a2b4a;text-decoration:none">
-            🏢 Search <strong>${data.make}</strong> on Denison Yachting →
-          </a>
-        </td></tr>
-        <tr><td style="padding:4px 0">
-          <a href="${ywUrl}" style="font-size:14px;color:#666;text-decoration:none">
-            ⚓ Search ${data.make} on YachtWorld →
-          </a>
-        </td></tr>
-      </table>
-    </div>`;
+  // Hero image
+  const heroBlock = data.heroImageUrl ? `
+    <a href="${data.listingUrl || "#"}" style="display:block;text-decoration:none;margin-bottom:24px">
+      <img src="${data.heroImageUrl}" alt="${data.year} ${data.make} ${data.model}"
+           style="width:100%;max-height:300px;object-fit:cover;border-radius:6px;display:block">
+    </a>` : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -220,33 +157,24 @@ export function buildMatchEmail(data: MatchEmailData, tone: MatchEmailTone): str
 
       <p style="font-size:15px;line-height:1.7;color:#222;margin:0 0 18px">Hi ${data.clientFirstName},</p>
 
-      <p style="font-size:15px;line-height:1.7;color:#222;margin:0 0 24px">${opening}</p>
+      <p style="font-size:15px;line-height:1.7;color:#222;margin:0 0 20px">${opening}</p>
 
       ${heroBlock}
 
-      <div style="font-size:10px;font-weight:700;letter-spacing:.12em;color:#b8933a;text-transform:uppercase;margin-bottom:5px">${data.make} &middot; ${data.year}</div>
-      <div style="font-size:22px;font-weight:600;color:#050d1a;margin-bottom:14px">${data.model}</div>
+      <p style="font-size:15px;line-height:1.7;color:#222;margin:0 0 20px">${descLine}</p>
 
-      ${specsHtml}
-      ${featuresHtml}
+      ${reasonsHtml}
+      ${listingHtml}
+      ${brochureHtml}
       ${noteHtml}
-      ${nextStepsHtml}
-      ${linksHtml}
 
-      <p style="font-size:15px;color:#222;margin:0 0 32px">— ${data.brokerName}</p>
-    </td>
-  </tr>
+      <p style="font-size:15px;line-height:1.7;color:#222;margin:0 0 28px">If it catches your eye, I can give you my quick take on how it stacks up against the other boats in this part of the market and whether it is truly worth pursuing.</p>
 
-  <!-- Broker card -->
-  <tr>
-    <td style="background:#f8f8f8;border-top:1px solid #eee;padding:18px 32px">
-      <div style="font-size:13px;font-weight:600;color:#0a0a0a;margin-bottom:2px">${data.brokerFull}</div>
-      <div style="font-size:12px;color:#666;margin-bottom:7px">${data.brokerTitle}</div>
-      <div style="font-size:12px;color:#444">
-        <a href="mailto:${data.brokerEmail}" style="color:#b8933a;text-decoration:none">${data.brokerEmail}</a>
-        &nbsp;&middot;&nbsp;
-        <a href="tel:${data.brokerPhone.replace(/\D/g,"")}" style="color:#444;text-decoration:none">${data.brokerPhone}</a>
-      </div>
+      <p style="font-size:15px;color:#222;margin:0 0 32px">Best,<br>${data.brokerName}<br>
+        <span style="font-size:13px;color:#666">${data.brokerTitle}</span><br>
+        <span style="font-size:13px;color:#666">${data.brokerPhone}</span><br>
+        <a href="mailto:${data.brokerEmail}" style="font-size:13px;color:#b8933a;text-decoration:none">${data.brokerEmail}</a>
+      </p>
     </td>
   </tr>
 
@@ -254,7 +182,7 @@ export function buildMatchEmail(data: MatchEmailData, tone: MatchEmailTone): str
   <tr>
     <td style="padding:14px 32px;background:#050d1a">
       <p style="font-size:11px;color:#555;margin:0;line-height:1.6">
-        You are receiving this because ${data.brokerFull} has you on file as a client actively searching.
+        You are receiving this because ${data.brokerFull} has you on file as an active buyer.
         Reply "unsubscribe" at any time to stop receiving updates.
       </p>
     </td>
@@ -270,42 +198,35 @@ export function buildMatchEmail(data: MatchEmailData, tone: MatchEmailTone): str
 // ── Plain-text fallback ───────────────────────────────────────────────────────
 
 export function buildMatchEmailText(data: MatchEmailData, tone: MatchEmailTone): string {
-  const vessel    = `${data.year} ${data.make} ${data.model}`.trim();
-  const opening   = openingParagraph(data, tone);
-  const features  = parseFeatures(data.features || "");
-  const denisonUrl = denisonSearchUrl(data.make);
-  const ywUrl      = yachtWorldSearchUrl(data.make, data.year);
+  const opening  = openingParagraph(data, tone);
+  const descLine = vesselLine(data).replace(/<em>|<\/em>/g, "");
+
+  const reasons: string[] = data.matchReasons?.length
+    ? data.matchReasons.slice(0, 3)
+    : parseFeatures(data.features || "").slice(0, 3);
 
   return [
     `Hi ${data.clientFirstName},`,
     "",
     opening,
     "",
-    `${vessel}`,
-    data.price    ? `Price: ${data.price}`       : "",
-    data.loa      ? `Length: ${data.loa}`         : "",
-    data.location ? `Location: ${data.location}`  : "",
-    data.brokerage ? `Listed by: ${data.brokerage}` : "",
-    features.length ? `\nFeatures:\n${features.map(f => `  · ${f}`).join("\n")}` : "",
+    descLine,
     "",
+    reasons.length ? "A few reasons it stood out to me:" : "",
+    ...reasons.map(r => `• ${r}`),
+    reasons.length ? "" : "",
+    data.listingUrl ? `You can take a look here:\n${data.listingUrl}` : "",
+    data.listingUrl ? "" : "",
+    data.brochureUrl ? `I also have the brochure here if you'd like a deeper look:\n${data.brochureUrl}` : "",
+    data.brochureUrl ? "" : "",
     data.personalNote || "",
     data.personalNote ? "" : "",
-    "A few ways I can help from here:",
-    "→ Schedule a call — happy to walk you through everything I know about this one",
-    "→ Get videos or a virtual tour — I can reach out to the listing broker and request footage",
-    "→ Arrange a showing — if you want to get eyes on her in person, let's set it up",
-    "→ Dig deeper — survey history, full specs, anything specific — just ask",
+    "If it catches your eye, I can give you my quick take on how it stacks up against the other boats in this part of the market and whether it is truly worth pursuing.",
     "",
-    "Just reply and let me know what you'd like to do.",
-    "",
-    "Links:",
-    data.listingUrl ? `View listing: ${data.listingUrl}` : "(No direct listing link available)",
-    `Search ${data.make} on Denison: ${denisonUrl}`,
-    `Search ${data.make} on YachtWorld: ${ywUrl}`,
-    "",
-    `— ${data.brokerName}`,
-    "",
-    `${data.brokerFull}  ·  ${data.brokerTitle}`,
-    `${data.brokerEmail}  ·  ${data.brokerPhone}`,
-  ].filter(s => s !== null).join("\n");
+    `Best,`,
+    `${data.brokerName}`,
+    `${data.brokerTitle}`,
+    `${data.brokerPhone}`,
+    `${data.brokerEmail}`,
+  ].filter(s => s !== null && s !== undefined).join("\n");
 }

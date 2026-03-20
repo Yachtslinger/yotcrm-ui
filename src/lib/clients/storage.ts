@@ -8,51 +8,43 @@ function getDb() {
   const db = new Database(DB_PATH, { readonly: false });
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
-  // Ensure enrichment profile columns exist on leads table
-  const profileCols = [
-    ["occupation", "TEXT DEFAULT ''"],
-    ["employer", "TEXT DEFAULT ''"],
-    ["city", "TEXT DEFAULT ''"],
-    ["state", "TEXT DEFAULT ''"],
-    ["zip", "TEXT DEFAULT ''"],
-    ["linkedin_url", "TEXT DEFAULT ''"],
-    ["facebook_url", "TEXT DEFAULT ''"],
-    ["instagram_url", "TEXT DEFAULT ''"],
-    ["twitter_url", "TEXT DEFAULT ''"],
-    // Extended profile fields per intelligence spec
-    ["net_worth_range", "TEXT DEFAULT ''"],
-    ["net_worth_confidence", "TEXT DEFAULT ''"],
-    ["board_positions", "TEXT DEFAULT ''"],
-    ["yacht_clubs", "TEXT DEFAULT ''"],
-    ["nonprofit_roles", "TEXT DEFAULT ''"],
-    ["total_donations", "TEXT DEFAULT ''"],
-    ["property_summary", "TEXT DEFAULT ''"],
-    ["wikipedia_url", "TEXT DEFAULT ''"],
-    ["website_url", "TEXT DEFAULT ''"],
-    ["media_mentions", "INTEGER DEFAULT 0"],
-    // Deep background fields
-    ["estimated_net_worth", "TEXT DEFAULT ''"],
-    ["net_worth_breakdown", "TEXT DEFAULT ''"],
-    ["date_of_birth", "TEXT DEFAULT ''"],
-    ["age", "TEXT DEFAULT ''"],
-    ["spouse_name", "TEXT DEFAULT ''"],
-    ["spouse_employer", "TEXT DEFAULT ''"],
-    ["primary_address", "TEXT DEFAULT ''"],
-    ["secondary_addresses", "TEXT DEFAULT '[]'"],
-    ["identity_confidence", "INTEGER DEFAULT 0"],
-    ["identity_verifications", "TEXT DEFAULT '[]'"],
-    ["manual_corrections", "TEXT DEFAULT '[]'"],
-    ["court_records", "TEXT DEFAULT ''"],
-    ["professional_history", "TEXT DEFAULT ''"],
-    ["relatives", "TEXT DEFAULT ''"],
-    ["additional_properties", "TEXT DEFAULT ''"],
-    ["reverify_status", "TEXT DEFAULT ''"],
-    ["broker_notes", "TEXT DEFAULT ''"],
-  ];
-  for (const [col, def] of profileCols) {
-    try { db.exec(`ALTER TABLE leads ADD COLUMN ${col} ${def}`); } catch { /* already exists */ }
-  }
   return db;
+}
+
+// ── One-time column migrations (run once per process lifetime, not per request) ─
+let _columnsReady = false;
+function ensureLeadColumns() {
+  if (_columnsReady) return;
+  const db = getDb();
+  try {
+    const cols = [
+      ["occupation","TEXT DEFAULT ''"], ["employer","TEXT DEFAULT ''"],
+      ["city","TEXT DEFAULT ''"], ["state","TEXT DEFAULT ''"], ["zip","TEXT DEFAULT ''"],
+      ["linkedin_url","TEXT DEFAULT ''"], ["facebook_url","TEXT DEFAULT ''"],
+      ["instagram_url","TEXT DEFAULT ''"], ["twitter_url","TEXT DEFAULT ''"],
+      ["net_worth_range","TEXT DEFAULT ''"], ["net_worth_confidence","TEXT DEFAULT ''"],
+      ["board_positions","TEXT DEFAULT ''"], ["yacht_clubs","TEXT DEFAULT ''"],
+      ["nonprofit_roles","TEXT DEFAULT ''"], ["total_donations","TEXT DEFAULT ''"],
+      ["property_summary","TEXT DEFAULT ''"], ["wikipedia_url","TEXT DEFAULT ''"],
+      ["website_url","TEXT DEFAULT ''"], ["media_mentions","INTEGER DEFAULT 0"],
+      ["estimated_net_worth","TEXT DEFAULT ''"], ["net_worth_breakdown","TEXT DEFAULT ''"],
+      ["date_of_birth","TEXT DEFAULT ''"], ["age","TEXT DEFAULT ''"],
+      ["spouse_name","TEXT DEFAULT ''"], ["spouse_employer","TEXT DEFAULT ''"],
+      ["primary_address","TEXT DEFAULT ''"], ["secondary_addresses","TEXT DEFAULT '[]'"],
+      ["identity_confidence","INTEGER DEFAULT 0"], ["identity_verifications","TEXT DEFAULT '[]'"],
+      ["manual_corrections","TEXT DEFAULT '[]'"], ["court_records","TEXT DEFAULT ''"],
+      ["professional_history","TEXT DEFAULT ''"], ["relatives","TEXT DEFAULT ''"],
+      ["additional_properties","TEXT DEFAULT ''"], ["reverify_status","TEXT DEFAULT ''"],
+      ["broker_notes","TEXT DEFAULT ''"],
+    ];
+    for (const [col, def] of cols) {
+      try { db.exec(`ALTER TABLE leads ADD COLUMN ${col} ${def}`); } catch {}
+    }
+    // Performance index — prevents full-table scan on ORDER BY updated_at DESC
+    try { db.exec("CREATE INDEX IF NOT EXISTS idx_leads_updated ON leads(updated_at DESC)"); } catch {}
+    try { db.exec("CREATE INDEX IF NOT EXISTS idx_todos_queue ON todos(assignee, queue, completed)"); } catch {}
+    _columnsReady = true;
+  } finally { db.close(); }
 }
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -144,9 +136,141 @@ function normalizeTags(tags: string | string[] | undefined): string[] {
   return tags.split(";").map((t) => t.trim()).filter((t) => t.length > 0);
 }
 
+// ─── Paginated Read (Phase 0 performance fix) ───────────────────────────────
+
+export type LeadFilters = {
+  page?: number; pageSize?: number;
+  search?: string; status?: string; source?: string;
+  intelFilter?: string; boatFilter?: string; sortBy?: string;
+};
+
+export async function readContactsPaginated(opts: LeadFilters = {}): Promise<{
+  contacts: ContactFlat[]; total: number; counts: Record<string, number>;
+}> {
+  ensureLeadColumns();
+  try { initIntelTables(); } catch {}
+  const db = getDb();
+  try {
+    const { page=1, pageSize=100, search="", status="all", source="all",
+            intelFilter="all", boatFilter="", sortBy="newest" } = opts;
+    const offset = (Math.max(1, page) - 1) * pageSize;
+
+    const hasIntel = !!db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='enrichment_profiles'"
+    ).get();
+
+    const conds: string[] = [];
+    const params: any[] = [];
+
+    if (status && status !== "all") {
+      conds.push("LOWER(l.status) = ?"); params.push(status.toLowerCase());
+    }
+    if (source && source !== "all") {
+      conds.push("LOWER(l.source) = ?"); params.push(source.toLowerCase());
+    }
+    if (search.trim()) {
+      const t = `%${search.toLowerCase()}%`;
+      conds.push(`(LOWER(l.first_name) LIKE ? OR LOWER(l.last_name) LIKE ? OR
+        LOWER(l.email) LIKE ? OR l.phone LIKE ? OR LOWER(l.notes) LIKE ? OR LOWER(l.source) LIKE ? OR
+        EXISTS(SELECT 1 FROM boats bx WHERE bx.lead_id=l.id AND
+          (LOWER(bx.make) LIKE ? OR LOWER(bx.model) LIKE ?)))`);
+      params.push(t, t, t, t, t, t, t, t);
+    }
+    if (boatFilter.trim()) {
+      const bf = `%${boatFilter.toLowerCase()}%`;
+      conds.push(`EXISTS(SELECT 1 FROM boats by2 WHERE by2.lead_id=l.id AND
+        (LOWER(by2.make) LIKE ? OR LOWER(by2.model) LIKE ?))`);
+      params.push(bf, bf);
+    }
+    if (intelFilter !== "all" && hasIntel) {
+      if (intelFilter === "none") conds.push("ep.lead_id IS NULL");
+      else if (intelFilter === "scanned") conds.push("ep.lead_id IS NOT NULL");
+      else { conds.push("ep.score_band = ?"); params.push(intelFilter); }
+    }
+    const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+
+    const STATUS_CASE = `(CASE LOWER(l.status) WHEN 'hot' THEN 0 WHEN 'warm' THEN 1 WHEN 'new' THEN 2
+      WHEN 'nurture' THEN 3 WHEN 'cold' THEN 4 WHEN 'client' THEN 5 ELSE 6 END)`;
+    const orderMap: Record<string, string> = {
+      newest: "l.updated_at DESC", oldest: "l.updated_at ASC",
+      name_az: "l.first_name ASC, l.last_name ASC",
+      name_za: "l.first_name DESC, l.last_name DESC",
+      status: `${STATUS_CASE} ASC`,
+      score_high: hasIntel ? "COALESCE(ep.score,-1) DESC" : "l.updated_at DESC",
+      score_low:  hasIntel ? "COALESCE(ep.score,999) ASC" : "l.updated_at ASC",
+      source: "l.source ASC",
+      boat: `COALESCE((SELECT bz.make FROM boats bz WHERE bz.lead_id=l.id ORDER BY bz.added_at DESC LIMIT 1),'zzz') ASC`,
+    };
+    const orderBy = orderMap[sortBy] || "l.updated_at DESC";
+    const from = hasIntel
+      ? "FROM leads l LEFT JOIN enrichment_profiles ep ON ep.lead_id = l.id"
+      : "FROM leads l";
+
+    const total = (db.prepare(`SELECT COUNT(*) as n ${from} ${where}`).get(...params) as any).n as number;
+
+    const leadRows = db.prepare(`
+      SELECT l.*, ${hasIntel ? "ep.score AS intel_score, ep.score_band AS intel_band" : "NULL AS intel_score, NULL AS intel_band"}
+      ${from} ${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?
+    `).all(...params, pageSize, offset) as any[];
+
+    // Boats: only for this page's leads
+    const ids = leadRows.map(r => r.id);
+    const allBoats = ids.length
+      ? db.prepare(`SELECT * FROM boats WHERE lead_id IN (${ids.map(()=>"?").join(",")}) ORDER BY added_at DESC`).all(...ids) as any[]
+      : [];
+    const boatsByLead = new Map<number, BoatRecord[]>();
+    for (const b of allBoats) {
+      const list = boatsByLead.get(b.lead_id) || [];
+      list.push(b); boatsByLead.set(b.lead_id, list);
+    }
+
+    // Unfiltered status counts for chip badges
+    const countRows = db.prepare("SELECT LOWER(COALESCE(status,'other')) as s, COUNT(*) as c FROM leads GROUP BY s").all() as any[];
+    const counts: Record<string, number> = { all: 0 };
+    for (const r of countRows) { counts[r.s] = r.c; counts.all += r.c; }
+
+    const contacts = leadRows.map((row): ContactFlat => {
+      const boats = boatsByLead.get(row.id) || [];
+      const fb = boats[0];
+      return {
+        id: String(row.id), first_name: row.first_name||"", last_name: row.last_name||"",
+        email: row.email||"", phone: row.phone||"", tags: normalizeTags(row.tags),
+        notes: row.notes||"", source: row.source||"", status: row.status||"other",
+        created_at: row.created_at||"", updated_at: row.updated_at||"", boats,
+        boat_make: fb?.make||"", boat_model: fb?.model||"", boat_year: fb?.year||"",
+        boat_length: fb?.length||"", boat_price: fb?.price||"",
+        boat_location: fb?.location||"", listing_url: fb?.listing_url||"",
+        intel_score: row.intel_score??null, intel_band: row.intel_band??null,
+        occupation: row.occupation||"", employer: row.employer||"",
+        city: row.city||"", state: row.state||"", zip: row.zip||"",
+        linkedin_url: row.linkedin_url||"", facebook_url: row.facebook_url||"",
+        instagram_url: row.instagram_url||"", twitter_url: row.twitter_url||"",
+        net_worth_range: row.net_worth_range||"", net_worth_confidence: row.net_worth_confidence||"",
+        board_positions: row.board_positions||"", yacht_clubs: row.yacht_clubs||"",
+        nonprofit_roles: row.nonprofit_roles||"", total_donations: row.total_donations||"",
+        property_summary: row.property_summary||"", wikipedia_url: row.wikipedia_url||"",
+        website_url: row.website_url||"", media_mentions: row.media_mentions||0,
+        estimated_net_worth: row.estimated_net_worth||"", net_worth_breakdown: row.net_worth_breakdown||"",
+        date_of_birth: row.date_of_birth||"", age: row.age||"",
+        spouse_name: row.spouse_name||"", spouse_employer: row.spouse_employer||"",
+        primary_address: row.primary_address||"", secondary_addresses: row.secondary_addresses||"[]",
+        identity_confidence: row.identity_confidence||0,
+        identity_verifications: row.identity_verifications||"[]",
+        manual_corrections: row.manual_corrections||"[]", court_records: row.court_records||"",
+        professional_history: row.professional_history||"", relatives: row.relatives||"",
+        additional_properties: row.additional_properties||"", reverify_status: row.reverify_status||"",
+        broker_notes: row.broker_notes||"",
+      };
+    });
+
+    return { contacts, total, counts };
+  } finally { db.close(); }
+}
+
 // ─── Read ───────────────────────────────────────────────────────────
 
 export async function readContacts(): Promise<ContactFlat[]> {
+  ensureLeadColumns();
   // Ensure enrichment tables exist so LEFT JOIN works reliably
   try { initIntelTables(); } catch { /* non-fatal — fallback below */ }
 

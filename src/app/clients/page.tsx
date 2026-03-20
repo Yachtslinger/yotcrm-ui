@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import ScreenshotUploadModal from "./ScreenshotUploadModal";
 import AddLeadModal from "./AddLeadModal";
@@ -111,18 +111,96 @@ export default function ClientsPage(): React.ReactElement {
   const [showFilters, setShowFilters] = useState(false);
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
   const [batchEnriching, setBatchEnriching] = useState(false);
+  // ── Pagination + server-side filter state (Phase 0 fix) ───────────────────
+  const PAGE_SIZE = 100;
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Unique sources from current page (for dropdown — approximate)
+  const uniqueSources = [...new Set(contacts.map(c => (c.source || "").toLowerCase()).filter(Boolean))].sort();
+
+  const buildUrl = useCallback((overrides: Record<string, any> = {}) => {
+    const p = { page, status: statusFilter, source: sourceFilter, intelFilter,
+                boatFilter, sortBy, search, ...overrides };
+    const q = new URLSearchParams({
+      page: String(p.page), pageSize: String(PAGE_SIZE),
+      status: p.status, source: p.source, intelFilter: p.intelFilter,
+      boatFilter: p.boatFilter, sortBy: p.sortBy, search: p.search,
+    });
+    return `/api/clients?${q.toString()}`;
+  }, [page, statusFilter, sourceFilter, intelFilter, boatFilter, sortBy, search]);
+
+  const fetchContacts = useCallback(async (url?: string, retries = 2) => {
+    try {
+      const res = await fetch(url || buildUrl(), { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setContacts(Array.isArray(data.contacts) ? data.contacts.map((c:any,i:number) => normalizeContact(c,i)) : []);
+      if (typeof data.total === "number") setTotal(data.total);
+      if (data.counts) setCounts(data.counts);
+      setError(null);
+    } catch (err) {
+      if (retries > 0) {
+        await new Promise(r => setTimeout(r, 1000 * (3 - retries)));
+        return fetchContacts(url, retries - 1);
+      }
+      console.error("Error fetching contacts", err);
+      setError("Unable to load leads — try refreshing.");
+    }
+  }, [buildUrl]);
+
+  // Initial load
+  useEffect(() => {
+    setIsLoading(true);
+    fetchContacts(buildUrl({ page: 1 })).finally(() => setIsLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Filter changes → reset to page 1 and refetch
+  useEffect(() => {
+    setPage(1);
+    setIsLoading(true);
+    fetchContacts(buildUrl({ page: 1 })).finally(() => setIsLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, sourceFilter, intelFilter, boatFilter, sortBy]);
+
+  // Search: debounce 350ms
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      setPage(1);
+      setIsLoading(true);
+      fetchContacts(buildUrl({ page: 1, search })).finally(() => setIsLoading(false));
+    }, 350);
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+
+  // Page navigation
+  const goToPage = (p: number) => {
+    setPage(p);
+    setIsLoading(true);
+    fetchContacts(buildUrl({ page: p })).finally(() => setIsLoading(false));
+  };
+
+  // Visibility change refresh
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") fetchContacts(buildUrl());
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [fetchContacts, buildUrl]);
 
   const toggleSelect = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setSelectedLeads(prev => {
-      const s = new Set(prev);
-      s.has(id) ? s.delete(id) : s.add(id);
-      return s;
-    });
+    setSelectedLeads(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
   };
   const toggleSelectAll = () => {
-    if (selectedLeads.size === sorted.length) setSelectedLeads(new Set());
-    else setSelectedLeads(new Set(sorted.map(c => c.id)));
+    if (selectedLeads.size === contacts.length) setSelectedLeads(new Set());
+    else setSelectedLeads(new Set(contacts.map(c => c.id)));
   };
 
   const runBatchEnrich = async () => {
@@ -135,8 +213,7 @@ export default function ClientsPage(): React.ReactElement {
       setEnriching(prev => new Set(prev).add(id));
       try {
         const res = await fetch("/api/intel/profile", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+          method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ lead_id: Number(id), action: "enrich" }),
         });
         const data = await res.json();
@@ -145,9 +222,8 @@ export default function ClientsPage(): React.ReactElement {
       } catch { /* continue */ }
       finally { setEnriching(prev => { const s = new Set(prev); s.delete(id); return s; }); }
     }
-    await fetchContacts();
-    setSelectedLeads(new Set());
-    setBatchEnriching(false);
+    await fetchContacts(buildUrl());
+    setSelectedLeads(new Set()); setBatchEnriching(false);
     toast(`✅ Batch scan complete — ${done}/${ids.length} processed`);
   };
 
@@ -156,136 +232,46 @@ export default function ClientsPage(): React.ReactElement {
     setEnriching(prev => new Set(prev).add(id));
     try {
       const res = await fetch("/api/intel/profile", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lead_id: Number(id), action: "enrich" }),
       });
       const data = await res.json();
-      if (data.ok) {
-        toast(`Intel: ${data.score}/100 — ${(data.band || "").replace(/_/g, " ")}`);
-        fetchContacts();
-      } else {
-        toast(data.error || "Enrichment failed", "error");
-      }
+      if (data.ok) { toast(`Intel: ${data.score}/100 — ${(data.band||"").replace(/_/g," ")}`); fetchContacts(buildUrl()); }
+      else toast(data.error || "Enrichment failed", "error");
     } catch { toast("Enrichment failed", "error"); }
     finally { setEnriching(prev => { const s = new Set(prev); s.delete(id); return s; }); }
   };
 
-  const fetchContacts = useCallback(async () => {
-    try {
-      const res = await fetch(CLIENTS_ENDPOINT, { cache: "no-store" });
-      if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-      const data = await res.json();
-      const normalized = Array.isArray(data.contacts)
-        ? data.contacts.map((c: any, i: number) => normalizeContact(c, i))
-        : [];
-      setContacts(normalized);
-    } catch (err) {
-      console.error("Error fetching contacts", err);
-      setError("Unable to load clients.");
-    }
-  }, []);
-
-  useEffect(() => {
-    setIsLoading(true);
-    fetchContacts().finally(() => setIsLoading(false));
-    const interval = setInterval(() => { fetchContacts(); }, 30000);
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") fetchContacts();
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [fetchContacts]);
-
   const updateStatus = async (id: string, newStatus: string) => {
     try {
       const res = await fetch(`/api/clients/${encodeURIComponent(id)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus }),
       });
       if (!res.ok) throw new Error("Update failed");
-      setContacts((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, status: newStatus } : c))
-      );
+      setContacts(prev => prev.map(c => c.id === id ? { ...c, status: newStatus } : c));
       toast(`Status updated to ${newStatus}`);
-    } catch (err) {
-      console.error("Status update failed", err);
-      toast("Failed to update status", "error");
-    }
+    } catch { toast("Failed to update status", "error"); }
   };
 
-  const filtered = contacts.filter((c) => {
-    const status = (c.status || "other").toLowerCase();
-    if (statusFilter !== "all" && status !== statusFilter) return false;
-    if (sourceFilter !== "all" && (c.source || "").toLowerCase() !== sourceFilter) return false;
-    if (intelFilter !== "all") {
-      if (intelFilter === "none" && c.intel_score != null) return false;
-      if (intelFilter === "scanned" && c.intel_score == null) return false;
-      if (intelFilter !== "none" && intelFilter !== "scanned" && c.intel_band !== intelFilter) return false;
-    }
-    if (boatFilter.trim()) {
-      const bf = boatFilter.toLowerCase();
-      const boatStr = [c.boat_make, c.boat_model, c.boat_year, c.boat_length].join(" ").toLowerCase();
-      if (!boatStr.includes(bf)) return false;
-    }
-    if (search.trim()) {
-      const term = search.toLowerCase();
-      return [c.firstName, c.lastName, c.email, c.phone, c.boat_make, c.boat_model, c.source, c.notes]
-        .some((f) => (f || "").toLowerCase().includes(term));
-    }
-    return true;
-  });
+  // Server-side sorted/filtered — contacts IS the result
+  const sorted = contacts;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  // Sort
-  const STATUS_SORT_ORDER: Record<string, number> = { hot: 0, warm: 1, new: 2, nurture: 3, cold: 4, client: 5, other: 6 };
-  const sorted = [...filtered].sort((a, b) => {
-    if (sortBy === "newest") return (b.createdAt || "").toString().localeCompare((a.createdAt || "").toString());
-    if (sortBy === "oldest") return (a.createdAt || "").toString().localeCompare((b.createdAt || "").toString());
-    if (sortBy === "name_az") return `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`);
-    if (sortBy === "name_za") return `${b.firstName} ${b.lastName}`.localeCompare(`${a.firstName} ${a.lastName}`);
-    if (sortBy === "status") return (STATUS_SORT_ORDER[(a.status||"other").toLowerCase()] ?? 6) - (STATUS_SORT_ORDER[(b.status||"other").toLowerCase()] ?? 6);
-    if (sortBy === "score_high") return (b.intel_score || 0) - (a.intel_score || 0);
-    if (sortBy === "score_low") return (a.intel_score || 0) - (b.intel_score || 0);
-    if (sortBy === "boat") return (a.boat_make || "zzz").localeCompare(b.boat_make || "zzz");
-    if (sortBy === "source") return (a.source || "zzz").localeCompare(b.source || "zzz");
-    return 0;
-  });
-
-  const counts = contacts.reduce<Record<string, number>>((acc, c) => {
-    const s = (c.status || "other").toLowerCase();
-    acc[s] = (acc[s] || 0) + 1;
-    return acc;
-  }, {});
-
-  // Unique sources for filter dropdown
-  const uniqueSources = [...new Set(contacts.map(c => (c.source || "").toLowerCase()).filter(Boolean))].sort();
-
-  // Active filter count for badge
   const activeFilterCount = [
-    statusFilter !== "all",
-    sourceFilter !== "all",
-    intelFilter !== "all",
-    boatFilter.trim() !== "",
-    sortBy !== "newest",
+    statusFilter !== "all", sourceFilter !== "all", intelFilter !== "all",
+    boatFilter.trim() !== "", sortBy !== "newest",
   ].filter(Boolean).length;
 
   const clearAllFilters = () => {
-    setStatusFilter("all");
-    setSourceFilter("all");
-    setIntelFilter("all");
-    setBoatFilter("");
-    setSortBy("newest");
-    setSearch("");
+    setStatusFilter("all"); setSourceFilter("all"); setIntelFilter("all");
+    setBoatFilter(""); setSortBy("newest"); setSearch("");
   };
 
   return (
     <PageShell
       title="Leads"
-      subtitle={`${contacts.length} total lead${contacts.length !== 1 ? "s" : ""} in pipeline`}
+      subtitle={`${total || counts.all || 0} leads · showing ${contacts.length > 0 ? (page - 1) * PAGE_SIZE + 1 : 0}–${Math.min(page * PAGE_SIZE, total)} of ${total}`}
       maxWidth="wide"
       actions={
         <div className="flex gap-2">
@@ -330,13 +316,13 @@ export default function ClientsPage(): React.ReactElement {
         {/* Row 2: Status Chips (always visible) */}
         <div className="flex gap-2 overflow-x-auto nav-scroll pb-1">
           {[
-            { key: "all", label: "All", count: contacts.length },
-            { key: "new", label: "New", count: counts.new || 0 },
-            { key: "hot", label: "Hot", count: counts.hot || 0 },
-            { key: "warm", label: "Warm", count: counts.warm || 0 },
-            { key: "cold", label: "Cold", count: counts.cold || 0 },
-            { key: "nurture", label: "Nurture", count: counts.nurture || 0 },
-            { key: "client", label: "✓ Client", count: counts.client || 0 },
+            { key: "all",     label: "All",      count: counts.all     || 0 },
+            { key: "new",     label: "New",      count: counts.new     || 0 },
+            { key: "hot",     label: "Hot",      count: counts.hot     || 0 },
+            { key: "warm",    label: "Warm",     count: counts.warm    || 0 },
+            { key: "cold",    label: "Cold",     count: counts.cold    || 0 },
+            { key: "nurture", label: "Nurture",  count: counts.nurture || 0 },
+            { key: "client",  label: "✓ Client", count: counts.client  || 0 },
           ].map((s) => (
             <button key={s.key} onClick={() => setStatusFilter(s.key)}
               className={`shrink-0 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all border ${

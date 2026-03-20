@@ -37,11 +37,14 @@ export async function POST(req: NextRequest) {
       year:          number | string;
       make:          string;
       model:         string;
+      vesselName?:   string;
       loa?:          string;
       price?:        string;
       location?:     string;
       listingUrl?:   string;
+      brochureUrl?:  string;
       features?:     string;
+      matchReasons?: string[];
       brokerNotes?:  string;
       brokerage?:    string;
       vesselType?:   string;
@@ -66,11 +69,14 @@ export async function POST(req: NextRequest) {
     loa:         vessel.loa,
     price:       vessel.price,
     location:    vessel.location,
-    listingUrl:  listingUrl || undefined,
-    features:    vessel.features,
-    brokerNotes: vessel.brokerNotes,
-    brokerage:   vessel.brokerage,
-    vesselType:  vessel.vesselType,
+    vesselName:   vessel.vesselName,
+    listingUrl:   listingUrl || undefined,
+    brochureUrl:  vessel.brochureUrl,
+    features:     vessel.features,
+    matchReasons: vessel.matchReasons,
+    brokerNotes:  vessel.brokerNotes,
+    brokerage:    vessel.brokerage,
+    vesselType:   vessel.vesselType,
   };
 
   const subject = buildSubjectLine(emailData, tone);

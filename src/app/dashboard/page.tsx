@@ -68,20 +68,21 @@ export default function DashboardPage() {
   const [newMatches, setNewMatches] = useState<Match[]>([]);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
+  // Phase 0: counts + recent from lightweight summary endpoint
+  const [counts, setCounts] = useState<Record<string, number>>({});
 
   const fetchDashboard = () => {
     Promise.all([
-      fetch("/api/clients").then(r => r.json()),
+      fetch("/api/dashboard").then(r => r.json()).catch(() => ({ ok: false })),
       fetch("/api/todos").then(r => r.json()),
       fetch("/api/market/matches?status=new").then(r => r.json()).catch(() => ({ ok: false })),
       fetch("/api/analytics").then(r => r.json()).catch(() => null),
-    ]).then(([cData, tData, mData, aData]) => {
-      const contacts = (cData.contacts || []).map((c: any) => ({
-        ...c, id: String(c.id),
-        first_name: c.first_name || c.firstName || "",
-        last_name: c.last_name || c.lastName || "",
-      }));
-      setLeads(contacts);
+    ]).then(([dData, tData, mData, aData]) => {
+      // Summary endpoint: counts + recent leads
+      if (dData.ok) {
+        setCounts(dData.counts || {});
+        setLeads(dData.recentLeads || []);
+      }
       setTodos((tData.todos || []).filter((t: Todo) => !t.completed));
       if (mData.ok) setNewMatches((mData.matches || []).slice(0, 5));
       if (aData?.ok) setAnalytics(aData);
@@ -101,15 +102,10 @@ export default function DashboardPage() {
     };
   }, []);
 
-  const byStatus = leads.reduce<Record<string, number>>((acc, l) => {
-    const s = (l.status || "other").toLowerCase();
-    acc[s] = (acc[s] || 0) + 1;
-    return acc;
-  }, {});
+  // byStatus from lightweight summary (not from full leads array)
+  const byStatus = counts;
 
-  const recent = [...leads]
-    .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
-    .slice(0, 5);
+  const recent = leads; // already the 5 most recent from summary endpoint
 
   if (loading) return <DashboardSkeleton />;
 
@@ -122,7 +118,7 @@ export default function DashboardPage() {
       title="Dashboard"
       subtitle={
         <>
-          {leads.length} lead{leads.length !== 1 ? "s" : ""} in pipeline · {todos.length} open task{todos.length !== 1 ? "s" : ""}
+          {counts.all || 0} lead{(counts.all||0) !== 1 ? "s" : ""} in pipeline · {todos.length} open task{todos.length !== 1 ? "s" : ""}
           {newMatches.length > 0 && (
             <span className="text-[var(--brass-500)] dark:text-[var(--brass-400)] font-medium">
               {" "}· {newMatches.length} new match{newMatches.length !== 1 ? "es" : ""}
