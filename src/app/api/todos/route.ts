@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAllTodos, createTodo, updateTodo, deleteTodo, clearCompleted } from "@/lib/todos/storage";
+import { dismissMatch } from "@/lib/matches/storage";
 import Database from "better-sqlite3";
 
 const DB_PATH = process.env.DB_PATH || "/app/data/yotcrm.db";
@@ -33,6 +34,30 @@ export async function POST(req: Request) {
     if (action === "delete") {
       const ok = deleteTodo(body.id);
       return NextResponse.json({ ok });
+    }
+    // Dismiss a match todo — deletes the todo AND records dismissal in the match engine
+    // so the listing never resurfaces for this lead in future batches
+    if (action === "dismiss_match") {
+      const todo = body.todo as {
+        id: number; listing_id?: number | null; lead_id?: number | null; assignee?: string;
+      };
+      if (!todo?.id) return NextResponse.json({ ok: false, error: "Missing todo" }, { status: 400 });
+      // Find the listing_match record for this todo
+      const db = new Database(DB_PATH);
+      let matchId: number | null = null;
+      try {
+        const row = db.prepare(
+          "SELECT id FROM listing_matches WHERE listing_id=? AND lead_id=? AND status != 'dismissed' LIMIT 1"
+        ).get(todo.listing_id ?? -1, todo.lead_id ?? -1) as any;
+        if (row) matchId = row.id;
+      } finally { db.close(); }
+      // Record dismissal in match engine (prevents resurfacing)
+      if (matchId && todo.listing_id && todo.lead_id) {
+        dismissMatch(matchId, todo.lead_id, todo.listing_id, todo.assignee || "will");
+      }
+      // Delete the todo itself
+      deleteTodo(todo.id);
+      return NextResponse.json({ ok: true });
     }
     if (action === "delete_bulk") {
       const ids: number[] = body.ids || [];

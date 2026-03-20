@@ -244,6 +244,22 @@ export default function TodosPage() {
     } catch { toast("Failed to save","error"); }
   }
 
+  // Dismiss a match todo — records dismissal in match engine so it never resurfaces
+  async function dismissMatchTodo(todo: Todo) {
+    try {
+      await fetch("/api/todos", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "dismiss_match",
+          todo: { id: todo.id, listing_id: todo.listing_id, lead_id: todo.lead_id, assignee: todo.assignee },
+        }),
+      });
+      setTodos(p => p.filter(t => t.id !== todo.id));
+      setSelected(p => { const n = new Set(p); n.delete(todo.id); return n; });
+      toast("Dismissed — won't resurface for this lead");
+    } catch { toast("Failed to dismiss", "error"); }
+  }
+
   async function deleteTodo(id: number) {
     try {
       await fetch("/api/todos", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({ action:"delete", id }) });
@@ -658,7 +674,7 @@ export default function TodosPage() {
                           {pdfLoading[todo.id] ? "⏳ Generating…" : "📄 Generate PDF"}
                         </button>
 
-                        <button onClick={() => deleteTodo(todo.id)}
+                        <button onClick={() => dismissMatchTodo(todo)}
                           className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold ml-auto"
                           style={{ background: "rgba(107,114,128,0.1)", color: "#6b7280", minHeight: 44 }}>
                           ✕ Dismiss

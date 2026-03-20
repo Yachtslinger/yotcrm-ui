@@ -83,6 +83,23 @@ export function initMatchTables() {
     try { db.exec("ALTER TABLE parsed_listings ADD COLUMN brokerage TEXT DEFAULT ''"); } catch {}
     try { db.exec("ALTER TABLE parsed_listings ADD COLUMN client_name TEXT DEFAULT ''"); } catch {}
     try { db.exec("ALTER TABLE parsed_listings ADD COLUMN denison_url TEXT DEFAULT ''"); } catch {}
+    // Phase 1: staleness tracking on listings
+    try { db.exec("ALTER TABLE parsed_listings ADD COLUMN listed_at TEXT DEFAULT ''"); } catch {}
+    try { db.exec("ALTER TABLE parsed_listings ADD COLUMN days_on_market INTEGER DEFAULT 0"); } catch {}
+    // Phase 1: dismissal memory on leads
+    try { db.exec("ALTER TABLE leads ADD COLUMN dismissed_listing_ids TEXT DEFAULT '[]'"); } catch {}
+    // Phase 1: exposure log table
+    db.exec(`CREATE TABLE IF NOT EXISTS match_exposure_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      match_id INTEGER NOT NULL,
+      lead_id INTEGER NOT NULL,
+      listing_id INTEGER NOT NULL,
+      surfaced_in TEXT DEFAULT 'todos',
+      surfaced_at TEXT NOT NULL,
+      broker_action TEXT DEFAULT '',
+      action_at TEXT DEFAULT '',
+      assigned_broker TEXT DEFAULT ''
+    )`);
     // Extended buyer_searches criteria columns (Phase 2)
     try { db.exec("ALTER TABLE buyer_searches ADD COLUMN vessel_type_pref TEXT DEFAULT ''"); } catch {}
     try { db.exec("ALTER TABLE buyer_searches ADD COLUMN flybridge_pref TEXT DEFAULT ''"); } catch {}
@@ -108,6 +125,7 @@ export type ParsedListing = {
   vessel_type: string; features: string; listing_url: string;
   broker_notes: string; raw_text: string; created_at: string;
   section?: string; brokerage?: string;
+  listed_at?: string; days_on_market?: number; denison_url?: string;
 };
 
 export type ListingMatch = {
@@ -181,12 +199,12 @@ export function insertListing(batchId: number, listing: Partial<ParsedListing> &
     }
 
     const result = db.prepare(
-      `INSERT INTO parsed_listings (batch_id, make, model, year, loa, asking_price, location, vessel_type, features, listing_url, broker_notes, raw_text, content_hash, section, brokerage, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO parsed_listings (batch_id, make, model, year, loa, asking_price, location, vessel_type, features, listing_url, broker_notes, raw_text, content_hash, section, brokerage, listed_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(batchId, listing.make||"", listing.model||"", listing.year||"", listing.loa||"",
       listing.asking_price||"", listing.location||"", listing.vessel_type||"",
       listing.features||"", listing.listing_url||"", listing.broker_notes||"",
-      listing.raw_text||"", hash, listing.section||"", listing.brokerage||"", now);
+      listing.raw_text||"", hash, listing.section||"", listing.brokerage||"", now, now);
     return db.prepare("SELECT * FROM parsed_listings WHERE id = ?").get(result.lastInsertRowid) as ParsedListing;
   } finally { db.close(); }
 }
@@ -214,6 +232,10 @@ type MatchResult = {
   conflicts: string[];
   /** Number of criteria that returned a REAL signal (not a neutral default) */
   positiveHits: number;
+  /** Human-readable log of penalties applied */
+  penaltyLog: string[];
+  /** true if hard-fail gate triggered — match should be suppressed entirely */
+  hardFail: boolean;
 };
 
 // ── Geo helpers ───────────────────────────────────────────────────────────────
@@ -447,12 +469,62 @@ export function scoreListingVsBuyer(
   let positiveHits = 0;   // incremented only when we have REAL data, not neutral defaults
   const reasons: string[] = [];
   const conflicts: string[] = [];
+  const penaltyLog: string[] = [];
 
   const lPrice = parseNum(listing.asking_price);
   const lLoa   = parseNum(listing.loa);
   const lYear  = parseNum(listing.year);
   const lMake  = (listing.make || "").toLowerCase().trim();
   const notes  = buyer.notes || "";
+
+  // ── HARD-FAIL GATES (evaluated before any scoring) ────────────────────────
+  // If any gate fires, return immediately with hardFail=true — match is suppressed.
+
+  // Gate 1: Price >125% of buyer max (completely unaffordable)
+  const bMinH = parseNum(buyer.budget_min) || parseNum(buyer.boat_price);
+  const bMaxH = parseNum(buyer.budget_max) || (bMinH ? bMinH * 1.3 : null);
+  if (lPrice !== null && bMaxH !== null && lPrice > bMaxH * 1.25) {
+    return { score: 0, confidence: "low", reasons: [], conflicts: ["Price >125% of budget"],
+             positiveHits: 0, penaltyLog: [], hardFail: true };
+  }
+
+  // Gate 2: LOA more than 20% outside buyer range (wrong size class entirely)
+  const bLenMinH = parseNum(buyer.length_min) || (buyer.boat_length ? (parseNum(buyer.boat_length)||0)*0.85 : null);
+  const bLenMaxH = parseNum(buyer.length_max) || (buyer.boat_length ? (parseNum(buyer.boat_length)||0)*1.15 : null);
+  if (lLoa !== null && bLenMinH !== null && bLenMaxH !== null) {
+    if (lLoa < bLenMinH * 0.8 || lLoa > bLenMaxH * 1.2) {
+      return { score: 0, confidence: "low", reasons: [], conflicts: ["LOA >20% outside desired range"],
+               positiveHits: 0, penaltyLog: [], hardFail: true };
+    }
+  }
+
+  // Gate 3: Hard vessel type contradiction (buyer wants sail, listing is power, or vice versa)
+  const vtPrefH = (buyer.vessel_type_pref || "").toLowerCase();
+  const lTypeH  = (listing.vessel_type || "").toLowerCase();
+  if (vtPrefH && lTypeH) {
+    const wantsSail  = /sail|sloop|ketch|yawl/.test(vtPrefH);
+    const wantsPower = /motor|flybridge|pilothouse|sport|explorer/.test(vtPrefH);
+    const isSail  = /sail|sloop|ketch|yawl/.test(lTypeH);
+    const isPower = /motor|flybridge|pilothouse|sport|explorer/.test(lTypeH);
+    if ((wantsSail && isPower) || (wantsPower && isSail)) {
+      return { score: 0, confidence: "low", reasons: [],
+               conflicts: [`Type contradiction: buyer wants ${vtPrefH}, listing is ${lTypeH}`],
+               positiveHits: 0, penaltyLog: [], hardFail: true };
+    }
+  }
+
+  // Gate 4: Listing staleness >180 days (stale inventory — never surface)
+  const listedAt = (listing.listed_at || listing.created_at || "");
+  let daysOld = 0;
+  if (listedAt) {
+    daysOld = Math.floor((Date.now() - new Date(listedAt).getTime()) / 86_400_000);
+    if (daysOld > 180) {
+      return { score: 0, confidence: "low", reasons: [],
+               conflicts: [`Listing >180 days old (${daysOld}d)`],
+               positiveHits: 0, penaltyLog: [], hardFail: true };
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   // ── 1. PRICE (25 pts) ──────────────────────────────────────────────────────
   const bMin = parseNum(buyer.budget_min) || parseNum(buyer.boat_price);
@@ -659,10 +731,57 @@ export function scoreListingVsBuyer(
     }
   }
 
-  // Confidence bucket — adjusted for new max ~117 pts
+  // ── STALENESS DECAY ───────────────────────────────────────────────────────
+  // New-to-market bonus: listed in last 7 days gets +6
+  // Soft decay: 31–90 days = -2; 91–180 days = -5
+  if (daysOld > 0) {
+    if (daysOld <= 7) {
+      score += 6; reasons.push(`New to market (${daysOld}d old)`);
+    } else if (daysOld <= 30) {
+      // 8–30 days: no bonus, no penalty
+    } else if (daysOld <= 90) {
+      score -= 2; penaltyLog.push(`Staleness -2 (${daysOld}d old)`);
+    } else {
+      score -= 5; penaltyLog.push(`Staleness -5 (${daysOld}d old)`);
+    }
+  }
+
+  // ── CONFLICT PENALTY DEDUCTIONS ───────────────────────────────────────────
+  // Conflicts are now functional — they subtract from the score.
+  // Each conflict was already pushed to the conflicts[] array above.
+  // Map conflict patterns to point deductions.
+  const conflictPenalties: [RegExp, number, string][] = [
+    [/price exceeds budget by >15%/i,               10, "Price >15% over budget"],
+    [/price slightly over budget/i,                  0, ""],   // already scored partial pts
+    [/loa .+ outside desired range/i,                8, "LOA outside range"],
+    [/loa .+ slightly outside range/i,               0, ""],  // already scored partial pts
+    [/year .+ too far from target/i,                 8, "Year too far"],
+    [/year .+ slightly outside target/i,             0, ""],  // partial pts already
+    [/make: .+ vs preferred/i,                       5, "Make mismatch"],
+    [/type (mismatch|contradiction)/i,               5, "Vessel type mismatch"],
+    [/flybridge: buyer wants/i,                      4, "Flybridge mismatch"],
+    [/buyer wants stabilizers/i,                     2, "Stabilizers not confirmed"],
+    [/cabins below .+ minimum/i,                     3, "Insufficient cabins"],
+    [/engine: want/i,                                2, "Engine type mismatch"],
+    [/hull: want/i,                                  1, "Hull material mismatch"],
+  ];
+
+  for (const conflict of conflicts) {
+    for (const [pattern, deduction, label] of conflictPenalties) {
+      if (deduction > 0 && pattern.test(conflict)) {
+        score -= deduction;
+        penaltyLog.push(`${label} -${deduction}`);
+        break;
+      }
+    }
+  }
+
+  // ── FINAL CONFIDENCE BUCKET ───────────────────────────────────────────────
+  // Score can now go negative due to penalties — clamp at 0
+  score = Math.max(0, score);
   const confidence = score >= 70 ? "high" : score >= 45 ? "medium" : "low";
 
-  return { score, confidence, reasons, conflicts, positiveHits };
+  return { score, confidence, reasons, conflicts, positiveHits, penaltyLog, hardFail: false };
 }
 
 // ─── Run Matches for a Batch ────────────────────────────
@@ -691,6 +810,12 @@ export function runMatchesForBatch(batchId: number): number {
     for (const listing of listings) {
       // ── Match against leads ──────────────────────────────────────────────
       for (const lead of leads) {
+        // Dismissal exclusion: if this lead has previously dismissed this listing, skip entirely
+        const dismissedIds: number[] = (() => {
+          try { return JSON.parse(lead.dismissed_listing_ids || "[]"); } catch { return []; }
+        })();
+        if (dismissedIds.includes(listing.id)) continue;
+
         const leadBoats = boatsByLead.get(lead.id) || [];
 
         // Build candidate buyer profiles — one per boat, plus a notes-only profile if strong intent
@@ -731,6 +856,9 @@ export function runMatchesForBatch(batchId: number): number {
           .map(p => scoreListingVsBuyer(listing, p))
           .reduce((best, r) => r.score > best.score ? r : best);
 
+        // Skip if any profile triggered a hard-fail gate
+        if (result.hardFail) continue;
+
         if (result.score >= THRESHOLD) {
           try {
             db.prepare(
@@ -755,7 +883,6 @@ export function runMatchesForBatch(batchId: number): number {
           has_email: !!(iso.buyer_email?.trim()),
           has_phone: !!(iso.buyer_phone?.trim()),
           lead_status: "active",
-          // ── Extended Phase 2 criteria ─────────────────────────────────────
           vessel_type_pref:   iso.vessel_type_pref   || "",
           flybridge_pref:     iso.flybridge_pref     || "",
           stabilizers_pref:   iso.stabilizers_pref   || "",
@@ -764,6 +891,8 @@ export function runMatchesForBatch(batchId: number): number {
           engine_type_pref:   iso.engine_type_pref   || "",
           hull_material_pref: iso.hull_material_pref || "",
         });
+
+        if (result.hardFail) continue;
 
         if (result.score >= THRESHOLD) {
           try {
@@ -1133,4 +1262,63 @@ export function markNotificationRead(id: number) {
   try {
     db.prepare("UPDATE match_notifications SET read = 1 WHERE id = ?").run(id);
   } finally { db.close(); }
+}
+
+// ─── Phase 1: Dismissal Memory ─────────────────────────────────────────────
+
+/**
+ * Called when a broker dismisses a match todo.
+ * Records the listing_id in the lead's dismissed_listing_ids array so it
+ * never resurfaces in future batches. Also marks the listing_match as dismissed.
+ */
+export function dismissMatch(matchId: number, leadId: number | null, listingId: number, broker: string) {
+  const db = getDb();
+  try {
+    initMatchTables();
+    const now = new Date().toISOString();
+
+    // Mark the listing_match record as dismissed
+    db.prepare("UPDATE listing_matches SET status = 'dismissed', contacted_at = ? WHERE id = ?")
+      .run(now, matchId);
+
+    // Add listing_id to lead's dismissed_listing_ids
+    if (leadId) {
+      const lead = db.prepare("SELECT dismissed_listing_ids FROM leads WHERE id = ?").get(leadId) as any;
+      if (lead) {
+        const current: number[] = (() => {
+          try { return JSON.parse(lead.dismissed_listing_ids || "[]"); } catch { return []; }
+        })();
+        if (!current.includes(listingId)) {
+          current.push(listingId);
+          db.prepare("UPDATE leads SET dismissed_listing_ids = ? WHERE id = ?")
+            .run(JSON.stringify(current), leadId);
+        }
+      }
+    }
+
+    // Log the dismissal in exposure log
+    try {
+      db.prepare(`INSERT INTO match_exposure_log
+        (match_id, lead_id, listing_id, surfaced_in, surfaced_at, broker_action, action_at, assigned_broker)
+        VALUES (?, ?, ?, 'todos', ?, 'dismissed', ?, ?)`
+      ).run(matchId, leadId ?? 0, listingId, now, now, broker);
+    } catch { /* non-fatal */ }
+  } finally { db.close(); }
+}
+
+/**
+ * Log when a match is surfaced to a broker (for exposure tracking).
+ */
+export function logMatchExposure(matchId: number, leadId: number, listingId: number,
+  surface: string, broker: string, action = "") {
+  const db = getDb();
+  try {
+    initMatchTables();
+    const now = new Date().toISOString();
+    db.prepare(`INSERT INTO match_exposure_log
+      (match_id, lead_id, listing_id, surfaced_in, surfaced_at, broker_action, action_at, assigned_broker)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(matchId, leadId, listingId, surface, now, action, action ? now : "", broker);
+  } catch { /* non-fatal — exposure log is optional */ }
+  finally { db.close(); }
 }
