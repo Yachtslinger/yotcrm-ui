@@ -119,7 +119,7 @@ Rules: use real operational logic, fuel based on burn rate and hours, dockage ba
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
-        max_tokens: 4000,
+        max_tokens: 8000,
         messages: [{ role: "user", content: prompt }],
       }),
     });
