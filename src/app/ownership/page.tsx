@@ -159,10 +159,21 @@ export default function OwnershipPage() {
     setModel(null);
 
     try {
-      const res = await fetch("/api/ownership/generate", {
+      // Step 1: Scrape vessel data (fast, ~10-20s)
+      const scrapeRes = await fetch("/api/brochures/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: url.trim() }),
+      });
+      const scrapeData = await scrapeRes.json();
+      if (!scrapeData.ok && !scrapeData.vessel) throw new Error(scrapeData.error || "Scrape failed");
+      const vessel = scrapeData.vessel || {};
+
+      // Step 2: Generate cost model from vessel data (Claude, ~30-40s)
+      const res = await fetch("/api/ownership/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vessel, url: url.trim() }),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "Generation failed");
@@ -249,7 +260,7 @@ export default function OwnershipPage() {
           {loading && (
             <div className="mt-3 flex items-center gap-2">
               <div className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "var(--brass-400)", borderTopColor: "transparent" }} />
-              <span className="text-xs" style={{ color: "var(--navy-400)" }}>Running ownership analysis — this takes ~30 seconds…</span>
+              <span className="text-xs" style={{ color: "var(--navy-400)" }}>Step 1: Fetching vessel data… Step 2: Running cost analysis (~30s)…</span>
             </div>
           )}
           {error && <p className="mt-2 text-xs" style={{ color: "#f87171" }}>Error: {error}</p>}

@@ -5,40 +5,35 @@ export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
-    const { url } = await req.json();
-    if (!url) return NextResponse.json({ ok: false, error: "URL required" }, { status: 400 });
+    // Accepts pre-scraped vessel data directly — scraping is done by the client
+    // in a separate call to /api/brochures/preview so each step fits in 60s.
+    const { vessel, url } = await req.json();
+    if (!vessel && !url) return NextResponse.json({ ok: false, error: "vessel data required" }, { status: 400 });
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://yotcrm-production.up.railway.app";
-    const scrapeRes = await fetch(`${baseUrl}/api/brochures/preview`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
-    });
-    const scrapeData = await scrapeRes.json();
-    const vessel = scrapeData.vessel || {};
-
+    const v = vessel || {};
     const vesselSummary = [
-      `Name: ${vessel.name || "Unknown"}`,
-      `Builder: ${vessel.builder || "Unknown"}`,
-      `Year: ${vessel.year || "Unknown"}`,
-      `LOA: ${vessel.loa || "Unknown"}`,
-      `Engines: ${vessel.engines || "Unknown"}`,
-      `Power: ${vessel.power || "Unknown"}`,
-      `Fuel Tank: ${vessel.fuelTank || "Unknown"}`,
-      `Guests: ${vessel.guests || "Unknown"}`,
-      `Staterooms: ${vessel.staterooms || "Unknown"}`,
-      `Crew: ${vessel.crew || "Unknown"}`,
-      `Price: ${vessel.price || "Unknown"}`,
-      `Location: ${vessel.location || "Unknown"}`,
-      `Hull Material: ${vessel.hullMaterial || "Unknown"}`,
-      `Description: ${(vessel.description || "").slice(0, 400)}`,
+      `Name: ${v.name || "Unknown"}`,
+      `Builder: ${v.builder || "Unknown"}`,
+      `Year: ${v.year || "Unknown"}`,
+      `LOA: ${v.loa || "Unknown"}`,
+      `Engines: ${v.engines || "Unknown"}`,
+      `Power: ${v.power || "Unknown"}`,
+      `Fuel Tank: ${v.fuelTank || "Unknown"}`,
+      `Guests: ${v.guests || "Unknown"}`,
+      `Staterooms: ${v.staterooms || "Unknown"}`,
+      `Crew: ${v.crew || "Unknown"}`,
+      `Price: ${v.price || "Unknown"}`,
+      `Location: ${v.location || "Unknown"}`,
+      `Hull Material: ${v.hullMaterial || "Unknown"}`,
+      `Description: ${(v.description || "").slice(0, 400)}`,
     ].join("\n");
+
 
     const prompt = `You are a superyacht operations consultant and financial analyst. Analyze this vessel and return ONLY a valid JSON object — no markdown, no explanation, just raw JSON.
 
 VESSEL:
 ${vesselSummary}
-URL: ${url}
+URL: ${url || v.url || ""}
 
 JSON structure (all numbers are annual USD amounts):
 {
@@ -101,14 +96,15 @@ JSON structure (all numbers are annual USD amounts):
     "tendersToys": {"low":0,"mid":0,"high":0},
     "other": {"low":0,"mid":0,"high":0}
   },
-  "assumptions": "1-2 sentences max on usage assumptions",
-  "rangeExplanation": "1-2 sentences max explaining the cost range",
-  "categoryBreakdown": "2-3 sentences max covering key cost categories",
-  "crewStructureNote": "2-3 sentences max: crew roles, total salary range, savings if one crew removed",
+  "assumptions": "1-2 sentences on usage assumptions",
+  "rangeExplanation": "1-2 sentences explaining the cost range",
+  "categoryBreakdown": "2-3 sentences covering key cost categories",
+  "crewStructureNote": "2-3 sentences: crew roles, total salary range, savings if one crew removed",
   "keyDrivers": "Top 3 cost drivers, one sentence each"
 }
 
-Rules: use real operational logic, fuel based on burn rate and hours, dockage based on region, insurance 1-1.75% of vessel value, all values realistic and defensible. Keep all text fields SHORT — 1-3 sentences maximum each.`;
+Rules: use real operational logic, fuel based on burn rate and hours, dockage based on region, insurance 1-1.75% of vessel value, all values realistic and defensible.`;
+
 
     const message = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -137,7 +133,7 @@ Rules: use real operational logic, fuel based on burn rate and hours, dockage ba
     try {
       modelData = JSON.parse(cleaned);
     } catch {
-      throw new Error(`JSON parse failed. Claude response preview: ${cleaned.slice(0, 200)}`);
+      throw new Error(`JSON parse failed. Response length: ${cleaned.length}. Last 200 chars: ${cleaned.slice(-200)}`);
     }
 
     return NextResponse.json({ ok: true, model: modelData });
