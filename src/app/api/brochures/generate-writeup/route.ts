@@ -101,7 +101,7 @@ Return ONLY a raw JSON object — no markdown fences, no preamble, no explanatio
       },
       body: JSON.stringify({
         model: "claude-opus-4-6",
-        max_tokens: 3000,
+        max_tokens: 16000,
         messages: [{ role: "user", content: prompt }],
       }),
     });
