@@ -71,4 +71,18 @@ export type Contact = {
   additional_properties?: string;
   reverify_status?: string;
   broker_notes?: string;
+  // ── Buyer Criteria (Phase 3) — feed directly into matching engine ──────────
+  budget_min?: string;       // e.g. "1000000"
+  budget_max?: string;       // e.g. "3500000"
+  loa_min?: string;          // feet e.g. "70"
+  loa_max?: string;          // feet e.g. "95"
+  year_min?: string;         // e.g. "2015"
+  year_max?: string;         // e.g. "2024"
+  make_preference?: string;  // e.g. "Azimut"
+  preferred_location?: string; // e.g. "Florida, Mediterranean"
+  vessel_type_pref?: string; // motor_yacht | sailing | explorer | sport | catamaran | mega
+  flybridge_pref?: string;   // yes | no | any
+  stabilizers_pref?: string; // yes | no
+  min_cabins?: string;       // "3"
+  engine_type_pref?: string; // diesel | gas | hybrid
 };

@@ -65,6 +65,13 @@ export async function POST(req: Request) {
             reverify_status TEXT DEFAULT '', broker_notes TEXT DEFAULT '',
             dismissed_listing_ids TEXT DEFAULT '[]',
             last_contacted_at TEXT DEFAULT '',
+            budget_min TEXT DEFAULT '', budget_max TEXT DEFAULT '',
+            loa_min TEXT DEFAULT '', loa_max TEXT DEFAULT '',
+            year_min TEXT DEFAULT '', year_max TEXT DEFAULT '',
+            make_preference TEXT DEFAULT '', preferred_location TEXT DEFAULT '',
+            vessel_type_pref TEXT DEFAULT '', flybridge_pref TEXT DEFAULT '',
+            stabilizers_pref TEXT DEFAULT '', min_cabins TEXT DEFAULT '',
+            engine_type_pref TEXT DEFAULT '',
             created_at TEXT NOT NULL, updated_at TEXT NOT NULL
           )
         `);
@@ -72,6 +79,19 @@ export async function POST(req: Request) {
         try { db.exec("ALTER TABLE leads ADD COLUMN broker_notes TEXT DEFAULT ''"); } catch {}
         try { db.exec("ALTER TABLE leads ADD COLUMN dismissed_listing_ids TEXT DEFAULT '[]'"); } catch {}
         try { db.exec("ALTER TABLE leads ADD COLUMN last_contacted_at TEXT DEFAULT ''"); } catch {}
+        try { db.exec("ALTER TABLE leads ADD COLUMN budget_min TEXT DEFAULT ''"); } catch {}
+        try { db.exec("ALTER TABLE leads ADD COLUMN budget_max TEXT DEFAULT ''"); } catch {}
+        try { db.exec("ALTER TABLE leads ADD COLUMN loa_min TEXT DEFAULT ''"); } catch {}
+        try { db.exec("ALTER TABLE leads ADD COLUMN loa_max TEXT DEFAULT ''"); } catch {}
+        try { db.exec("ALTER TABLE leads ADD COLUMN year_min TEXT DEFAULT ''"); } catch {}
+        try { db.exec("ALTER TABLE leads ADD COLUMN year_max TEXT DEFAULT ''"); } catch {}
+        try { db.exec("ALTER TABLE leads ADD COLUMN make_preference TEXT DEFAULT ''"); } catch {}
+        try { db.exec("ALTER TABLE leads ADD COLUMN preferred_location TEXT DEFAULT ''"); } catch {}
+        try { db.exec("ALTER TABLE leads ADD COLUMN vessel_type_pref TEXT DEFAULT ''"); } catch {}
+        try { db.exec("ALTER TABLE leads ADD COLUMN flybridge_pref TEXT DEFAULT ''"); } catch {}
+        try { db.exec("ALTER TABLE leads ADD COLUMN stabilizers_pref TEXT DEFAULT ''"); } catch {}
+        try { db.exec("ALTER TABLE leads ADD COLUMN min_cabins TEXT DEFAULT ''"); } catch {}
+        try { db.exec("ALTER TABLE leads ADD COLUMN engine_type_pref TEXT DEFAULT ''"); } catch {}
 
         // Upsert leads: insert new ones, update non-mutable fields on existing ones.
         // NEVER overwrite: status, notes, dismissed_listing_ids, last_contacted_at, broker_notes

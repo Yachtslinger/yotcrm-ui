@@ -36,6 +36,14 @@ function ensureLeadColumns() {
       ["professional_history","TEXT DEFAULT ''"], ["relatives","TEXT DEFAULT ''"],
       ["additional_properties","TEXT DEFAULT ''"], ["reverify_status","TEXT DEFAULT ''"],
       ["broker_notes","TEXT DEFAULT ''"],
+      // Buyer criteria — Phase 3 — feed directly into match engine scoring
+      ["budget_min","TEXT DEFAULT ''"], ["budget_max","TEXT DEFAULT ''"],
+      ["loa_min","TEXT DEFAULT ''"], ["loa_max","TEXT DEFAULT ''"],
+      ["year_min","TEXT DEFAULT ''"], ["year_max","TEXT DEFAULT ''"],
+      ["make_preference","TEXT DEFAULT ''"], ["preferred_location","TEXT DEFAULT ''"],
+      ["vessel_type_pref","TEXT DEFAULT ''"], ["flybridge_pref","TEXT DEFAULT ''"],
+      ["stabilizers_pref","TEXT DEFAULT ''"], ["min_cabins","TEXT DEFAULT ''"],
+      ["engine_type_pref","TEXT DEFAULT ''"],
     ];
     for (const [col, def] of cols) {
       try { db.exec(`ALTER TABLE leads ADD COLUMN ${col} ${def}`); } catch {}
@@ -447,6 +455,13 @@ export async function readContact(id: string): Promise<ContactFlat | null> {
       additional_properties: row.additional_properties || "",
       reverify_status: row.reverify_status || "",
       broker_notes: row.broker_notes || "",
+      budget_min: row.budget_min || "", budget_max: row.budget_max || "",
+      loa_min: row.loa_min || "", loa_max: row.loa_max || "",
+      year_min: row.year_min || "", year_max: row.year_max || "",
+      make_preference: row.make_preference || "", preferred_location: row.preferred_location || "",
+      vessel_type_pref: row.vessel_type_pref || "", flybridge_pref: row.flybridge_pref || "",
+      stabilizers_pref: row.stabilizers_pref || "", min_cabins: row.min_cabins || "",
+      engine_type_pref: row.engine_type_pref || "",
     };
   } finally {
     db.close();
@@ -473,6 +488,10 @@ export async function updateContact(id: string, updates: Partial<ContactRecord>)
       "identity_confidence", "identity_verifications", "manual_corrections",
       "court_records", "professional_history", "relatives", "additional_properties", "reverify_status",
       "broker_notes",
+      // Buyer criteria
+      "budget_min", "budget_max", "loa_min", "loa_max", "year_min", "year_max",
+      "make_preference", "preferred_location", "vessel_type_pref", "flybridge_pref",
+      "stabilizers_pref", "min_cabins", "engine_type_pref",
     ];
     for (const field of allowedFields) {
       if (field in updates && updates[field as keyof ContactRecord] !== undefined) {

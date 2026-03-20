@@ -855,6 +855,20 @@ export function runMatchesForBatch(batchId: number): number {
           has_phone: !!(lead.phone && lead.phone.trim()),
           lead_status: lead.status || "new",
           last_contacted_at: lead.last_contacted_at || "",
+          // Explicit buyer criteria (Phase 3) — take priority over notes mining
+          budget_min: lead.budget_min || "",
+          budget_max: lead.budget_max || "",
+          length_min: lead.loa_min || "",
+          length_max: lead.loa_max || "",
+          year_min: lead.year_min || "",
+          year_max: lead.year_max || "",
+          make: lead.make_preference || "",
+          preferred_location: lead.preferred_location || "",
+          vessel_type_pref: lead.vessel_type_pref || "",
+          flybridge_pref: lead.flybridge_pref || "",
+          stabilizers_pref: lead.stabilizers_pref || "",
+          min_cabins: lead.min_cabins || "",
+          engine_type_pref: lead.engine_type_pref || "",
         };
 
         for (const boat of leadBoats) {

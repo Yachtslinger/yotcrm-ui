@@ -186,6 +186,20 @@ function LeadDetailPageClient({ id }: { id: string }) {
           additional_properties: data.additional_properties || "",
           reverify_status: data.reverify_status || "",
           broker_notes: data.broker_notes || "",
+          // Buyer criteria
+          budget_min: data.budget_min || "",
+          budget_max: data.budget_max || "",
+          loa_min: data.loa_min || "",
+          loa_max: data.loa_max || "",
+          year_min: data.year_min || "",
+          year_max: data.year_max || "",
+          make_preference: data.make_preference || "",
+          preferred_location: data.preferred_location || "",
+          vessel_type_pref: data.vessel_type_pref || "",
+          flybridge_pref: data.flybridge_pref || "",
+          stabilizers_pref: data.stabilizers_pref || "",
+          min_cabins: data.min_cabins || "",
+          engine_type_pref: data.engine_type_pref || "",
         };
         
         setLead(normalized);
@@ -241,6 +255,20 @@ function LeadDetailPageClient({ id }: { id: string }) {
           secondary_addresses: form.secondary_addresses,
           estimated_net_worth: form.estimated_net_worth,
           broker_notes: form.broker_notes,
+          // Buyer criteria
+          budget_min: form.budget_min,
+          budget_max: form.budget_max,
+          loa_min: form.loa_min,
+          loa_max: form.loa_max,
+          year_min: form.year_min,
+          year_max: form.year_max,
+          make_preference: form.make_preference,
+          preferred_location: form.preferred_location,
+          vessel_type_pref: form.vessel_type_pref,
+          flybridge_pref: form.flybridge_pref,
+          stabilizers_pref: form.stabilizers_pref,
+          min_cabins: form.min_cabins,
+          engine_type_pref: form.engine_type_pref,
         }),
       });
 
@@ -837,7 +865,19 @@ function LeadDetailPageClient({ id }: { id: string }) {
             onSaved={(val) => { setLead(l => l ? { ...l, broker_notes: val } : l); setForm(f => f ? { ...f, broker_notes: val } : f); }}
           />
 
-          {/* Customer Message (read-only, from lead form) */}
+          {/* ═══ BUYER CRITERIA ═══ */}
+          <BuyerCriteriaPanel
+            leadId={id}
+            lead={lead}
+            form={form}
+            editing={editing}
+            setForm={setForm}
+            onSaved={(fields) => {
+              setLead(l => l ? { ...l, ...fields } : l);
+              setForm(f => f ? { ...f, ...fields } : f);
+            }}
+          />
+
           {lead.notes && (
             <div className="border-t border-gray-200 dark:border-gray-700 pt-6 mt-6">
               <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">
@@ -970,6 +1010,203 @@ function BrokerNotesPanel({ leadId, initialValue, onSaved }: {
         style={{ minHeight: "160px", fontSize: "16px" }}
       />
       <p className="text-[11px] text-gray-400 mt-1.5">Auto-saves as you type. Use the mic button to dictate.</p>
+    </div>
+  );
+}
+
+// ─── Buyer Criteria Panel ────────────────────────────────────────────────────
+
+function BuyerCriteriaPanel({ leadId, lead, form, editing, setForm, onSaved }: {
+  leadId: string;
+  lead: Contact;
+  form: Contact | null;
+  editing: boolean;
+  setForm: (f: Contact) => void;
+  onSaved: (fields: Partial<Contact>) => void;
+}) {
+  const { toast } = useToast();
+  const [saving, setSaving] = React.useState(false);
+  const [saved, setSaved] = React.useState(false);
+
+  // Criteria that feed the match engine — count how many are filled
+  const criteria = [
+    lead.budget_min || lead.budget_max,
+    lead.loa_min || lead.loa_max,
+    lead.year_min || lead.year_max,
+    lead.make_preference,
+    lead.preferred_location,
+    lead.vessel_type_pref && lead.vessel_type_pref !== "any",
+    lead.flybridge_pref && lead.flybridge_pref !== "any",
+    lead.stabilizers_pref && lead.stabilizers_pref !== "any",
+  ];
+  const filledCount = criteria.filter(Boolean).length;
+  const totalCount = criteria.length;
+  const profileStrength = filledCount >= 6 ? "strong" : filledCount >= 4 ? "good" : filledCount >= 2 ? "partial" : "weak";
+  const strengthColor = profileStrength === "strong" ? "#059669" : profileStrength === "good" ? "#0ea5e9" : profileStrength === "partial" ? "#d97706" : "#9ca3af";
+
+  const saveField = async (fields: Partial<Contact>) => {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/clients/${encodeURIComponent(decodeURIComponent(leadId))}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fields),
+      });
+      if (!res.ok) throw new Error("Failed");
+      onSaved(fields);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    } catch { toast("Failed to save", "error"); }
+    finally { setSaving(false); }
+  };
+
+  // Mini input used throughout this panel
+  const F = ({ label, field, placeholder, half }: {
+    label: string; field: keyof Contact; placeholder?: string; half?: boolean;
+  }) => (
+    <div className={half ? "" : ""}>
+      <label className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 block mb-1">{label}</label>
+      <input
+        value={(editing ? form?.[field] : lead[field]) as string || ""}
+        onChange={e => editing && form && setForm({ ...form, [field]: e.target.value })}
+        onBlur={e => {
+          if (!editing && e.target.value !== (lead[field] as string || "")) {
+            saveField({ [field]: e.target.value });
+          }
+        }}
+        placeholder={placeholder || ""}
+        readOnly={editing ? false : false}
+        className="w-full rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 text-gray-800 dark:text-gray-100"
+        style={{ minHeight: "40px" }}
+      />
+    </div>
+  );
+
+  const Sel = ({ label, field, options }: {
+    label: string; field: keyof Contact; options: { value: string; label: string }[];
+  }) => (
+    <div>
+      <label className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 block mb-1">{label}</label>
+      <select
+        value={(editing ? form?.[field] : lead[field]) as string || ""}
+        onChange={e => {
+          const val = e.target.value;
+          if (editing && form) { setForm({ ...form, [field]: val }); }
+          else { saveField({ [field]: val }); }
+        }}
+        className="w-full rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 text-gray-800 dark:text-gray-100"
+        style={{ minHeight: "40px" }}
+      >
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </div>
+  );
+
+  return (
+    <div className="border-t border-gray-200 dark:border-gray-700 pt-6 mt-6">
+      {/* Header with match profile indicator */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">
+            🎯 Buyer Criteria
+          </h2>
+          <span className="text-[10px] font-normal text-gray-400 normal-case tracking-normal">
+            — feeds directly into the match engine
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          {saved && <span className="text-xs font-semibold" style={{ color: "#059669" }}>✓ Saved</span>}
+          {saving && <span className="text-xs text-gray-400">Saving…</span>}
+          {/* Match profile strength badge */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold"
+            style={{ background: `${strengthColor}18`, color: strengthColor }}>
+            {filledCount}/{totalCount} criteria
+            {profileStrength === "strong" && " · Strong"}
+            {profileStrength === "good" && " · Good"}
+            {profileStrength === "partial" && " · Partial"}
+            {profileStrength === "weak" && " · Weak"}
+          </div>
+        </div>
+      </div>
+
+      {/* Match profile bar */}
+      <div className="h-1.5 rounded-full bg-gray-100 dark:bg-neutral-800 mb-5 overflow-hidden">
+        <div className="h-full rounded-full transition-all duration-500"
+          style={{ width: `${(filledCount / totalCount) * 100}%`, background: strengthColor }} />
+      </div>
+
+      <div className="space-y-4">
+        {/* Budget */}
+        <div>
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 block mb-1.5">Budget Range</label>
+          <div className="grid grid-cols-2 gap-2">
+            <F label="Min ($)" field="budget_min" placeholder="e.g. 1000000" />
+            <F label="Max ($)" field="budget_max" placeholder="e.g. 3500000" />
+          </div>
+        </div>
+
+        {/* LOA */}
+        <div>
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 block mb-1.5">LOA Range (feet)</label>
+          <div className="grid grid-cols-2 gap-2">
+            <F label="Min (ft)" field="loa_min" placeholder="e.g. 65" />
+            <F label="Max (ft)" field="loa_max" placeholder="e.g. 90" />
+          </div>
+        </div>
+
+        {/* Year */}
+        <div>
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 block mb-1.5">Build Year Range</label>
+          <div className="grid grid-cols-2 gap-2">
+            <F label="From" field="year_min" placeholder="e.g. 2015" />
+            <F label="To" field="year_max" placeholder="e.g. 2024" />
+          </div>
+        </div>
+
+        {/* Make + Location */}
+        <div className="grid grid-cols-2 gap-3">
+          <F label="Make Preference" field="make_preference" placeholder="e.g. Azimut" />
+          <F label="Preferred Location" field="preferred_location" placeholder="e.g. Florida, Med" />
+        </div>
+
+        {/* Vessel type + Flybridge */}
+        <div className="grid grid-cols-2 gap-3">
+          <Sel label="Vessel Type" field="vessel_type_pref" options={[
+            { value: "", label: "Any type" },
+            { value: "motor_yacht", label: "Motor Yacht" },
+            { value: "sailing", label: "Sailing" },
+            { value: "explorer", label: "Explorer / Trawler" },
+            { value: "sport", label: "Sport / Sportfish" },
+            { value: "catamaran", label: "Catamaran" },
+            { value: "mega", label: "Superyacht / Mega" },
+          ]} />
+          <Sel label="Flybridge" field="flybridge_pref" options={[
+            { value: "", label: "Any" },
+            { value: "yes", label: "Flybridge required" },
+            { value: "no", label: "No flybridge (express)" },
+          ]} />
+        </div>
+
+        {/* Stabilizers + Engine + Cabins */}
+        <div className="grid grid-cols-3 gap-3">
+          <Sel label="Stabilizers" field="stabilizers_pref" options={[
+            { value: "", label: "Any" },
+            { value: "yes", label: "Required" },
+            { value: "no", label: "Not required" },
+          ]} />
+          <Sel label="Engine Type" field="engine_type_pref" options={[
+            { value: "", label: "Any" },
+            { value: "diesel", label: "Diesel" },
+            { value: "gas", label: "Gas" },
+            { value: "hybrid", label: "Hybrid" },
+          ]} />
+          <F label="Min Cabins" field="min_cabins" placeholder="e.g. 4" />
+        </div>
+      </div>
+
+      <p className="text-[11px] text-gray-400 mt-4">
+        Fields auto-save on blur. More criteria filled = more accurate matches.
+      </p>
     </div>
   );
 }
