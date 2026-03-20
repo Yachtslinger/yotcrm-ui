@@ -29,11 +29,24 @@ export async function POST(req: NextRequest) {
     ].join("\n");
 
 
-    const prompt = `You are a superyacht operations consultant and financial analyst. Analyze this vessel and return ONLY a valid JSON object — no markdown, no explanation, just raw JSON.
+    const prompt = `You are a superyacht operations consultant producing a budget for a yacht broker to share with a prospective buyer. Analyze this vessel and return ONLY a valid JSON object — no markdown, no explanation, just raw JSON.
 
 VESSEL:
 ${vesselSummary}
 URL: ${url || v.url || ""}
+
+SCENARIO DEFINITIONS — follow these exactly:
+- LOW = lean private ownership: minimal cruising (400-600 hrs/year), home port in a cost-efficient location (Spain, Turkey, Florida municipal), smallest viable crew, deferred non-essential capex.
+- MID = realistic private ownership: moderate use (700-1,000 hrs/year), mix of home port and seasonal cruising, properly staffed crew, routine maintenance on schedule, typical capex reserve. This is what a well-run private yacht actually costs — NOT a charter operation.
+- HIGH = active/intensive ownership: heavy use (1,200-1,800 hrs/year), premium Med ports (Monaco, Antibes, Porto Cervo), full charter-ready crew and standards, aggressive capex.
+
+CALIBRATION RULES — apply every figure against these:
+- Captain salary: scales with vessel size. Under 40m = $100-130k. 40-55m = $140-180k. 55m+ = $180-230k. Do not underestimate.
+- Fuel: displacement hulls burn LESS than planing hulls. Use realistic burn rates: under 30m = 40-80 L/hr; 30-45m = 80-150 L/hr; 45-60m = 120-220 L/hr; 60m+ = 200-350 L/hr. Mid scenario = moderate hours, not heavy use.
+- Dockage: Mid = home port contract + occasional cruising. NOT a full premium Med season. For a Florida/US home port mid = $80-150/ft/year. Med home port mid = €120-200/ft/year.
+- Insurance hull: 1.0-1.25% of vessel value for mid private use. 1.5-1.75% only for high scenario or charter.
+- Capital improvements: annualize realistically. Paint on a GRP hull every 5-7 years, steel every 3-5 years. Engineering reserves based on engine hours and age. Mid should NOT assume everything happens in year one.
+- Total annual cost sanity check: should be roughly 8-12% of vessel value for mid private ownership. Flag mentally if you are outside this range.
 
 JSON structure (all numbers are annual USD amounts):
 {
@@ -96,14 +109,12 @@ JSON structure (all numbers are annual USD amounts):
     "tendersToys": {"low":0,"mid":0,"high":0},
     "other": {"low":0,"mid":0,"high":0}
   },
-  "assumptions": "1-2 sentences on usage assumptions",
-  "rangeExplanation": "1-2 sentences explaining the cost range",
-  "categoryBreakdown": "2-3 sentences covering key cost categories",
-  "crewStructureNote": "2-3 sentences: crew roles, total salary range, savings if one crew removed",
+  "assumptions": "1-2 sentences: vessel size, estimated value, usage hours and home port assumed for mid scenario",
+  "rangeExplanation": "1-2 sentences: what drives the gap between low and high",
+  "categoryBreakdown": "2-3 sentences: top 3 cost categories and what moves them",
+  "crewStructureNote": "2-3 sentences: crew complement for this vessel size, total salary mid, saving from removing one position",
   "keyDrivers": "Top 3 cost drivers, one sentence each"
-}
-
-Rules: use real operational logic, fuel based on burn rate and hours, dockage based on region, insurance 1-1.75% of vessel value, all values realistic and defensible.`;
+}`;
 
 
     const message = await fetch("https://api.anthropic.com/v1/messages", {
