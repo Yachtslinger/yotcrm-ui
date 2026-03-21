@@ -1051,19 +1051,28 @@ export function generateMatchTodos(batchId: number): { human: number; bot: numbe
         ? `$${numPrice.toLocaleString()}`
         : m.asking_price || "";
 
-      // Dedup: skip if this lead already has an open todo for any listing with the same URL
-      // (same boat appears in multiple batches with different parsed_listing IDs)
-      const dupCheck = db.prepare(
-        `SELECT t.id FROM todos t
-         JOIN parsed_listings pl ON pl.id = t.listing_id
-         WHERE t.lead_id=? AND t.completed=0 AND t.todo_type='match'
-           AND pl.listing_url=? AND pl.listing_url != ''`
-      ).get(m.lead_id || -1, m.listing_url || "") as any;
-      // Also check by listing_id directly (handles no-URL case)
-      const dupCheck2 = !dupCheck
+      // Dedup: skip if this lead already has an open match todo for the same vessel
+      // Strategy: URL match first (most reliable), then make+loa+year fingerprint fallback
+      const dupByUrl = m.listing_url
+        ? db.prepare(`
+            SELECT t.id FROM todos t
+            JOIN parsed_listings pl ON pl.id = t.listing_id
+            WHERE t.lead_id=? AND t.completed=0 AND t.todo_type='match'
+              AND pl.listing_url=? AND pl.listing_url != ''
+          `).get(m.lead_id || -1, m.listing_url) as any
+        : null;
+      const dupByFingerprint = !dupByUrl
+        ? db.prepare(`
+            SELECT t.id FROM todos t
+            JOIN parsed_listings pl ON pl.id = t.listing_id
+            WHERE t.lead_id=? AND t.completed=0 AND t.todo_type='match'
+              AND LOWER(pl.make)=LOWER(?) AND pl.loa=? AND pl.year=?
+          `).get(m.lead_id || -1, m.make || "", m.loa || "", m.year || "") as any
+        : null;
+      const dupById = (!dupByUrl && !dupByFingerprint)
         ? db.prepare("SELECT id FROM todos WHERE lead_id=? AND listing_id=? AND completed=0").get(m.lead_id || -1, m.listing_id) as any
         : null;
-      if (dupCheck || dupCheck2) continue;
+      if (dupByUrl || dupByFingerprint || dupById) continue;
 
       const reasons  = storedReasons;
       const topReason = reasons[0] || "";

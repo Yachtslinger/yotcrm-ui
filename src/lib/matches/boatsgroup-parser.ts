@@ -153,8 +153,11 @@ function extractListingsFromBlock(
       while (k >= 0 && !lines[k].trim()) k--;
 
       // Boat name line (e.g. "Ocean Alexander 72 Pilothouse")
+      // Guard: skip lines that look like field labels (Length:, Year:, Price:, Location:, Brokerage:)
       if (k >= 0) {
-        boatName = lines[k].trim().replace(/\s*$/, "");
+        const candidate = lines[k].trim().replace(/\s*$/, "");
+        const isFieldLabel = /^(Length|Year|Price|Location|Brokerage|Search Criteria|result)[\s:]/i.test(candidate);
+        boatName = isFieldLabel ? "" : candidate;
       }
 
       // Parse make/model from boat name
