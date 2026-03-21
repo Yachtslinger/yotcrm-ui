@@ -50,62 +50,242 @@ const GROUP_LABELS: Record<string, string> = {
   account: "Account",
 };
 
-/* ─── Search Overlay ─── */
-function SearchOverlay({ open, onClose }: { open: boolean; onClose: () => void }) {
+/* ─── Command Palette (⌘K) ─── */
+type CmdResult = {
+  leads: any[];
+  todos: any[];
+  listings: any[];
+};
+
+function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const [query, setQuery] = useState("");
+  const [results, setResults] = useState<CmdResult>({ leads: [], todos: [], listings: [] });
+  const [loading, setLoading] = useState(false);
+  const [cursor, setCursor] = useState(0);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (open) { setQuery(""); setTimeout(() => inputRef.current?.focus(), 50); }
+    if (open) { setQuery(""); setResults({ leads: [], todos: [], listings: [] }); setCursor(0); setTimeout(() => inputRef.current?.focus(), 50); }
   }, [open]);
 
-  const results = query.trim().length > 0
-    ? NAV_ITEMS.filter(i => i.label.toLowerCase().includes(query.toLowerCase()))
-    : [];
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!query.trim()) { setResults({ leads: [], todos: [], listings: [] }); setLoading(false); return; }
+    setLoading(true);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/command-search?q=${encodeURIComponent(query)}`);
+        setResults(await r.json());
+      } catch { /* ignore */ }
+      setLoading(false);
+    }, 160);
+  }, [query]);
 
-  const go = (href: string) => { router.push(href); onClose(); };
+  // Flatten all items for keyboard nav
+  const pageResults = query.trim() ? NAV_ITEMS.filter(i => i.label.toLowerCase().includes(query.toLowerCase())) : [];
+  type FlatItem =
+    | { kind: "page";    href: string; label: string; Icon: React.ElementType; color: string }
+    | { kind: "lead";    id: string;   name: string;  status: string; boat: string; email: string }
+    | { kind: "todo";    id: number;   text: string;  leadName: string; priority: string }
+    | { kind: "listing"; id: number;   label: string; price: string; location: string; batchId: number };
+
+  const flat: FlatItem[] = [
+    ...pageResults.map(p => ({ kind: "page" as const, href: p.href, label: p.label, Icon: p.Icon, color: p.color })),
+    ...results.leads.map(l => ({
+      kind: "lead" as const,
+      id: String(l.id),
+      name: [l.first_name, l.last_name].filter(Boolean).join(" ") || l.email || "Unknown",
+      status: l.status || "new",
+      boat: [l.boat_year, l.boat_make, l.boat_model].filter(Boolean).join(" "),
+      email: l.email || "",
+    })),
+    ...results.todos.map(t => ({
+      kind: "todo" as const,
+      id: t.id,
+      text: t.text?.replace(/\[Score:\s*\d+\]/, "").replace(/\n/g, " ").trim() || "",
+      leadName: t.lead_name || "",
+      priority: t.priority || "normal",
+    })),
+    ...results.listings.map(l => ({
+      kind: "listing" as const,
+      id: l.id,
+      label: [l.year, l.make, l.model].filter(Boolean).join(" ") || "Unknown vessel",
+      price: l.asking_price || "",
+      location: l.location || "",
+      batchId: l.batch_id,
+    })),
+  ];
+
+  const go = (item: FlatItem) => {
+    if (item.kind === "page")    router.push(item.href);
+    if (item.kind === "lead")    router.push(`/clients/${item.id}`);
+    if (item.kind === "todo")    router.push("/todos");
+    if (item.kind === "listing") router.push(`/matches?batchId=${item.batchId}`);
+    onClose();
+  };
 
   const handleKey = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") onClose();
-    if (e.key === "Enter" && results.length > 0) go(results[0].href);
+    if (e.key === "Escape") { onClose(); return; }
+    if (e.key === "ArrowDown") { e.preventDefault(); setCursor(c => Math.min(c + 1, flat.length - 1)); return; }
+    if (e.key === "ArrowUp")   { e.preventDefault(); setCursor(c => Math.max(c - 1, 0)); return; }
+    if (e.key === "Enter" && flat[cursor]) { go(flat[cursor]); return; }
+  };
+
+  const statusColor = (s: string) => {
+    const m: Record<string, string> = { hot: "#ef4444", warm: "#f97316", cold: "#6b7280", nurture: "#3b82f6", client: "#7c3aed", new: "#059669" };
+    return m[s] || m.new;
   };
 
   if (!open) return null;
+
+  const isEmpty = !loading && query.trim() && flat.length === 0;
+  const showEmpty = query.trim().length === 0;
+
+  let globalIdx = 0;
+  const renderSection = (label: string, items: FlatItem[]) => {
+    if (items.length === 0) return null;
+    return (
+      <div key={label}>
+        <div className="px-4 py-1.5 text-[10px] font-bold tracking-widest uppercase"
+          style={{ color: "var(--navy-400, rgba(255,255,255,0.3))", borderTop: "1px solid var(--border, rgba(255,255,255,0.08))" }}>
+          {label}
+        </div>
+        {items.map(item => {
+          const idx = globalIdx++;
+          const active = cursor === idx;
+          return (
+            <button key={`${item.kind}-${item.kind === "page" ? item.href : item.id}`}
+              onClick={() => go(item)}
+              onMouseEnter={() => setCursor(idx)}
+              className="w-full flex items-start gap-3 px-4 py-2.5 text-left transition-colors"
+              style={{ background: active ? "rgba(201,165,92,0.12)" : "transparent" }}>
+              {item.kind === "page" && (
+                <>
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                    style={{ background: item.color + "20" }}>
+                    <item.Icon style={{ width: 14, height: 14, color: item.color }} />
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium" style={{ color: "var(--foreground)" }}>{item.label}</div>
+                    <div className="text-[11px]" style={{ color: "var(--navy-400)" }}>{item.href}</div>
+                  </div>
+                </>
+              )}
+              {item.kind === "lead" && (
+                <>
+                  <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 text-xs font-bold"
+                    style={{ background: statusColor(item.status) + "20", color: statusColor(item.status) }}>
+                    {item.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium" style={{ color: "var(--foreground)" }}>{item.name}</span>
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                        style={{ background: statusColor(item.status) + "15", color: statusColor(item.status) }}>
+                        {item.status}
+                      </span>
+                    </div>
+                    <div className="text-[11px] truncate" style={{ color: "var(--navy-400)" }}>
+                      {item.boat || item.email || "—"}
+                    </div>
+                  </div>
+                </>
+              )}
+              {item.kind === "todo" && (
+                <>
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                    style={{ background: item.priority === "high" ? "rgba(239,68,68,0.12)" : "rgba(245,158,11,0.12)" }}>
+                    <span style={{ fontSize: 14 }}>✓</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium truncate" style={{ color: "var(--foreground)" }}>{item.text}</div>
+                    {item.leadName && <div className="text-[11px]" style={{ color: "var(--navy-400)" }}>{item.leadName}</div>}
+                  </div>
+                </>
+              )}
+              {item.kind === "listing" && (
+                <>
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                    style={{ background: "rgba(139,92,246,0.12)" }}>
+                    <span style={{ fontSize: 14 }}>⚡</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium" style={{ color: "var(--foreground)" }}>{item.label}</div>
+                    <div className="text-[11px]" style={{ color: "var(--navy-400)" }}>
+                      {[item.price, item.location].filter(Boolean).join(" · ")}
+                    </div>
+                  </div>
+                </>
+              )}
+              {active && <span className="text-[10px] ml-auto shrink-0 self-center" style={{ color: "var(--navy-400)" }}>↵</span>}
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const pageSec    = flat.filter(i => i.kind === "page");
+  const leadSec    = flat.filter(i => i.kind === "lead");
+  const todoSec    = flat.filter(i => i.kind === "todo");
+  const listingSec = flat.filter(i => i.kind === "listing");
+  // reset for render
+  globalIdx = 0;
+
   return (
     <div className="fixed inset-0" style={{ zIndex: 9999 }}>
-      <div className="absolute inset-0 bg-[rgba(6,14,26,0.6)] backdrop-blur-sm" onClick={onClose} />
-      <div className="relative mx-auto mt-[15vh] w-[92%] max-w-lg">
-        <div className="rounded-2xl overflow-hidden" style={{ background: "var(--card)", boxShadow: "var(--shadow-modal)" }}>
-          <div className="flex items-center gap-3 px-5 py-4 border-b" style={{ borderColor: "var(--border)" }}>
+      <div className="absolute inset-0 bg-[rgba(6,14,26,0.65)] backdrop-blur-sm" onClick={onClose} />
+      <div className="relative mx-auto mt-[12vh] w-[92%] max-w-xl">
+        <div className="rounded-2xl overflow-hidden" style={{ background: "var(--card)", boxShadow: "0 25px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06)" }}>
+          {/* Input */}
+          <div className="flex items-center gap-3 px-4 py-3.5" style={{ borderBottom: "1px solid var(--border)" }}>
             <Search className="w-5 h-5 shrink-0" style={{ color: "var(--navy-300)" }} />
-            <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)}
-              onKeyDown={handleKey} placeholder="Jump to any page..."
-              className="flex-1 text-base bg-transparent outline-none" style={{ color: "var(--foreground)" }} />
-            <button onClick={onClose} className="icon-btn icon-btn-sm"><X /></button>
+            <input ref={inputRef} value={query} onChange={e => { setQuery(e.target.value); setCursor(0); }}
+              onKeyDown={handleKey}
+              placeholder="Search leads, todos, listings, pages…"
+              className="flex-1 text-[15px] bg-transparent outline-none"
+              style={{ color: "var(--foreground)" }} />
+            {loading && <div className="w-4 h-4 rounded-full border-2 animate-spin shrink-0" style={{ borderColor: "var(--navy-300)", borderTopColor: "var(--brass-400)" }} />}
+            {!loading && <button onClick={onClose}><X className="w-4 h-4" style={{ color: "var(--navy-400)" }} /></button>}
           </div>
-          <div className="max-h-[50vh] overflow-y-auto">
-            {query.trim().length === 0 ? (
-              <div className="px-5 py-8 text-center">
-                <p className="text-sm mb-2" style={{ color: "var(--navy-400)" }}>Jump to any page</p>
-                <div className="flex items-center justify-center gap-1.5">
-                  <span className="kbd">⌘</span><span className="kbd">K</span>
+
+          {/* Results */}
+          <div className="max-h-[60vh] overflow-y-auto">
+            {showEmpty && (
+              <div className="px-4 py-6 text-center">
+                <p className="text-sm font-medium mb-1" style={{ color: "var(--navy-500)" }}>Search leads, todos, listings, pages</p>
+                <div className="flex items-center justify-center gap-1.5 mt-2">
+                  <span className="px-2 py-0.5 rounded text-xs font-mono" style={{ background: "var(--sand-100, rgba(255,255,255,0.06))", color: "var(--navy-400)" }}>⌘K</span>
+                  <span className="text-xs" style={{ color: "var(--navy-400)" }}>to open · ESC to close · ↑↓ navigate · ↵ select</span>
                 </div>
               </div>
-            ) : results.length === 0 ? (
-              <div className="px-5 py-8 text-center text-sm" style={{ color: "var(--navy-400)" }}>No results</div>
-            ) : (
-              <div className="py-2">
-                {results.map(item => (
-                  <button key={item.href} onClick={() => go(item.href)}
-                    className="w-full flex items-center gap-3 px-5 py-3 text-left hover:bg-[var(--sand-100)] transition-colors">
-                    <item.Icon className="w-5 h-5 shrink-0" style={{ color: "var(--navy-400)" }} />
-                    <span className="text-sm font-medium" style={{ color: "var(--navy-700)" }}>{item.label}</span>
-                  </button>
-                ))}
+            )}
+            {isEmpty && (
+              <div className="px-4 py-8 text-center text-sm" style={{ color: "var(--navy-400)" }}>
+                No results for &ldquo;{query}&rdquo;
               </div>
             )}
+            {!showEmpty && !isEmpty && (
+              <>
+                {renderSection("Pages", pageSec)}
+                {renderSection("Leads", leadSec)}
+                {renderSection("Todos", todoSec)}
+                {renderSection("Listings", listingSec)}
+              </>
+            )}
           </div>
+
+          {/* Footer hint */}
+          {!showEmpty && flat.length > 0 && (
+            <div className="flex items-center justify-end gap-3 px-4 py-2" style={{ borderTop: "1px solid var(--border)" }}>
+              <span className="text-[10px]" style={{ color: "var(--navy-400)" }}>
+                {flat.length} result{flat.length !== 1 ? "s" : ""}
+              </span>
+              <span className="text-[10px]" style={{ color: "var(--navy-400)" }}>↑↓ navigate · ↵ open</span>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -412,7 +592,7 @@ export default function NavShell({ children }: { children: React.ReactNode }) {
       <AppsSheet open={appsOpen} onClose={() => setAppsOpen(false)} isActive={isActive} />
 
       {/* Search overlay — shared */}
-      <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
     </>
   );
 }
