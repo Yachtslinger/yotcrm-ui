@@ -1187,6 +1187,7 @@ export type MatchFilters = {
   search?: string;
   page?: number;
   pageSize?: number;
+  sortBy?: string;           // "score" | "newest_listing" | "active_buyer" | "new_to_market" | "stale"
 };
 
 export function listMatchesForPage(filters: MatchFilters = {}): { matches: ListingMatch[]; total: number } {
@@ -1223,6 +1224,17 @@ export function listMatchesForPage(filters: MatchFilters = {}): { matches: Listi
     const pageSize = filters.pageSize || 50;
     const offset = (page - 1) * pageSize;
 
+    // Sort mapping — section F from the original spec
+    const sortMap: Record<string, string> = {
+      score:          "lm.match_score DESC, pl.created_at DESC",
+      newest_listing: "pl.created_at DESC, lm.match_score DESC",
+      active_buyer:   "l.last_contacted_at DESC, lm.match_score DESC",
+      builder_match:  "CASE WHEN LOWER(pl.make) = LOWER(COALESCE((SELECT b2.make FROM boats b2 WHERE b2.lead_id=lm.lead_id ORDER BY b2.added_at DESC LIMIT 1),'')) THEN 0 ELSE 1 END ASC, lm.match_score DESC",
+      new_to_market:  "pl.listed_at DESC, lm.match_score DESC",
+      stale:          "lm.match_score ASC, pl.created_at ASC",
+    };
+    const orderBy = sortMap[filters.sortBy || "score"] || sortMap.score;
+
     const baseQuery = `
       FROM listing_matches lm
       JOIN parsed_listings pl ON lm.listing_id = pl.id
@@ -1245,7 +1257,7 @@ export function listMatchesForPage(filters: MatchFilters = {}): { matches: Listi
         l.status AS lead_status, l.notes AS lead_notes,
         bs.buyer_name AS iso_name, bs.buyer_email AS iso_email, bs.buyer_phone AS iso_phone
       ${baseQuery}
-      ORDER BY lm.match_score DESC
+      ORDER BY ${orderBy}
       LIMIT ? OFFSET ?
     `).all(...params, pageSize, offset) as any[];
 

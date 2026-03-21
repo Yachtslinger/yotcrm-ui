@@ -91,6 +91,7 @@ export default function MatchesPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [batchFilter, setBatchFilter] = useState<number | null>(null);
+  const [sortBy, setSortBy] = useState("score");
 
   // UI state
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -123,13 +124,14 @@ export default function MatchesPage() {
       if (search) params.set("search", search);
       if (statusFilter) params.set("status", statusFilter);
       if (batchFilter) params.set("batchId", String(batchFilter));
+      if (sortBy !== "score") params.set("sortBy", sortBy);
       const res = await fetch(`/api/matches/list?${params}`);
       const data = await res.json();
       setMatches(data.matches || []);
       setTotal(data.total || 0);
     } catch (e) { console.error(e); }
     setLoading(false);
-  }, [confidence, minScore, search, statusFilter, batchFilter]);
+  }, [confidence, minScore, search, statusFilter, batchFilter, sortBy]);
 
   const fetchBatches = useCallback(async () => {
     try {
@@ -371,6 +373,27 @@ export default function MatchesPage() {
               </div>
 
               <div className="flex flex-wrap gap-2 mt-3">
+                {/* ── Sort pills ── */}
+                {[
+                  { id: "score",          label: "Strongest Match" },
+                  { id: "newest_listing", label: "Newest Listing"  },
+                  { id: "active_buyer",   label: "Active Buyer"    },
+                  { id: "new_to_market",  label: "New to Market"   },
+                  { id: "stale",          label: "Stale / Low"     },
+                ].map(s => (
+                  <button key={s.id} onClick={() => setSortBy(s.id)}
+                    className="px-3 py-1.5 rounded-full text-xs font-semibold transition-colors"
+                    style={{
+                      background: sortBy === s.id ? "var(--navy-800)" : "var(--sand-100)",
+                      color: sortBy === s.id ? "#fff" : "var(--navy-500)",
+                      border: `1px solid ${sortBy === s.id ? "var(--navy-700)" : "var(--border)"}`,
+                    }}>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap gap-2 mt-2">
                 {["", "high", "medium", "low"].map(c => (
                   <button key={c}
                     onClick={() => setConfidence(c)}

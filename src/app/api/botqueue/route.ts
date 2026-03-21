@@ -94,8 +94,10 @@ export async function POST(req: NextRequest) {
             continue;
           }
 
-          // Parse the email draft
-          const lines = (todo.email_draft as string).split("\n");
+          // Parse the email draft — strip machine-readable metadata section before sending
+          const cleanDraft = (todo.email_draft as string)
+            .replace(/\n---match-metadata---[\s\S]*?---\n?/g, "").trimEnd();
+          const lines = cleanDraft.split("\n");
           const toLine = lines.find(l => l.startsWith("To:"))?.replace("To:", "").trim();
           const subjLine = lines.find(l => l.startsWith("Subject:"))?.replace("Subject:", "").trim();
           const bodyStart = lines.findIndex(l => l.startsWith("Hi "));

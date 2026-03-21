@@ -21,6 +21,7 @@ export async function GET(req: NextRequest) {
       search: sp.get("search") || undefined,
       page: sp.get("page") ? Number(sp.get("page")) : 1,
       pageSize: sp.get("pageSize") ? Number(sp.get("pageSize")) : 50,
+      sortBy: sp.get("sortBy") || "score",
     };
 
     // If matchId param, return single detail
