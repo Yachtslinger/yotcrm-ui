@@ -1051,11 +1051,19 @@ export function generateMatchTodos(batchId: number): { human: number; bot: numbe
         ? `$${numPrice.toLocaleString()}`
         : m.asking_price || "";
 
-      // Dedup: skip if this listing already has an open todo for this lead
+      // Dedup: skip if this lead already has an open todo for any listing with the same URL
+      // (same boat appears in multiple batches with different parsed_listing IDs)
       const dupCheck = db.prepare(
-        "SELECT id FROM todos WHERE lead_id=? AND listing_id=? AND completed=0"
-      ).get(m.lead_id || -1, m.listing_id) as any;
-      if (dupCheck) continue;
+        `SELECT t.id FROM todos t
+         JOIN parsed_listings pl ON pl.id = t.listing_id
+         WHERE t.lead_id=? AND t.completed=0 AND t.todo_type='match'
+           AND pl.listing_url=? AND pl.listing_url != ''`
+      ).get(m.lead_id || -1, m.listing_url || "") as any;
+      // Also check by listing_id directly (handles no-URL case)
+      const dupCheck2 = !dupCheck
+        ? db.prepare("SELECT id FROM todos WHERE lead_id=? AND listing_id=? AND completed=0").get(m.lead_id || -1, m.listing_id) as any
+        : null;
+      if (dupCheck || dupCheck2) continue;
 
       const reasons  = storedReasons;
       const topReason = reasons[0] || "";
