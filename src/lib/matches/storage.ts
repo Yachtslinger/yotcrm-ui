@@ -1184,6 +1184,7 @@ export type MatchFilters = {
   budgetMax?: number;
   leadStatus?: string;
   status?: string;           // "new" | "contacted" | "dismissed" | "snoozed"
+  leadId?: number;           // filter to a specific lead's matches
   search?: string;
   page?: number;
   pageSize?: number;
@@ -1202,6 +1203,7 @@ export function listMatchesForPage(filters: MatchFilters = {}): { matches: Listi
     if (filters.minScore !== undefined) { conditions.push("lm.match_score >= ?"); params.push(filters.minScore); }
     if (filters.maxScore !== undefined) { conditions.push("lm.match_score <= ?"); params.push(filters.maxScore); }
     if (filters.status) { conditions.push("lm.status = ?"); params.push(filters.status); }
+    if (filters.leadId) { conditions.push("lm.lead_id = ?"); params.push(filters.leadId); }
 
     // Listing filters
     if (filters.make) { conditions.push("LOWER(pl.make) LIKE ?"); params.push(`%${filters.make.toLowerCase()}%`); }
