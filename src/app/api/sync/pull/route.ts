@@ -30,6 +30,10 @@ export async function GET(req: NextRequest) {
       iso_requests: safeAll("SELECT * FROM iso_requests ORDER BY id"),
       marinas: safeAll("SELECT * FROM marinas ORDER BY id"),
       my_listings: safeAll("SELECT * FROM my_listings ORDER BY id"),
+      // Match engine tables — preserved across deploys
+      email_batches: safeAll("SELECT * FROM email_batches ORDER BY id"),
+      parsed_listings: safeAll("SELECT * FROM parsed_listings ORDER BY id"),
+      listing_matches: safeAll("SELECT * FROM listing_matches ORDER BY id"),
     });
   } finally {
     db.close();

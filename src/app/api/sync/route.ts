@@ -29,7 +29,8 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { leads = [], boats = [], todos = [], pocket_listings = [], iso_requests = [], marinas = [],
       listings = [], enrichment_profiles = [], enrichment_sources = [], score_weights = [],
-      vessel_owners = [], buyer_searches = [] } = body;
+      vessel_owners = [], buyer_searches = [],
+      email_batches = [], parsed_listings = [], listing_matches = [] } = body;
 
     const db = getDb();
     try {
@@ -395,6 +396,66 @@ export async function POST(req: Request) {
         CREATE TABLE IF NOT EXISTS vessel_matches (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id INTEGER NOT NULL, iso_id INTEGER NOT NULL, match_score INTEGER DEFAULT 0, match_reasons TEXT DEFAULT '', status TEXT DEFAULT 'new', notes TEXT DEFAULT '', created_at TEXT NOT NULL, FOREIGN KEY (owner_id) REFERENCES vessel_owners(id) ON DELETE CASCADE, FOREIGN KEY (iso_id) REFERENCES buyer_searches(id) ON DELETE CASCADE, UNIQUE(owner_id, iso_id));
       `);
 
+      // ── Restore match engine tables (email_batches, parsed_listings, listing_matches) ──
+      // These are ephemeral on Railway — sync preserves them across deploys
+      if (email_batches.length > 0) {
+        const upsertBatch = db.prepare(`
+          INSERT INTO email_batches (id, source, subject, sender, content_hash, raw_content,
+            listing_count, match_count, status, error_log, created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?)
+          ON CONFLICT(id) DO UPDATE SET
+            listing_count=excluded.listing_count, match_count=excluded.match_count,
+            status=excluded.status
+        `);
+        for (const b of email_batches) {
+          upsertBatch.run(b.id, b.source||'', b.subject||'', b.sender||'',
+            b.content_hash||'', b.raw_content||'',
+            b.listing_count||0, b.match_count||0,
+            b.status||'processed', b.error_log||'',
+            b.created_at||new Date().toISOString());
+        }
+      }
+      if (parsed_listings.length > 0) {
+        // Add Phase-1 columns if missing
+        try { db.exec("ALTER TABLE parsed_listings ADD COLUMN listed_at TEXT DEFAULT ''"); } catch {}
+        try { db.exec("ALTER TABLE parsed_listings ADD COLUMN days_on_market INTEGER DEFAULT 0"); } catch {}
+        try { db.exec("ALTER TABLE parsed_listings ADD COLUMN denison_url TEXT DEFAULT ''"); } catch {}
+        const upsertListing = db.prepare(`
+          INSERT INTO parsed_listings (id, batch_id, make, model, year, loa, asking_price,
+            location, vessel_type, features, listing_url, broker_notes, raw_text,
+            content_hash, section, brokerage, created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          ON CONFLICT(id) DO NOTHING
+        `);
+        for (const l of parsed_listings) {
+          upsertListing.run(l.id, l.batch_id, l.make||'', l.model||'', l.year||'',
+            l.loa||'', l.asking_price||'', l.location||'', l.vessel_type||'',
+            l.features||'', l.listing_url||'', l.broker_notes||'', l.raw_text||'',
+            l.content_hash||'', l.section||'', l.brokerage||'',
+            l.created_at||new Date().toISOString());
+        }
+      }
+      if (listing_matches.length > 0) {
+        // Add Phase-1 columns if missing
+        try { db.exec("ALTER TABLE listing_matches ADD COLUMN penalty_log TEXT DEFAULT '[]'"); } catch {}
+        try { db.exec("ALTER TABLE listing_matches ADD COLUMN positive_hits INTEGER DEFAULT 0"); } catch {}
+        const upsertMatch = db.prepare(`
+          INSERT INTO listing_matches (id, listing_id, lead_id, iso_id, batch_id,
+            match_score, confidence, reasons, conflicts, status, notes, contacted_at, created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+          ON CONFLICT(id) DO UPDATE SET
+            status=CASE WHEN excluded.status='dismissed' THEN 'dismissed' ELSE listing_matches.status END,
+            contacted_at=COALESCE(excluded.contacted_at, listing_matches.contacted_at)
+        `);
+        for (const m of listing_matches) {
+          upsertMatch.run(m.id, m.listing_id, m.lead_id||null, m.iso_id||null,
+            m.batch_id, m.match_score||0, m.confidence||'low',
+            m.reasons||'[]', m.conflicts||'[]',
+            m.status||'new', m.notes||'', m.contacted_at||null,
+            m.created_at||new Date().toISOString());
+        }
+      }
+
       // ── Sync vessel_owners (upsert by id) ──
       if (vessel_owners.length > 0) {
         const upsertOwner = db.prepare(`INSERT INTO vessel_owners (id, owner_name, owner_email, owner_phone, make, model, year, length, estimated_value, location, vessel_name, how_known, description, status, notes, lead_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET owner_name=excluded.owner_name, owner_email=excluded.owner_email, owner_phone=excluded.owner_phone, make=excluded.make, model=excluded.model, year=excluded.year, length=excluded.length, estimated_value=excluded.estimated_value, location=excluded.location, vessel_name=excluded.vessel_name, how_known=excluded.how_known, description=excluded.description, status=excluded.status, notes=excluded.notes, lead_id=excluded.lead_id, updated_at=excluded.updated_at`);
@@ -416,7 +477,9 @@ export async function POST(req: Request) {
       const counts = { leads: leads.length, boats: boats.length, todos: todos.length,
         pocket_listings: pocket_listings.length, iso_requests: iso_requests.length, marinas: marinas.length,
         my_listings: listings.length, vessel_owners: vessel_owners.length, buyer_searches: buyer_searches.length,
-        enrichment_profiles: enrichment_profiles.length, enrichment_sources: enrichment_sources.length };
+        enrichment_profiles: enrichment_profiles.length, enrichment_sources: enrichment_sources.length,
+        email_batches: email_batches.length, parsed_listings: parsed_listings.length,
+        listing_matches: listing_matches.length };
       console.log("[SYNC] Database synced:", counts);
       return NextResponse.json({ ok: true, synced: counts });
     } finally { db.close(); }

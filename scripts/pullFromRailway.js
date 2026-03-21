@@ -99,6 +99,10 @@ async function pull() {
     { name: 'iso_requests', rows: data.iso_requests || [] },
     { name: 'marinas', rows: data.marinas || [] },
     { name: 'my_listings', rows: data.my_listings || [] },
+    // Match engine tables — preserve across Railway deploys
+    { name: 'email_batches', rows: data.email_batches || [] },
+    { name: 'parsed_listings', rows: data.parsed_listings || [] },
+    { name: 'listing_matches', rows: data.listing_matches || [] },
   ];
 
   const results = {};
