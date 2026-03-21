@@ -1041,10 +1041,15 @@ export function generateMatchTodos(batchId: number): { human: number; bot: numbe
       }
 
       const boatLabel    = [m.make, m.model, m.year ? `(${m.year})` : "", m.loa ? `${m.loa}'` : ""]
-        .filter(Boolean).join(" ").trim() || "Unknown vessel";
+        .filter(Boolean).map((s: string) => s.toString().trim().replace(/\n/g, " ")).join(" ").trim() || "Unknown vessel";
       const prospectName = [m.first_name, m.last_name].filter(Boolean).join(" ") || "Unknown prospect";
       const firstName    = m.first_name || "there";
-      const price        = m.asking_price ? `$${Number(m.asking_price).toLocaleString()}` : "";
+      // Safe price formatting — strip $ and commas before Number(), then re-format
+      const rawPrice = (m.asking_price || "").toString().replace(/[$,\s]/g, "");
+      const numPrice = parseFloat(rawPrice);
+      const price = !isNaN(numPrice) && numPrice > 0
+        ? `$${numPrice.toLocaleString()}`
+        : m.asking_price || "";
 
       // Dedup: skip if this listing already has an open todo for this lead
       const dupCheck = db.prepare(
