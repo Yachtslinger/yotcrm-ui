@@ -107,16 +107,36 @@ async function pull() {
 
   const results = {};
   const syncAll = db.transaction(() => {
+    // Bootstrap match tables locally if they don't exist
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS email_batches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT DEFAULT 'boatwizard',
+        subject TEXT DEFAULT '', sender TEXT DEFAULT '', content_hash TEXT UNIQUE,
+        raw_content TEXT DEFAULT '', listing_count INTEGER DEFAULT 0,
+        match_count INTEGER DEFAULT 0, status TEXT DEFAULT 'processed',
+        error_log TEXT DEFAULT '', created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS parsed_listings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id INTEGER NOT NULL,
+        make TEXT DEFAULT '', model TEXT DEFAULT '', year TEXT DEFAULT '',
+        loa TEXT DEFAULT '', asking_price TEXT DEFAULT '', location TEXT DEFAULT '',
+        vessel_type TEXT DEFAULT '', features TEXT DEFAULT '',
+        listing_url TEXT DEFAULT '', broker_notes TEXT DEFAULT '',
+        raw_text TEXT DEFAULT '', content_hash TEXT, section TEXT DEFAULT '',
+        brokerage TEXT DEFAULT '', listed_at TEXT DEFAULT '', created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS listing_matches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, listing_id INTEGER NOT NULL,
+        lead_id INTEGER, iso_id INTEGER, batch_id INTEGER NOT NULL,
+        match_score INTEGER DEFAULT 0, confidence TEXT DEFAULT 'low',
+        reasons TEXT DEFAULT '[]', conflicts TEXT DEFAULT '[]',
+        penalty_log TEXT DEFAULT '[]', positive_hits INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'new', notes TEXT DEFAULT '',
+        contacted_at TEXT, created_at TEXT NOT NULL
+      );
+    `);
     for (const { name, rows } of tables) {
       if (rows.length === 0) continue;
-      // Ensure table exists (basic schema — columns added dynamically)
-      try {
-        db.prepare(`SELECT 1 FROM ${name} LIMIT 1`).get();
-      } catch {
-        // Table doesn't exist locally — skip (syncToRailway will create it)
-        console.log(`[PULL] Table ${name} doesn't exist locally, skipping`);
-        continue;
-      }
       results[name] = upsertRows(db, name, rows);
     }
   });
