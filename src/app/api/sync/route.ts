@@ -164,6 +164,15 @@ export async function POST(req: Request) {
             FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE
           )
         `);
+        const insertBoat = db.prepare(
+          `INSERT INTO boats (id, lead_id, make, model, year, length, price, location, listing_url, source_email, added_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+        for (const b of boats) {
+          insertBoat.run(b.id, b.lead_id, b.make||'', b.model||'', b.year||'',
+            b.length||'', b.price||'', b.location||'', b.listing_url||'',
+            b.source_email||'', b.added_at||new Date().toISOString());
+        }
 
         // ── Todos: merge — add new, preserve Railway-side completions ──
         // Ensure todos table + new columns exist
