@@ -1066,7 +1066,9 @@ export function generateMatchTodos(batchId: number): { human: number; bot: numbe
             SELECT t.id FROM todos t
             JOIN parsed_listings pl ON pl.id = t.listing_id
             WHERE t.lead_id=? AND t.completed=0 AND t.todo_type='match'
-              AND LOWER(pl.make)=LOWER(?) AND pl.loa=? AND pl.year=?
+              AND LOWER(REPLACE(pl.make,' ',''))=LOWER(REPLACE(?,' ',''))
+              AND REPLACE(REPLACE(pl.loa,'''',''),'ft','')=REPLACE(REPLACE(?,' ft',''),' ','')
+              AND pl.year=?
           `).get(m.lead_id || -1, m.make || "", m.loa || "", m.year || "") as any
         : null;
       const dupById = (!dupByUrl && !dupByFingerprint)
