@@ -109,11 +109,11 @@ JSON structure (all numbers are annual USD amounts):
     "tendersToys": {"low":0,"mid":0,"high":0},
     "other": {"low":0,"mid":0,"high":0}
   },
-  "assumptions": "1-2 sentences: vessel size, estimated value, usage hours and home port assumed for mid scenario",
-  "rangeExplanation": "1-2 sentences: what drives the gap between low and high",
-  "categoryBreakdown": "2-3 sentences: top 3 cost categories and what moves them",
-  "crewStructureNote": "2-3 sentences: crew complement for this vessel size, total salary mid, saving from removing one position",
-  "keyDrivers": "Top 3 cost drivers, one sentence each"
+  "assumptions": "1 sentence max: key assumptions for mid scenario",
+  "rangeExplanation": "1 sentence max: what drives low vs high gap",
+  "categoryBreakdown": "1 sentence max: top cost categories",
+  "crewStructureNote": "1 sentence max: crew complement and mid salary total",
+  "keyDrivers": "Top 3 cost drivers, one phrase each"
 }`;
 
 
@@ -126,8 +126,8 @@ JSON structure (all numbers are annual USD amounts):
       },
       signal: AbortSignal.timeout(55000),
       body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 16000,
+        model: "claude-sonnet-4-5-20250514",
+        max_tokens: 8192,
         messages: [{ role: "user", content: prompt }],
       }),
     });
@@ -139,12 +139,45 @@ JSON structure (all numbers are annual USD amounts):
 
     const text = messageData.content?.find(b => b.type === "text")?.text || "";
     if (!text) throw new Error("Anthropic returned no text content");
-    const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+
+    // Strip markdown fences then extract the outermost JSON object
+    const stripped = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    // Find first { and last } to handle any prose before/after
+    const jsonStart = stripped.indexOf("{");
+    const jsonEnd   = stripped.lastIndexOf("}");
+    if (jsonStart === -1 || jsonEnd === -1) {
+      throw new Error(`No JSON object found in response. Length: ${stripped.length}. Preview: ${stripped.slice(0, 200)}`);
+    }
+    let cleaned = stripped.slice(jsonStart, jsonEnd + 1);
+
     let modelData;
     try {
       modelData = JSON.parse(cleaned);
     } catch {
-      throw new Error(`JSON parse failed. Response length: ${cleaned.length}. Last 200 chars: ${cleaned.slice(-200)}`);
+      // Attempt repair: truncated response — close any open string/object/array
+      // Count unclosed braces and close them
+      let depth = 0;
+      let inStr = false;
+      let esc = false;
+      for (let i = 0; i < cleaned.length; i++) {
+        const c = cleaned[i];
+        if (esc) { esc = false; continue; }
+        if (c === "\\" && inStr) { esc = true; continue; }
+        if (c === '"') { inStr = !inStr; continue; }
+        if (!inStr) {
+          if (c === "{" || c === "[") depth++;
+          else if (c === "}" || c === "]") depth--;
+        }
+      }
+      // If we're mid-string, close it first
+      if (inStr) cleaned += '"';
+      // Close any open objects/arrays
+      while (depth > 0) { cleaned += "}"; depth--; }
+      try {
+        modelData = JSON.parse(cleaned);
+      } catch (e2) {
+        throw new Error(`JSON parse failed after repair attempt. Length: ${cleaned.length}. Last 200: ${cleaned.slice(-200)}`);
+      }
     }
 
     return NextResponse.json({ ok: true, model: modelData });
