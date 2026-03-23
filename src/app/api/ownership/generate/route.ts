@@ -144,11 +144,12 @@ JSON structure (all numbers are annual USD amounts):
     const stripped = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     // Find first { and last } to handle any prose before/after
     const jsonStart = stripped.indexOf("{");
-    const jsonEnd   = stripped.lastIndexOf("}");
-    if (jsonStart === -1 || jsonEnd === -1) {
-      throw new Error(`No JSON object found in response. Length: ${stripped.length}. Preview: ${stripped.slice(0, 200)}`);
+    if (jsonStart === -1) {
+      throw new Error(`No JSON object found. Preview: ${stripped.slice(0, 200)}`);
     }
-    let cleaned = stripped.slice(jsonStart, jsonEnd + 1);
+    const jsonEnd = stripped.lastIndexOf("}");
+    // If no closing brace → response was truncated; take everything from jsonStart and repair below
+    let cleaned = jsonEnd >= jsonStart ? stripped.slice(jsonStart, jsonEnd + 1) : stripped.slice(jsonStart);
 
     let modelData;
     try {
