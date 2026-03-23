@@ -247,12 +247,11 @@ type MatchResult = {
   confidence: string;
   reasons: string[];
   conflicts: string[];
-  /** Number of criteria that returned a REAL signal (not a neutral default) */
   positiveHits: number;
-  /** Human-readable log of penalties applied */
   penaltyLog: string[];
-  /** true if hard-fail gate triggered — match should be suppressed entirely */
   hardFail: boolean;
+  /** Number of explicit buyer criteria filled in (0–8). Used to raise effective human threshold. */
+  criteriaFilled: number;
 };
 
 // ── Geo helpers ───────────────────────────────────────────────────────────────
@@ -503,7 +502,7 @@ export function scoreListingVsBuyer(
   const bMaxH = parseNum(buyer.budget_max) || (bMinH ? bMinH * 1.3 : null);
   if (lPrice !== null && bMaxH !== null && lPrice > bMaxH * 1.25) {
     return { score: 0, confidence: "low", reasons: [], conflicts: ["Price >125% of budget"],
-             positiveHits: 0, penaltyLog: [], hardFail: true };
+             positiveHits: 0, penaltyLog: [], hardFail: true, criteriaFilled: 0 };
   }
 
   // Gate 2: LOA more than 20% outside buyer range (wrong size class entirely)
@@ -512,7 +511,7 @@ export function scoreListingVsBuyer(
   if (lLoa !== null && bLenMinH !== null && bLenMaxH !== null) {
     if (lLoa < bLenMinH * 0.8 || lLoa > bLenMaxH * 1.2) {
       return { score: 0, confidence: "low", reasons: [], conflicts: ["LOA >20% outside desired range"],
-               positiveHits: 0, penaltyLog: [], hardFail: true };
+               positiveHits: 0, penaltyLog: [], hardFail: true, criteriaFilled: 0 };
     }
   }
 
@@ -527,7 +526,7 @@ export function scoreListingVsBuyer(
     if ((wantsSail && isPower) || (wantsPower && isSail)) {
       return { score: 0, confidence: "low", reasons: [],
                conflicts: [`Type contradiction: buyer wants ${vtPrefH}, listing is ${lTypeH}`],
-               positiveHits: 0, penaltyLog: [], hardFail: true };
+               positiveHits: 0, penaltyLog: [], hardFail: true, criteriaFilled: 0 };
     }
   }
 
@@ -539,7 +538,7 @@ export function scoreListingVsBuyer(
     if (daysOld > 180) {
       return { score: 0, confidence: "low", reasons: [],
                conflicts: [`Listing >180 days old (${daysOld}d)`],
-               positiveHits: 0, penaltyLog: [], hardFail: true };
+               positiveHits: 0, penaltyLog: [], hardFail: true, criteriaFilled: 0 };
     }
   }
   // ─────────────────────────────────────────────────────────────────────────
@@ -664,11 +663,11 @@ export function scoreListingVsBuyer(
   score += qualPts;
   if (qualPts >= 2) reasons.push("Verified contact info");
 
-  // ── 8b. DATA COMPLETENESS MULTIPLIER ────────────────────────────────────────
-  // Leads with explicit criteria filled in give real signals, not neutral defaults.
-  // A lead with 0 criteria scores entirely on inference; one with 6/8 filled is solid.
-  // Multiplier: 0.70 (0 criteria) → 1.00 (≥6 criteria). Applied AFTER all blocks.
-  // Count how many explicit criteria this buyer has filled in.
+  // ── 8b. DATA COMPLETENESS — track for threshold adjustment ────────────────
+  // Instead of penalizing the score (which breaks bot routing), we raise the
+  // effective human threshold for leads with no explicit criteria.
+  // 0 criteria → effectiveHuman = 106 (unreachable on inference alone → bot)
+  // 6 criteria → effectiveHuman = 88 (normal human threshold)
   const criteriaFilled = [
     buyer.budget_min || buyer.budget_max,
     buyer.length_min || buyer.length_max,
@@ -679,7 +678,7 @@ export function scoreListingVsBuyer(
     buyer.flybridge_pref   && buyer.flybridge_pref   !== "any",
     buyer.stabilizers_pref && buyer.stabilizers_pref !== "any",
   ].filter(Boolean).length;
-  // Store for later — apply after all scoring blocks so penalties are also scaled
+  // Store for use in routing decision (returned in result so caller can decide)
   const _criteriaFilled = criteriaFilled;
 
   // ── 9. EXTENDED CRITERIA (up to 17 additional pts) ─────────────────────────
@@ -833,15 +832,11 @@ export function scoreListingVsBuyer(
   }
 
   // ── FINAL CONFIDENCE BUCKET ───────────────────────────────────────────────
-  // Apply data completeness multiplier: 0 criteria = 0.70×, 6+ = 1.00×
-  // This ensures inferred matches (no criteria) can't accidentally hit the human queue
-  const completenessMultiplier = Math.min(1.0, 0.70 + (_criteriaFilled / 8) * 0.30);
-  score = Math.round(score * completenessMultiplier);
   // Score can now go negative due to penalties — clamp at 0
   score = Math.max(0, score);
   const confidence = score >= 70 ? "high" : score >= 45 ? "medium" : "low";
 
-  return { score, confidence, reasons, conflicts, positiveHits, penaltyLog, hardFail: false };
+  return { score, confidence, reasons, conflicts, positiveHits, penaltyLog, hardFail: false, criteriaFilled: _criteriaFilled };
 }
 
 // ─── Run Matches for a Batch ────────────────────────────
@@ -1077,8 +1072,35 @@ export function generateMatchTodos(batchId: number): { human: number; bot: numbe
       const storedReasons: string[] = (() => { try { return JSON.parse(m.reasons || "[]"); } catch { return []; } })();
       const positiveHits = storedReasons.length;
 
-      // ── Human vs bot decision ─────────────────────────────────────────────
-      const qualifiesHuman = m.match_score >= HUMAN_THRESHOLD && positiveHits >= MIN_POSITIVE_HITS;
+      // ── Human vs bot decision — with completeness-based threshold ──────────
+      // Leads with few/no explicit criteria get a raised human threshold.
+      // This keeps bot routing working while preventing inference-only matches
+      // from landing in the high-signal human queue.
+      //   0 criteria → effectiveHuman = 106  (unreachable on pure inference)
+      //   4 criteria → effectiveHuman = 94
+      //   6 criteria → effectiveHuman = 88   (normal)
+      //   8 criteria → effectiveHuman = 88
+      const leadCriteriaFilled: number = (() => {
+        try {
+          // Fetch from leads table at match time — criteria stored as columns
+          const leadRow = db.prepare(
+            "SELECT budget_min,budget_max,loa_min,loa_max,year_min,year_max,make_preference,preferred_location,vessel_type_pref,flybridge_pref,stabilizers_pref,min_cabins FROM leads WHERE id=?"
+          ).get(m.lead_id) as any;
+          if (!leadRow) return 0;
+          return [
+            leadRow.budget_min || leadRow.budget_max,
+            leadRow.loa_min    || leadRow.loa_max,
+            leadRow.year_min   || leadRow.year_max,
+            leadRow.make_preference,
+            leadRow.preferred_location,
+            leadRow.vessel_type_pref && leadRow.vessel_type_pref !== "any",
+            leadRow.flybridge_pref   && leadRow.flybridge_pref   !== "any",
+            leadRow.stabilizers_pref && leadRow.stabilizers_pref !== "any",
+          ].filter(Boolean).length;
+        } catch { return 0; }
+      })();
+      const effectiveHumanThreshold = HUMAN_THRESHOLD + Math.max(0, (6 - leadCriteriaFilled) * 3);
+      const qualifiesHuman = m.match_score >= effectiveHumanThreshold && positiveHits >= MIN_POSITIVE_HITS;
       const isHuman = qualifiesHuman;
       const queue   = isHuman ? "human" : "bot";
 
