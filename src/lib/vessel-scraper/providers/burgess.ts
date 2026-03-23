@@ -13,7 +13,7 @@
 import * as cheerio from "cheerio";
 import type { VesselData } from "../types";
 import { emptyVessel } from "../types";
-import { clean, cleanHeadline, dedupeImages, assignSpec, mineFromText } from "../utils";
+import { clean, cleanHeadline, assignSpec, mineFromText } from "../utils";
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -143,28 +143,37 @@ function parseBurgess(url: string, html: string): VesselData {
     || clean($('meta[property="og:description"]').attr("content") || "");
 
   // ── 7. Images ─────────────────────────────────────────────────────────────
+  const BURGESS_BASE = "https://www.burgessyachts.com";
   const seenImgs = new Set<string>();
   const addImg = (src: string) => {
-    if (!src || !/^https?:\/\//i.test(src)) return;
-    if (/logo|icon|flag|badge|placeholder|\.svg|avatar|staff|broker/i.test(src)) return;
-    const key = src.split("?")[0];
+    if (!src || src === "url") return;
+    // Resolve relative paths
+    const full = src.startsWith("http") ? src : `${BURGESS_BASE}${src.startsWith("/") ? "" : "/"}${src}`;
+    if (!/^https?:\/\//i.test(full)) return;
+    if (/logo|icon|flag|badge|placeholder|\.svg|avatar|staff|broker/i.test(full)) return;
+    // Strip query params for dedup key, but keep full URL for display
+    const key = full.split("?")[0];
     if (seenImgs.has(key)) return;
     seenImgs.add(key);
-    vessel.images.push({ src, alt: vessel.name });
+    // Upscale: request larger size by tweaking width param
+    const display = full.replace(/width=\d+/, "width=1600");
+    vessel.images.push({ src: display, alt: vessel.name });
   };
 
   $("img").each((_, img) => {
+    // Prefer highest-res srcset entry
+    const srcset = $(img).attr("srcset") || "";
+    if (srcset) {
+      // srcset: "/path?width=381 381w, /path?width=792 792w" — take last (largest)
+      const entries = srcset.split(",").map(s => s.trim().split(/\s+/)[0]).filter(Boolean);
+      const largest = entries[entries.length - 1];
+      if (largest) { addImg(largest); return; }
+    }
     addImg($(img).attr("data-src") || "");
-    addImg($(img).attr("data-lazy-src") || "");
     addImg($(img).attr("src") || "");
   });
 
-  // Regex sweep for Burgess CDN URLs
-  const cdnRe = /https?:\/\/(?:[a-z0-9-]+\.)?(?:burgessyachts\.com|imgix\.net|burgessyachtsmedia\.com)\/[^\s"'<>]+\.(?:jpe?g|png|webp)[^\s"'<>]*/gi;
-  let m: RegExpExecArray | null;
-  while ((m = cdnRe.exec(html)) !== null) addImg(m[0]);
-
-  vessel.images = dedupeImages(vessel.images);
+  vessel.images = vessel.images.filter(i => !/logo|icon|badge|sprite/i.test(i.src));
 
   // ── 8. Mine description ───────────────────────────────────────────────────
   if (vessel.description) mineFromText(vessel, vessel.description);

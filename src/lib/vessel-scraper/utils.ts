@@ -389,7 +389,11 @@ export function mineFromText(vessel: VesselData, raw: string): void {
   if (!vessel.power) {
     const pw = grab(/(\d[\d,]+)\s*(?:hp|HP|bhp|mhp|kW|KW)\s*(?:each|per\s+engine|total)?/i) ||
                grab(/(?:total\s+)?power\s+(?:output\s+)?(?:of\s+)?(\d[\d,]+\s*(?:hp|kW))/i);
-    if (pw) set("power", pw);
+    // Guard: must be ≥100 to avoid capturing knot speeds (e.g. "15.5 kn" → "15")
+    if (pw) {
+      const n = parseFloat(pw.replace(/,/g, ""));
+      if (!isNaN(n) && n >= 100) set("power", pw);
+    }
   }
 
   // ── Max speed ──────────────────────────────────────────────────────────────
@@ -764,6 +768,9 @@ JSON:`;
     // Apply only to still-empty fields — L1/L2 data is never overwritten
     for (const [key, value] of Object.entries(extracted)) {
       if (!value || typeof value !== "string" || value.trim() === "") continue;
+      // Filter out AI "I don't know" responses — these are useless noise
+      const vLow = value.toLowerCase().trim();
+      if (/^not\s+(mentioned|found|specified|available|provided|stated|indicated|given|listed|noted|included|discussed|detailed)|^unknown$|^n\/a$|^none$|^unspecified$|^unclear$/i.test(vLow)) continue;
       const field = key as keyof VesselData;
       const current = (vessel as Record<string, unknown>)[field as string];
       if (current === undefined || current === null || (typeof current === "string" && current.trim() === "")) {
