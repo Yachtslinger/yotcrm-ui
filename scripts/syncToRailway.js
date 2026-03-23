@@ -40,7 +40,7 @@ async function sync() {
   let enrichment_sources = []; try { enrichment_sources = db.prepare('SELECT * FROM enrichment_sources').all(); } catch {}
   let score_weights = []; try { score_weights = db.prepare('SELECT * FROM score_weights').all(); } catch {}
   // Match engine tables — include so they survive Railway deploys
-  let email_batches = []; try { email_batches = db.prepare('SELECT id,source,subject,sender,content_hash,raw_content,listing_count,match_count,status,error_log,created_at FROM email_batches ORDER BY id').all(); } catch {}
+  let email_batches = []; try { email_batches = db.prepare('SELECT id,source,subject,sender,content_hash,listing_count,match_count,status,error_log,created_at FROM email_batches ORDER BY id').all(); } catch {}
   let parsed_listings = []; try { parsed_listings = db.prepare('SELECT * FROM parsed_listings ORDER BY id').all(); } catch {}
   let listing_matches = []; try { listing_matches = db.prepare('SELECT * FROM listing_matches ORDER BY id').all(); } catch {}
   db.close();

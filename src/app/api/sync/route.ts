@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import Database from "better-sqlite3";
 
 export const runtime = "nodejs";
+export const maxDuration = 120;
+
+// Allow up to 10MB sync payloads (leads table alone can be ~2MB with 3000+ leads)
+export const fetchCache = "force-no-store";
+
 
 const DB_PATH = process.env.DB_PATH || "/app/data/yotcrm.db";
 const SYNC_SECRET = process.env.SYNC_SECRET || "yotcrm-sync-2026";
