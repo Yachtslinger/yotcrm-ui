@@ -631,3 +631,147 @@ export function mineFromText(vessel: VesselData, raw: string): void {
     if (loc) set("location", loc);
   }
 }
+
+// ─── Layer 3: AI-assisted spec extraction ────────────────────────────────────
+/**
+ * aiExtractSpecs — uses Claude Haiku to extract vessel specs from prose text.
+ *
+ * Called AFTER JSON-LD parsing (Layer 1) and regex mining (Layer 2).
+ * Only fills fields still empty — never overwrites structured data.
+ * Cost: ~$0.001 per listing on Haiku. Fails silently if no API key.
+ *
+ * Requires ANTHROPIC_API_KEY env var set on Railway.
+ */
+export async function aiExtractSpecs(vessel: VesselData, text: string): Promise<void> {
+  if (!text || text.length < 100) return;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return; // no key → L1+L2 results stand, no crash
+
+  // Only ask Claude about fields that are still empty after L1+L2
+  type ExtractField = { field: keyof VesselData; hint: string };
+  const EXTRACTABLE: ExtractField[] = [
+    { field: "engines",              hint: "main engine make and model e.g. 'Twin MTU 12V 4000 M93' or '2x CAT C32 ACERT'" },
+    { field: "engineHours",          hint: "engine operating hours e.g. '1,200 hrs' or 'Port: 1,200 / Stbd: 1,180 hrs'" },
+    { field: "engineMake",           hint: "engine manufacturer only e.g. 'MTU', 'Caterpillar', 'MAN', 'Volvo Penta'" },
+    { field: "engineModel",          hint: "engine model only e.g. '12V 4000 M93', 'C32 ACERT', 'D13'" },
+    { field: "power",                hint: "total power output e.g. '2 × 2,638 HP' or '3,650 HP total'" },
+    { field: "gensets",              hint: "generator full description including make and kW e.g. '2 × 60 kW Kohler'" },
+    { field: "generatorKW",          hint: "generator output per unit e.g. '60 kW each' or '120 kW'" },
+    { field: "generatorHours",       hint: "generator operating hours e.g. '800 hrs'" },
+    { field: "stabilisers",          hint: "stabilization system full description — brand, type, model" },
+    { field: "stabilisersMake",      hint: "stabilizer manufacturer e.g. 'Naiad', 'Seakeeper', 'CMC Marine'" },
+    { field: "zeroSpeedStabilisers", hint: "zero-speed stabilizer brand or 'Yes' if confirmed" },
+    { field: "bowThruster",          hint: "bow thruster — brand and power e.g. 'Sleipner 60 kW'" },
+    { field: "sternThruster",        hint: "stern thruster — brand and power" },
+    { field: "davitMake",            hint: "davit or crane manufacturer e.g. 'Opacmare', 'Besenzoni', 'Mar Quipt'" },
+    { field: "davitCapacity",        hint: "davit lifting capacity e.g. '3 ton', '3,000 kg SWL'" },
+    { field: "radar",                hint: "radar system brand and model e.g. 'Furuno FAR-2228'" },
+    { field: "chartPlotter",         hint: "chart plotter or MFD brand and model e.g. 'Garmin GPSMAP 8616'" },
+    { field: "autopilot",            hint: "autopilot brand and model e.g. 'Furuno NavPilot 711'" },
+    { field: "satcom",               hint: "satellite comms — Starlink, VSAT, Inmarsat, Iridium, KVH etc." },
+    { field: "aisSystem",            hint: "AIS transceiver brand and model" },
+    { field: "tender",               hint: "main tender description — make, model, length" },
+    { field: "tenderMake",           hint: "tender manufacturer e.g. 'Rand Boats', 'Williams', 'Castoldi'" },
+    { field: "tenderModel",          hint: "tender model e.g. 'Picnic 17', 'Turbojet 285'" },
+    { field: "tenderLength",         hint: "tender length e.g. '5.2 m / 17 ft'" },
+    { field: "tenderCount",          hint: "number of tenders aboard" },
+    { field: "beachClub",            hint: "beach club description — features, fold-down sections, sq m" },
+    { field: "swimmingPlatform",     hint: "swim platform type e.g. 'Hydraulic', 'Electric fold-down', 'Opacmare'" },
+    { field: "toys",                 hint: "water toys list — jet ski, seabob, kayak, paddleboard, efoil, dive gear etc." },
+    { field: "jacuzzi",              hint: "'Yes' if jacuzzi, hot tub or whirlpool mentioned" },
+    { field: "gym",                  hint: "'Yes' if gym or fitness room mentioned" },
+    { field: "cinema",               hint: "'Yes' if cinema, theater or screening room mentioned" },
+    { field: "helideck",             hint: "'Yes' if helideck or helipad mentioned" },
+    { field: "refitYear",            hint: "year of most recent refit e.g. '2022'" },
+    { field: "refitDetails",         hint: "summary of refit work performed" },
+    { field: "lastSurvey",           hint: "date of last survey e.g. '2023'" },
+    { field: "lastDrydock",          hint: "date of last dry dock or haul-out" },
+    { field: "maxSpeed",             hint: "maximum speed in knots e.g. '17 kn'" },
+    { field: "cruiseSpeed",          hint: "cruising speed e.g. '12 kn'" },
+    { field: "range",                hint: "cruising range e.g. '4,000 nm at 10 kn'" },
+    { field: "fuelTank",             hint: "total fuel capacity e.g. '30,000 lt / 7,925 gal'" },
+    { field: "freshWater",           hint: "fresh water capacity e.g. '8,000 lt / 2,113 gal'" },
+    { field: "waterMaker",           hint: "watermaker brand and capacity e.g. 'Spectra 1,200 lt/day'" },
+    { field: "guests",               hint: "maximum overnight guests as a number e.g. '12'" },
+    { field: "staterooms",           hint: "number of guest staterooms or cabins e.g. '6'" },
+    { field: "crew",                 hint: "crew complement e.g. '8'" },
+    { field: "hullMaterial",         hint: "hull construction material e.g. 'Steel', 'Aluminium', 'GRP'" },
+    { field: "classification",       hint: "classification society e.g. 'Lloyd's Register', 'Bureau Veritas', 'RINA'" },
+    { field: "flagState",            hint: "flag state / country of registration e.g. 'Cayman Islands'" },
+    { field: "navalArchitect",       hint: "naval architect or designer firm" },
+    { field: "exteriorDesign",       hint: "exterior design studio or designer" },
+    { field: "interiorDesign",       hint: "interior design studio or designer" },
+    { field: "fireSuppression",      hint: "fire suppression system type e.g. 'CO2', 'FM-200'" },
+    { field: "lifeRafts",            hint: "life raft count and brand" },
+    { field: "voltageSystem",        hint: "onboard voltage e.g. '220/380V 50Hz, 110/220V 60Hz'" },
+    { field: "shorepower",           hint: "shore power connection spec" },
+    { field: "fuelConsumption",      hint: "fuel consumption at cruise e.g. '450 lt/hr at 12 kn'" },
+    { field: "displacement",         hint: "displacement in tonnes" },
+    { field: "grossTonnage",         hint: "gross tonnage (GT) number" },
+    { field: "location",             hint: "current location where vessel is lying or berthed" },
+  ];
+
+  const needed = EXTRACTABLE.filter(({ field }) => {
+    const v = (vessel as Record<string, unknown>)[field as string];
+    return v === undefined || v === null || (typeof v === "string" && v.trim() === "");
+  });
+  if (needed.length === 0) return;
+
+  const fieldList = needed.map(({ field, hint }) => `"${field}": ${hint}`).join("\n");
+
+  const prompt = `Extract vessel specification data from this yacht listing.
+Return ONLY a valid JSON object. Include only fields you can find in the text.
+Omit fields not mentioned. Never invent values. Keep values concise and factual.
+
+Fields to find:
+${fieldList}
+
+Listing text:
+${text.slice(0, 4000)}
+
+JSON:`;
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1000,
+        messages: [{ role: "user", content: prompt }],
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+
+    if (!res.ok) return;
+    const data = await res.json();
+    const raw = (data?.content?.[0]?.text || "").trim();
+    const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+
+    let extracted: Record<string, unknown>;
+    try {
+      extracted = JSON.parse(jsonStr);
+    } catch {
+      const m = jsonStr.match(/\{[\s\S]+\}/);
+      if (!m) return;
+      try { extracted = JSON.parse(m[0]); } catch { return; }
+    }
+
+    // Apply only to still-empty fields — L1/L2 data is never overwritten
+    for (const [key, value] of Object.entries(extracted)) {
+      if (!value || typeof value !== "string" || value.trim() === "") continue;
+      const field = key as keyof VesselData;
+      const current = (vessel as Record<string, unknown>)[field as string];
+      if (current === undefined || current === null || (typeof current === "string" && current.trim() === "")) {
+        (vessel as Record<string, unknown>)[field as string] = (value as string).trim();
+      }
+    }
+    vessel.aiExtracted = true;
+  } catch {
+    // Network error, timeout, parse failure — fail silently, L1+L2 stand
+  }
+}

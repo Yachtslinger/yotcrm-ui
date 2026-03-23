@@ -150,8 +150,31 @@ export interface VesselData {
   beamMax?:        string;
   draftMin?:       string;
   airDraft?:       string;
-  transitRange?:   string;
   gaImages?:       VesselImage[];
+
+  // ── Davit / crane ─────────────────────────────────────────────────────────
+  davitMake?:      string;   // e.g. "Opacmare", "Besenzoni", "Mar Quipt"
+  davitModel?:     string;
+  davitCapacity?:  string;   // e.g. "3 ton", "3,000 kg SWL"
+
+  // ── Generator detail ──────────────────────────────────────────────────────
+  generatorHours?: string;   // separate from generatorKW
+
+  // ── Engine split fields ───────────────────────────────────────────────────
+  engineMake?:     string;   // manufacturer only, e.g. "MTU", "CAT", "MAN"
+  engineModel?:    string;   // model only, e.g. "12V 4000 M93"
+
+  // ── Tender detail ─────────────────────────────────────────────────────────
+  tenderMake?:     string;
+  tenderModel?:    string;
+  tenderLength?:   string;
+  tenderHp?:       string;
+
+  // ── Fuel consumption ─────────────────────────────────────────────────────
+  fuelConsumption?: string;  // e.g. "450 lt/hr at cruise"
+
+  // ── AI extraction metadata ────────────────────────────────────────────────
+  aiExtracted?:    boolean;  // true if Layer 3 ran successfully
 
   // ── Content ───────────────────────────────────────────────────────────────
   description:    string;
