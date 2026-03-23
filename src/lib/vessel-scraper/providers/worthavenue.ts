@@ -45,8 +45,10 @@ function parseWorthAvenue(url: string, html: string): VesselData {
     cleanHeadline($("h1.entry-title, h1.yacht-title, h1").first().text()) ||
     cleanHeadline($('meta[property="og:title"]').attr("content") || "") ||
     "";
-  // Strip trailing " Yacht for Sale | Worth Avenue Yachts" etc.
-  vessel.name = vessel.name.replace(/\s*[|–-]\s*(?:Yacht\s*for\s*(?:Sale|Charter)|Worth\s*Avenue).*/i, "").trim();
+  vessel.name = vessel.name
+    .replace(/\s*[|–-]\s*(?:Yacht\s*for\s*(?:Sale|Charter)|Worth\s*Avenue|Luxury\s*Yacht).*/i, "")
+    .replace(/\s+(?:Yacht\s*for\s*(?:Sale|Charter))$/i, "")
+    .trim();
 
   // ── 2. OG / meta basics ──────────────────────────────────────────────────
   const ogDesc = clean($('meta[property="og:description"]').attr("content") || "");
@@ -73,7 +75,9 @@ function parseWorthAvenue(url: string, html: string): VesselData {
       const label = lines[i];
       const value = lines[i + 1];
       // Label: short (1-4 words), no numbers. Value: has numbers or is a proper noun
-      if (label.length < 50 && !/^\d/.test(label) && value.length < 200) {
+      // Guard: skip if value is a bare number ≤4 digits (catches stray CSS/JS values)
+      if (label.length < 50 && !/^\d/.test(label) && value.length < 200 &&
+          !(value.length <= 4 && /^\d+$/.test(value))) {
         assignSpec(vessel, label, value);
       }
     }
@@ -115,13 +119,24 @@ function parseWorthAvenue(url: string, html: string): VesselData {
     } catch { /* skip */ }
   });
 
-  // ── 6. Price — WAY often shows price in page text ─────────────────────────
+  // ── 6. Price — WAY shows sale price in millions; skip charter rates ────────
+  // Charter weekly rates (< $1M) must not be captured as asking price
   if (!vessel.price) {
-    // "Asking Price: $12,500,000" or "$12,500,000" near "price"
+    // Look for explicit "Asking Price" label first
     const pm = rawText.match(/[Aa]sking\s+[Pp]rice[:\s]*(\$[\d,]+)/);
-    const pm2 = rawText.match(/\$([\d]{1,3}(?:,\d{3})+)/);
-    if (pm) vessel.price = pm[1];
-    else if (pm2 && parseInt(pm2[1].replace(/,/g,"")) > 100000) vessel.price = `$${pm2[1]}`;
+    if (pm) {
+      vessel.price = pm[1];
+    } else {
+      // Scan for $ amounts > $1,000,000 only — filters out charter rates
+      const allPrices = [...rawText.matchAll(/\$([\d]{1,3}(?:,\d{3})+)/g)];
+      for (const match of allPrices) {
+        const amount = parseInt(match[1].replace(/,/g, ""));
+        if (amount >= 1000000) {
+          vessel.price = `$${match[1]}`;
+          break;
+        }
+      }
+    }
   }
 
   // ── 7. Description ─────────────────────────────────────────────────────────

@@ -22,11 +22,37 @@ const KONTENT_PROJECT = "3bf3a169-546e-0010-21f7-a952f77e34c4";
 const DELIVERY_KEY   = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJjMmVjYjMwYWU2NTk0OTc2OTM0NWZjZDA4MDNiNWZiYyIsImlhdCI6MTc3MDcyOTYzOCwibmJmIjoxNzcwNzI5NjM4LCJleHAiOjE4MDIyNjU2MDAsInZlciI6IjIuMC4wIiwic2NvcGVfaWQiOiJhNDMzYWI5NjE3ODE0ZGRkOTNkZDc1OGQwNmE2NDEwYiIsInByb2plY3RfY29udGFpbmVyX2lkIjoiODAyZTFiODQ1M2E0MDBlMDc1NjQ2Y2QxNDNmMGU4MTAiLCJhdWQiOiJkZWxpdmVyLmtvbnRlbnQuYWkifQ.neDxKj8PzK4hYo7CawGpDGw9ZTmCC1hpB8RIvUCuCUw";
 const KONTENT_BASE   = `https://deliver.kontent.ai/${KONTENT_PROJECT}`;
 
-/** Extract vessel name slug from Fraser URL */
+/** Extract vessel name slug from Fraser URL — returns UPPERCASE for Kontent.ai query */
 function slugFromUrl(url: string): string {
-  // /en/yacht-for-sale/vessel-name/ → "vessel-name"
+  // /en/yacht-for-sale/vessel-name/ → "VESSEL NAME"
   const m = url.match(/\/yacht-for-(?:sale|charter)\/([^/?#]+)/i);
-  return m ? m[1].replace(/-/g, " ").trim().toUpperCase() : "";
+  if (!m) return "";
+  // Convert hyphenated slug to space-separated uppercase
+  return m[1].replace(/-/g, " ").trim().toUpperCase();
+}
+
+/** Try multiple name variants to handle slug→name mismatches */
+async function fetchYachtData(name: string): Promise<Record<string, { value: unknown }> | null> {
+  const variants = [
+    name,
+    // Some listings have articles removed: "THE YACHT" → "YACHT"
+    name.replace(/^THE\s+/i, ""),
+    // Roman numerals sometimes differ: "YACHTNAME II" vs "YACHTNAME 2"
+  ].filter((v, i, a) => a.indexOf(v) === i);
+
+  for (const variant of variants) {
+    const apiUrl = `${KONTENT_BASE}/items?system.type=yacht_data&elements.name=${encodeURIComponent(variant)}&limit=1`;
+    const res = await fetch(apiUrl, {
+      headers: { "Authorization": `Bearer ${DELIVERY_KEY}`, "Accept": "application/json" },
+      signal: AbortSignal.timeout(12000),
+      cache: "no-store",
+    });
+    if (!res.ok) continue;
+    const json = await res.json();
+    const items = json.items || [];
+    if (items.length > 0) return items[0].elements as Record<string, { value: unknown }>;
+  }
+  return null;
 }
 
 /** Safe element value getter */
@@ -68,20 +94,8 @@ export async function scrapeFraser(url: string): Promise<VesselData> {
   const name = slugFromUrl(url);
   if (!name) throw new Error(`Fraser: cannot extract vessel name from URL: ${url}`);
 
-  // ── Query Kontent.ai by vessel name ──────────────────────────────────────
-  const apiUrl = `${KONTENT_BASE}/items?system.type=yacht_data&elements.name=${encodeURIComponent(name)}&limit=1`;
-  const res = await fetch(apiUrl, {
-    headers: { "Authorization": `Bearer ${DELIVERY_KEY}`, "Accept": "application/json" },
-    signal: AbortSignal.timeout(15000),
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`Fraser Kontent.ai API: ${res.status}`);
-
-  const json = await res.json();
-  const items: { elements: Record<string, { value: unknown }>, system: Record<string,string> }[] = json.items || [];
-  if (!items.length) throw new Error(`Fraser: no yacht found for name "${name}"`);
-
-  const e = items[0].elements;
+  const e = await fetchYachtData(name);
+  if (!e) throw new Error(`Fraser: no yacht found for "${name}" — try pasting the page source`);
 
   // ── Identity ──────────────────────────────────────────────────────────────
   vessel.name      = val(e, "name") || name;
