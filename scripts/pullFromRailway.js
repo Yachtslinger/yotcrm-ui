@@ -60,12 +60,12 @@ function upsertRows(db, table, rows) {
       db.prepare(`UPDATE ${table} SET ${setClauses} WHERE id = ?`).run(...updateValues, row.id);
       updated++;
     } else {
-      // INSERT — handle unique constraint conflicts (e.g. email) by replacing
+      // INSERT — OR IGNORE to avoid stomping local data on email UNIQUE conflicts
+      // (two leads can share an email; local data is authoritative for existing rows)
       try {
-        db.prepare(`INSERT OR REPLACE INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})`).run(...values);
+        db.prepare(`INSERT OR IGNORE INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})`).run(...values);
         inserted++;
       } catch (e) {
-        // Skip rows that still fail (shouldn't happen with OR REPLACE, but be safe)
         console.warn(`[PULL] Skipped ${table} row id=${row.id}: ${e.message}`);
       }
     }
