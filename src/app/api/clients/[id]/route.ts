@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
 import { readContact, updateContact, deleteContact } from "@/lib/clients/storage";
+import { getBatchIds, runMatchesForBatch, generateMatchTodos } from "@/lib/matches/storage";
 
 export const runtime = "nodejs";
+
+// Buyer criteria fields that trigger match recomputation when changed
+const CRITERIA_FIELDS = new Set([
+  "budget_min","budget_max","loa_min","loa_max","year_min","year_max",
+  "make_preference","preferred_location","vessel_type_pref",
+  "flybridge_pref","stabilizers_pref","min_cabins","engine_type_pref",
+]);
 
 export async function GET(
   _req: Request, 
@@ -64,10 +72,42 @@ export async function PUT(
       additional_properties: body.additional_properties,
       reverify_status: body.reverify_status,
       broker_notes: body.broker_notes,
+      // ── Buyer criteria ──────────────────────────────────────────────────────
+      budget_min: body.budget_min,
+      budget_max: body.budget_max,
+      loa_min: body.loa_min,
+      loa_max: body.loa_max,
+      year_min: body.year_min,
+      year_max: body.year_max,
+      make_preference: body.make_preference,
+      preferred_location: body.preferred_location,
+      vessel_type_pref: body.vessel_type_pref,
+      flybridge_pref: body.flybridge_pref,
+      stabilizers_pref: body.stabilizers_pref,
+      min_cabins: body.min_cabins,
+      engine_type_pref: body.engine_type_pref,
     });
     if (!updated) {
       return NextResponse.json({ error: "Client not found" }, { status: 404 });
     }
+
+    // ── Auto-rerun matches when buyer criteria change ──────────────────────
+    // Fire-and-forget — don't block the save response
+    const criteriaChanged = Object.keys(body).some(k => CRITERIA_FIELDS.has(k));
+    if (criteriaChanged) {
+      try {
+        const batchIds = getBatchIds();
+        for (const batchId of batchIds) {
+          runMatchesForBatch(batchId);
+          generateMatchTodos(batchId);
+        }
+        console.log(`[criteria-rerun] Recomputed ${batchIds.length} batches for lead ${id}`);
+      } catch (e) {
+        console.error("[criteria-rerun] Failed:", e);
+        // Non-fatal — criteria saved successfully even if rerun fails
+      }
+    }
+
     return NextResponse.json(updated);
   } catch (error) {
     console.error("Failed to update client", error);

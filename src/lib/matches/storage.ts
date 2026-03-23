@@ -179,6 +179,18 @@ export function listBatches(): EmailBatch[] {
   } finally { db.close(); }
 }
 
+// Returns IDs of all batches that have listings — used by criteria-change recomputation trigger
+export function getBatchIds(): number[] {
+  const db = getDb();
+  try {
+    initMatchTables();
+    const rows = db.prepare(
+      "SELECT id FROM email_batches WHERE listing_count > 0 ORDER BY created_at DESC LIMIT 20"
+    ).all() as { id: number }[];
+    return rows.map(r => r.id);
+  } finally { db.close(); }
+}
+
 // ─── Parsed Listings ────────────────────────────────────
 
 export function insertListing(batchId: number, listing: Partial<ParsedListing> & { section?: string; brokerage?: string }): ParsedListing {
@@ -652,6 +664,24 @@ export function scoreListingVsBuyer(
   score += qualPts;
   if (qualPts >= 2) reasons.push("Verified contact info");
 
+  // ── 8b. DATA COMPLETENESS MULTIPLIER ────────────────────────────────────────
+  // Leads with explicit criteria filled in give real signals, not neutral defaults.
+  // A lead with 0 criteria scores entirely on inference; one with 6/8 filled is solid.
+  // Multiplier: 0.70 (0 criteria) → 1.00 (≥6 criteria). Applied AFTER all blocks.
+  // Count how many explicit criteria this buyer has filled in.
+  const criteriaFilled = [
+    buyer.budget_min || buyer.budget_max,
+    buyer.length_min || buyer.length_max,
+    buyer.year_min   || buyer.year_max,
+    buyer.make,
+    buyer.preferred_location,
+    buyer.vessel_type_pref && buyer.vessel_type_pref !== "any",
+    buyer.flybridge_pref   && buyer.flybridge_pref   !== "any",
+    buyer.stabilizers_pref && buyer.stabilizers_pref !== "any",
+  ].filter(Boolean).length;
+  // Store for later — apply after all scoring blocks so penalties are also scaled
+  const _criteriaFilled = criteriaFilled;
+
   // ── 9. EXTENDED CRITERIA (up to 17 additional pts) ─────────────────────────
   // Mine the listing for physical attributes
   const lf = extractListingFeatures(listing);
@@ -803,6 +833,10 @@ export function scoreListingVsBuyer(
   }
 
   // ── FINAL CONFIDENCE BUCKET ───────────────────────────────────────────────
+  // Apply data completeness multiplier: 0 criteria = 0.70×, 6+ = 1.00×
+  // This ensures inferred matches (no criteria) can't accidentally hit the human queue
+  const completenessMultiplier = Math.min(1.0, 0.70 + (_criteriaFilled / 8) * 0.30);
+  score = Math.round(score * completenessMultiplier);
   // Score can now go negative due to penalties — clamp at 0
   score = Math.max(0, score);
   const confidence = score >= 70 ? "high" : score >= 45 ? "medium" : "low";
@@ -974,11 +1008,13 @@ export function runMatchesForBatch(batchId: number): number {
 // score >= HUMAN_THRESHOLD AND positiveHits >= MIN_POSITIVE_HITS → human To Do
 // score >= BOT_THRESHOLD (but below human or insufficient hits) → bot queue
 // score <  BOT_THRESHOLD → ignored entirely
-const HUMAN_THRESHOLD    = 88;   // raised from 85 — requires genuinely strong overlap
+const HUMAN_THRESHOLD    = 88;   // requires genuinely strong overlap
 const BOT_THRESHOLD      = 75;
-const MIN_POSITIVE_HITS  = 3;    // at least 3 real data-point matches, not neutral defaults
-const TOP_N_PER_PERSON   = 50;   // global cap: max open match todos per person across ALL batches
+const MIN_POSITIVE_HITS  = 3;    // at least 3 real data-point matches
+const TOP_N_PER_PERSON   = 50;   // global cap: max open match todos per person
 const TOP_N_BOT          = 40;   // max bot queue items per batch
+const DAILY_CAP_HUMAN    = 8;    // max NEW human match todos created in any single run
+const DECAY_DAYS         = 14;   // after this many days unactioned, demote human→bot
 
 export function generateMatchTodos(batchId: number): { human: number; bot: number } {
   const db = getDb();
@@ -993,6 +1029,24 @@ export function generateMatchTodos(batchId: number): { human: number; bot: numbe
     const today = now.slice(0, 10);
     let humanCreated = 0;
     let botCreated   = 0;
+
+    // ── Daily cap: count human match todos already created TODAY ──────────────
+    const todayHumanCount = (db.prepare(
+      "SELECT COUNT(*) as c FROM todos WHERE queue='human' AND todo_type='match' AND completed=0 AND created_at >= ?"
+    ).get(today + "T00:00:00.000Z") as any).c as number;
+    let dailySlotsRemaining = Math.max(0, DAILY_CAP_HUMAN - todayHumanCount);
+
+    // ── Score decay: demote old unactioned human todos to bot queue ───────────
+    // Any human match todo older than DECAY_DAYS with no contact gets moved to bot
+    const decayDate = new Date(Date.now() - DECAY_DAYS * 86400000).toISOString();
+    db.prepare(`
+      UPDATE todos SET queue = 'bot', bot_status = 'pending', updated_at = ?
+      WHERE queue = 'human' AND todo_type = 'match' AND completed = 0
+        AND created_at < ?
+        AND lead_id NOT IN (
+          SELECT id FROM leads WHERE last_contacted_at >= ?
+        )
+    `).run(now, decayDate, decayDate);
 
     // ── Global cap: count current OPEN human match todos per person ───────────
     const willOpen  = (db.prepare("SELECT COUNT(*) as c FROM todos WHERE assignee='will'  AND queue='human' AND todo_type='match' AND completed=0").get() as any).c as number;
@@ -1036,6 +1090,8 @@ export function generateMatchTodos(batchId: number): { human: number; bot: numbe
       if (isHuman) {
         if (assignee === "will"  && willSlots  <= 0) continue;
         if (assignee === "paolo" && paoloSlots <= 0) continue;
+        // Daily cap: don't flood the queue in a single run
+        if (dailySlotsRemaining <= 0) continue;
       } else {
         if (botCreated >= TOP_N_BOT) continue;
       }
@@ -1157,6 +1213,7 @@ export function generateMatchTodos(batchId: number): { human: number; bot: numbe
 
       if (isHuman) {
         humanCreated++;
+        dailySlotsRemaining--;
         if (assignee === "will")  willSlots--;
         else                      paoloSlots--;
       } else {
