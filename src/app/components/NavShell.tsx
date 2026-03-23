@@ -18,6 +18,7 @@ const NAV_ITEMS = [
   { href: "/todos",     label: "To Do",       Icon: CheckSquare,     color: "#d97706", group: "core" },
   { href: "/botqueue",  label: "Bot Queue",   Icon: Zap,             color: "#7c3aed", group: "core" },
   { href: "/matches",   label: "Matches",     Icon: Zap,             color: "#7c3aed", group: "core" },
+  { href: "/connect",   label: "Connect",     Icon: Link2,           color: "#f59e0b", group: "core" },
   { href: "/campaigns", label: "Campaigns",   Icon: Mail,            color: "#0e7490", group: "core" },
   { href: "/buyers",    label: "Buyers",      Icon: Search,          color: "#6366f1", group: "listings" },
   { href: "/listings",  label: "My Listings", Icon: Briefcase,       color: "#b45e0b", group: "listings" },
@@ -31,7 +32,7 @@ const NAV_ITEMS = [
   { href: "/marinas",   label: "Marinas",     Icon: Anchor,          color: "#0e7490", group: "tools" },
   { href: "/card/will",   label: "My Card",     Icon: CreditCard,      color: "#c9a55c", group: "account" },
   { href: "/card/paolo",  label: "Paolo's Card", Icon: CreditCard,      color: "#6366f1", group: "account" },
-  { href: "/yotcrm",    label: "Connect",     Icon: Link2,           color: "#3b82f6", group: "account" },
+  { href: "/yotcrm",    label: "YotCRM",      Icon: Link2,           color: "#3b82f6", group: "account" },
   { href: "/import",    label: "Import",      Icon: Upload,          color: "#6b7280", group: "account" },
   { href: "/settings",  label: "Settings",    Icon: Settings,        color: "#6b7280", group: "account" },
 ];
