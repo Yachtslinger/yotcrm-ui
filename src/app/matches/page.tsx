@@ -305,13 +305,29 @@ export default function MatchesPage() {
               </p>
             )}
           </div>
-          <button
-            onClick={() => setShowUpload(true)}
-            className="btn btn-primary flex items-center gap-2"
-            style={{ minHeight: 44 }}
-          >
-            <Upload className="w-4 h-4" /> Process New Email
-          </button>
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={async () => {
+                if (!confirm("Auto-populate buyer criteria from existing boat records for all leads? This only fills empty fields.")) return;
+                const res = await fetch("/api/clients/infer-criteria", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+                const d = await res.json();
+                alert(d.message || (d.ok ? "Done" : d.error));
+                if (d.ok) fetchMatches();
+              }}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-neutral-800"
+              style={{ minHeight: 44, color: "var(--navy-600)", background: "var(--card)" }}
+              title="Fill empty criteria fields from each lead's boat record — budget ±30%, LOA ±20%, year ±5, make exact"
+            >
+              <RefreshCw className="w-4 h-4" /> Infer Criteria
+            </button>
+            <button
+              onClick={() => setShowUpload(true)}
+              className="btn btn-primary flex items-center gap-2"
+              style={{ minHeight: 44 }}
+            >
+              <Upload className="w-4 h-4" /> Process New Email
+            </button>
+          </div>
         </div>
 
         {/* ── Tab Toggle ── */}
