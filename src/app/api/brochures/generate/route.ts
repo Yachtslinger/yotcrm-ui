@@ -11,7 +11,7 @@ import { saveBrochure } from "@/lib/brochure-storage";
 import type { BrokerInfo } from "@/lib/brochure-storage";
 
 export const runtime = "nodejs";
-export const maxDuration = 90;
+export const maxDuration = 120;
 
 const DEFAULT_BROKERS: BrokerInfo[] = [
   {

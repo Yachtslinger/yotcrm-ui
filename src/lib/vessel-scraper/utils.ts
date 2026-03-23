@@ -744,7 +744,7 @@ JSON:`;
         max_tokens: 1000,
         messages: [{ role: "user", content: prompt }],
       }),
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(15000),
     });
 
     if (!res.ok) return;

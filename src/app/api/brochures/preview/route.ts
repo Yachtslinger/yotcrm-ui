@@ -4,7 +4,7 @@ import { scrapeVessel } from "@/lib/vessel-scraper";
 import type { VesselData } from "@/lib/brochure-storage";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
