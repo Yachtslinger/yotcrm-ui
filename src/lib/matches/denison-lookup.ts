@@ -1,72 +1,178 @@
 /**
- * BoatWizard → Denison Yachting URL Bridge
+ * src/lib/matches/denison-lookup.ts
+ * BoatWizard PSP URL → Denison Yachting public listing URL
  *
- * BoatsGroup (the platform powering both psp.boatwizard.com and
- * denisonyachtsales.com) uses the SAME vessel ID across all surfaces.
+ * Confirmed approach (via Puppeteer research + endpoint probing):
+ *   - Denison's listing data comes from POST /yachts-for-sale/get-boats/
+ *   - Response is JSON: { body: "<HTML fragment>" }
+ *   - Each card: <div class="inn_filter_box" data-id="VESSEL_ID">
+ *   - Real URL: href="/yachts-for-sale/SLUG" inside that card
+ *   - Brand filter: brand[]=NUMERIC_ID (extracted from page HTML)
+ *   - Supports page=N pagination (30 results per page)
  *
- * Strategy (in order):
- *   1. Extract the numeric vessel ID from the PSP BoatWizard URL
- *   2. Try several Denison URL slug patterns that embed that ID
- *   3. Verify via HEAD request (fast, no full scrape)
- *   4. Fall back to a filtered Denison search URL (make + year ± 1 + loa ± 5)
- *
- * The returned URL is ALWAYS Denison-branded — no YachtWorld/external links.
+ * Flow:
+ *   1. Extract vessel ID from PSP URL
+ *   2. Look up numeric brand ID for the make (cached in-process)
+ *   3. Page through get-boats results filtered by brand
+ *   4. Return the listing URL when data-id matches
+ *   5. Return null if not found (boat sold, not on Denison, different ID)
  */
 
-const USER_AGENT =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
-  "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
-
 const DENISON_HOST = "https://www.denisonyachtsales.com";
+const SEARCH_PAGE  = `${DENISON_HOST}/yachts-for-sale/`;
+const GET_BOATS    = `${DENISON_HOST}/yachts-for-sale/get-boats/`;
+const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+           "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+export type DenisonLookupResult = {
+  url: string | null;
+  method: "direct_match" | "not_found" | "no_id" | "error";
+  verified: boolean;
+  bwId: string | null;
+};
 
-function slugify(s: string): string {
-  return (s || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
+// ── Brand ID cache (in-process, rebuilt if empty) ─────────────────────────
+// Maps lowercase first-word of make → Denison numeric brand ID
+// e.g. "azimut" → "439", "bertram" → "288"
+const brandCache = new Map<string, string>();
+let brandCacheBuilt = false;
+
+async function fetchText(url: string, opts: RequestInit = {}): Promise<string> {
+  const res = await fetch(url, {
+    headers: { "User-Agent": UA, "Referer": SEARCH_PAGE, ...opts.headers },
+    signal: AbortSignal.timeout(20000),
+    ...opts,
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${url}`);
+  return res.text();
+}
+
+async function buildBrandCache(): Promise<void> {
+  if (brandCacheBuilt) return;
+  const html = await fetchText(SEARCH_PAGE);
+  // Labels: <div class="checkbox-item brand-item">...<span>MAKE NAME</span>...<input value="NNN">
+  // Also: brand text in <label> with adjacent input value
+  const re = /class="checkbox-item brand-item"[^>]*>[\s\S]*?<(?:span|label)[^>]*>([^<]{2,40})<\/(?:span|label)>[\s\S]*?value="(\d+)"/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const name  = m[1].trim().toLowerCase();
+    const value = m[2];
+    if (name && value) brandCache.set(name, value);
+    // Also store first word (e.g. "bertram 700" → "bertram")
+    const first = name.split(/\s+/)[0];
+    if (first && !brandCache.has(first)) brandCache.set(first, value);
+  }
+  brandCacheBuilt = true;
+  console.log(`[denison-lookup] brand cache built: ${brandCache.size} entries`);
 }
 
 function extractBwId(url: string): string | null {
   try {
     const u = new URL(url);
-    // psp.boatwizard.com/boat?id=XXXXXXXX
     const id = u.searchParams.get("id") || u.searchParams.get("psid");
-    return id && /^\d+$/.test(id) ? id : null;
-  } catch {
-    return null;
-  }
+    return id && /^\d{6,12}$/.test(id) ? id : null;
+  } catch { return null; }
 }
 
-async function headOk(url: string): Promise<boolean> {
-  try {
-    const res = await fetch(url, {
-      method: "HEAD",
-      headers: { "user-agent": USER_AGENT },
-      redirect: "follow",
-      signal: AbortSignal.timeout(7000),
+function makeToBrandId(make: string): string | null {
+  const lower = make.trim().toLowerCase();
+  // Try full make name first, then first word
+  return brandCache.get(lower) ?? brandCache.get(lower.split(/\s+/)[0]) ?? null;
+}
+
+// ── Search get-boats with brand filter, paginate, match by data-id ─────────
+
+async function findListingUrl(bwId: string, brandId: string): Promise<string | null> {
+  const MAX_PAGES = 15;  // 30 results/page × 15 = 450 boats max per brand
+
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const body = new URLSearchParams({
+      language: "en",
+      "brand[]": brandId,
+      page: String(page),
     });
-    return res.ok; // 200-299
-  } catch {
-    return false;
+
+    const res = await fetch(GET_BOATS, {
+      method: "POST",
+      headers: {
+        "User-Agent":    UA,
+        "Referer":       SEARCH_PAGE,
+        "Content-Type":  "application/x-www-form-urlencoded",
+        "Accept":        "*/*",
+      },
+      body: body.toString(),
+      signal: AbortSignal.timeout(20000),
+    });
+
+    if (!res.ok) break;
+
+    const json = await res.json() as { body?: string };
+    const html = json.body ?? "";
+    if (!html || !html.includes("data-id")) break;  // no more results
+
+    // Check if target ID appears in this page
+    if (!html.includes(`data-id="${bwId}"`)) continue;
+
+    // Found — extract the listing URL from this card
+    const cardStart = html.indexOf(`data-id="${bwId}"`);
+    const snippet   = html.slice(Math.max(0, cardStart - 100), cardStart + 800);
+
+    // Match href to a real listing slug (not save/compare/# links)
+    const urlRe = /href="(https:\/\/www\.denisonyachtsales\.com\/yachts-for-sale\/([^"#/?]+))"/g;
+    let match: RegExpExecArray | null;
+    while ((match = urlRe.exec(snippet)) !== null) {
+      const href = match[1];
+      const slug = match[2];
+      // Skip utility paths
+      if (["my-dashboard","get-page-views","save-search","get-boats"].includes(slug)) continue;
+      if (slug.length < 4) continue;
+      return href;
+    }
   }
+
+  return null;
 }
 
-// ── types ─────────────────────────────────────────────────────────────────────
+// ── Search without brand filter (fallback for unknown makes) ───────────────
+async function findListingUrlUnfiltered(bwId: string): Promise<string | null> {
+  // Page through unfiltered results — only practical for very unique IDs
+  // Cap at 5 pages (~150 boats) to avoid long timeouts
+  const MAX_PAGES = 5;
 
-export type DenisonLookupResult = {
-  /** Final Denison URL — either a specific listing or a filtered search */
-  url: string;
-  /** How confident we are this is the exact listing */
-  method: "direct_id" | "filtered_search" | "generic_search";
-  /** true = HEAD-verified as a real page, false = constructed but not checked */
-  verified: boolean;
-  /** The BoatWizard numeric vessel ID extracted from the listing URL */
-  bwId: string | null;
-};
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const body = new URLSearchParams({ language: "en", page: String(page) });
+    const res = await fetch(GET_BOATS, {
+      method: "POST",
+      headers: {
+        "User-Agent":   UA,
+        "Referer":      SEARCH_PAGE,
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept":       "*/*",
+      },
+      body: body.toString(),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) break;
+    const json = await res.json() as { body?: string };
+    const html = json.body ?? "";
+    if (!html || !html.includes("data-id")) break;
+    if (!html.includes(`data-id="${bwId}"`)) continue;
 
-// ── main export ───────────────────────────────────────────────────────────────
+    const cardStart = html.indexOf(`data-id="${bwId}"`);
+    const snippet   = html.slice(Math.max(0, cardStart - 100), cardStart + 800);
+    const urlRe = /href="(https:\/\/www\.denisonyachtsales\.com\/yachts-for-sale\/([^"#/?]+))"/g;
+    let match: RegExpExecArray | null;
+    while ((match = urlRe.exec(snippet)) !== null) {
+      const slug = match[2];
+      if (["my-dashboard","get-page-views","save-search","get-boats"].includes(slug)) continue;
+      if (slug.length < 4) continue;
+      return match[1];
+    }
+  }
+  return null;
+}
+
+// ── Main export ────────────────────────────────────────────────────────────
 
 export async function lookupDenisonUrl(listing: {
   listing_url?: string | null;
@@ -75,66 +181,42 @@ export async function lookupDenisonUrl(listing: {
   year?: string | null;
   loa?: string | null;
 }): Promise<DenisonLookupResult> {
+
   const bwId = listing.listing_url ? extractBwId(listing.listing_url) : null;
-  const make  = (listing.make  || "").trim();
-  const model = (listing.model || "").trim();
-  const year  = (listing.year  || "").trim();
-  const loa   = (listing.loa   || "").replace(/[^0-9]/g, ""); // numeric feet only
-
-  // ── Strategy 1: direct ID-based URL candidates ────────────────────────────
-  if (bwId) {
-    const candidates: string[] = [];
-
-    if (make && model && year && loa) {
-      candidates.push(
-        `${DENISON_HOST}/boat-for-sale/${year}-${slugify(make)}-${slugify(model)}-${loa}ft-${bwId}/`
-      );
-    }
-    if (make && year && loa) {
-      candidates.push(
-        `${DENISON_HOST}/boat-for-sale/${year}-${slugify(make)}-${loa}ft-${bwId}/`
-      );
-    }
-    if (make && year) {
-      candidates.push(
-        `${DENISON_HOST}/boat-for-sale/${year}-${slugify(make)}-${bwId}/`
-      );
-    }
-    // bare ID slug (some BoatsGroup sites route on just the ID)
-    candidates.push(`${DENISON_HOST}/boat-for-sale/${bwId}/`);
-
-    // Try each candidate — return the first that HEAD-resolves
-    for (const url of candidates) {
-      if (await headOk(url)) {
-        return { url, method: "direct_id", verified: true, bwId };
-      }
-    }
+  if (!bwId) {
+    return { url: null, method: "no_id", verified: false, bwId: null };
   }
 
-  // ── Strategy 2: filtered search URL (make + year ± 1 + loa ± 5) ──────────
-  const params = new URLSearchParams();
-  if (make)  params.set("make", make);
-  if (year && !isNaN(Number(year))) {
-    const y = Number(year);
-    params.set("year_min", String(y - 1));
-    params.set("year_max", String(y + 1));
-  }
-  if (loa && !isNaN(Number(loa))) {
-    const l = Number(loa);
-    params.set("length_min", String(Math.max(0, l - 5)));
-    params.set("length_max", String(l + 5));
-  }
+  try {
+    // Build brand cache if not yet loaded
+    await buildBrandCache();
 
-  if (params.toString()) {
-    const url = `${DENISON_HOST}/yachts-for-sale/?${params.toString()}`;
-    return { url, method: "filtered_search", verified: false, bwId };
-  }
+    const make = (listing.make || "").trim();
+    const brandId = make ? makeToBrandId(make) : null;
 
-  // ── Strategy 3: generic Denison search (last resort) ──────────────────────
-  return {
-    url: `${DENISON_HOST}/yachts-for-sale/`,
-    method: "generic_search",
-    verified: false,
-    bwId,
-  };
+    let url: string | null = null;
+
+    if (brandId) {
+      // Fast path: filter by brand, paginate
+      url = await findListingUrl(bwId, brandId);
+    }
+
+    if (!url) {
+      // Fallback: scan unfiltered first 5 pages (~150 most recent listings)
+      // Covers boats whose make doesn't match a brand or brand cache miss
+      url = await findListingUrlUnfiltered(bwId);
+    }
+
+    if (url) {
+      return { url, method: "direct_match", verified: true, bwId };
+    }
+
+    // Not found — boat is not currently listed on Denison's website
+    // (sold, different brokerage, or ID mismatch between MLS and Denison's DB)
+    return { url: null, method: "not_found", verified: false, bwId };
+
+  } catch (err) {
+    console.error("[denison-lookup] error:", err);
+    return { url: null, method: "error", verified: false, bwId };
+  }
 }

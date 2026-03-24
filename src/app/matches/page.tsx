@@ -86,13 +86,13 @@ function ViewListingButton({ listing }: { listing: ParsedListing }) {
   const [resolving, setResolving] = useState(false);
   const [resolved, setResolved] = useState<string>(listing.denison_url || "");
 
+  const [notOnDenison, setNotOnDenison] = useState(false);
+
   const handleClick = async (e: React.MouseEvent) => {
     e.preventDefault();
-    // Already resolved — just open it
     const target = resolved || listing.denison_url;
     if (target) { window.open(target, "_blank", "noopener,noreferrer"); return; }
 
-    // Need to look up
     setResolving(true);
     try {
       const res = await fetch("/api/matches/denison-lookup", {
@@ -108,10 +108,24 @@ function ViewListingButton({ listing }: { listing: ParsedListing }) {
       const data = await res.json();
       if (data.ok && data.url) {
         setResolved(data.url);
-        listing.denison_url = data.url; // update in-memory so next click is instant
+        listing.denison_url = data.url;
         window.open(data.url, "_blank", "noopener,noreferrer");
+      } else {
+        setNotOnDenison(true);
+        // Not in Denison's feed — open a filtered Denison search as fallback
+        const make = encodeURIComponent((listing.make || "").split(" ")[0]);
+        const year = listing.year ? parseInt(listing.year) : null;
+        const loa  = listing.loa  ? parseFloat(listing.loa.replace(/[^0-9.]/g,"")) : null;
+        const params = new URLSearchParams();
+        if (make) params.set("make", make);
+        if (year) { params.set("year_min", String(year - 1)); params.set("year_max", String(year + 1)); }
+        if (loa && !isNaN(loa)) { params.set("length_min", String(Math.round(loa - 10))); params.set("length_max", String(Math.round(loa + 10))); }
+        window.open(`https://www.denisonyachtsales.com/yachts-for-sale/?${params}`, "_blank", "noopener,noreferrer");
       }
-    } catch { /* silent */ } finally {
+    } catch {
+      // Silent fallback to generic Denison search
+      window.open("https://www.denisonyachtsales.com/yachts-for-sale/", "_blank", "noopener,noreferrer");
+    } finally {
       setResolving(false);
     }
   };
@@ -121,11 +135,18 @@ function ViewListingButton({ listing }: { listing: ParsedListing }) {
       onClick={handleClick}
       disabled={resolving}
       className="inline-flex items-center gap-1 text-xs mt-1"
-      style={{ color: "var(--brass-400)", background: "none", border: "none", cursor: resolving ? "wait" : "pointer", padding: 0 }}
+      style={{
+        color: notOnDenison ? "var(--navy-400, #6b7280)" : "var(--brass-400)",
+        background: "none", border: "none",
+        cursor: resolving ? "wait" : "pointer", padding: 0,
+      }}
+      title={notOnDenison ? "Not found in Denison's feed — opening search" : "Find on Denison Yachting"}
     >
       {resolving
-        ? <><RefreshCw className="w-3 h-3 animate-spin" /> Finding listing…</>
-        : <><ExternalLink className="w-3 h-3" /> View Listing</>
+        ? <><RefreshCw className="w-3 h-3 animate-spin" /> Searching Denison…</>
+        : notOnDenison
+        ? <><ExternalLink className="w-3 h-3" /> Search Denison</>
+        : <><ExternalLink className="w-3 h-3" /> View on Denison</>
       }
     </button>
   );
@@ -324,8 +345,11 @@ export default function MatchesPage() {
               listing_id: l.id,
             }),
           }).then(r => r.json());
-          if (lookup.ok && lookup.url) resolvedListingUrl = lookup.url;
-        } catch { /* non-fatal — email sends without link */ }
+          // Only use URL if it's a real listing page — not a fallback search
+          if (lookup.ok && lookup.url && lookup.method === "puppeteer_id_match") {
+            resolvedListingUrl = lookup.url;
+          }
+        } catch { /* non-fatal */ }
       }
 
       const resolvedLink = resolvedListingUrl ? `\n\nView listing: ${resolvedListingUrl}` : "";

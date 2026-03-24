@@ -3,17 +3,19 @@ import { lookupDenisonUrl } from "@/lib/matches/denison-lookup";
 import Database from "better-sqlite3";
 
 export const runtime = "nodejs";
-export const maxDuration = 20;
+export const maxDuration = 60; // Puppeteer page load needs up to 30s
 
 /**
  * POST /api/matches/denison-lookup
  *
  * Body: { listing_url?, make?, model?, year?, loa?, listing_id? }
  *
- * If listing_id is provided and we find a URL, it is persisted back to
- * parsed_listings.denison_url so subsequent calls return instantly.
+ * Loads the Denison search page with make/year/LOA filters and finds
+ * the card whose data-id matches the BoatWizard vessel ID.
  *
  * Returns: { ok, url, method, verified, bwId }
+ *   url:    public Denison URL, or null if not in their feed
+ *   method: "puppeteer_id_match" | "not_found" | "no_id"
  */
 export async function POST(req: NextRequest) {
   try {
