@@ -162,6 +162,28 @@ export function initConnectTables() {
         computed_at  TEXT NOT NULL DEFAULT (datetime('now'))
       );
     `);
+    // ── Migrate leads table to add connect buyer-criteria columns ────────────
+    // ALTER TABLE silently fails if the column already exists — safe to run each time.
+    const leadCols = [
+      'ALTER TABLE leads ADD COLUMN budget_min INTEGER',
+      'ALTER TABLE leads ADD COLUMN budget_max INTEGER',
+      'ALTER TABLE leads ADD COLUMN loa_min REAL',
+      'ALTER TABLE leads ADD COLUMN loa_max REAL',
+      'ALTER TABLE leads ADD COLUMN year_min INTEGER',
+      'ALTER TABLE leads ADD COLUMN year_max INTEGER',
+      'ALTER TABLE leads ADD COLUMN make_preference TEXT',
+      'ALTER TABLE leads ADD COLUMN preferred_location TEXT',
+      'ALTER TABLE leads ADD COLUMN vessel_type_pref TEXT',
+      'ALTER TABLE leads ADD COLUMN flybridge_pref INTEGER DEFAULT 0',
+      'ALTER TABLE leads ADD COLUMN stabilizers_pref INTEGER DEFAULT 0',
+      'ALTER TABLE leads ADD COLUMN min_cabins INTEGER',
+      'ALTER TABLE leads ADD COLUMN engine_type_pref TEXT',
+      'ALTER TABLE leads ADD COLUMN last_contacted_at TEXT',
+    ];
+    for (const sql of leadCols) {
+      try { db.exec(sql); } catch { /* column already exists */ }
+    }
+
     _tablesReady = true;
   } finally {
     db.close();

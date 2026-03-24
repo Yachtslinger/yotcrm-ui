@@ -65,7 +65,7 @@ export function getAllActiveLeads(): ConnectLead[] {
     const activeStatuses = ['active','warm','hot','qualified','interested','pipeline','new'];
     const placeholders = activeStatuses.map(() => '?').join(',');
     return db.prepare(
-      `SELECT id, name, email, phone, status, notes,
+      `SELECT id, (first_name || ' ' || last_name) AS name, email, phone, status, notes,
               budget_min, budget_max, loa_min, loa_max, year_min, year_max,
               make_preference, preferred_location, vessel_type_pref,
               flybridge_pref, stabilizers_pref, min_cabins, engine_type_pref,
@@ -81,7 +81,7 @@ export function getLeadById(leadId: number): ConnectLead | null {
   const db = getConnectDb();
   try {
     return db.prepare(
-      `SELECT id, name, email, phone, status, notes,
+      `SELECT id, (first_name || ' ' || last_name) AS name, email, phone, status, notes,
               budget_min, budget_max, loa_min, loa_max, year_min, year_max,
               make_preference, preferred_location, vessel_type_pref,
               flybridge_pref, stabilizers_pref, min_cabins, engine_type_pref,
@@ -325,7 +325,7 @@ export function getMatches(params: GetMatchesParams = {}): { data: MatchListItem
       SELECT
         cms.id, cms.lead_id, cms.brochure_id, cms.score, cms.confidence,
         cms.routing, cms.manual_priority_score, cms.scored_at,
-        l.name  AS lead_name, l.email AS lead_email, l.status AS lead_status,
+        (l.first_name || ' ' || l.last_name) AS lead_name, l.email AS lead_email, l.status AS lead_status,
         b.vessel_name, b.builder, b.year, b.slug,
         COALESCE(ces.sent_count, 0)  AS sent_count,
         ces.last_sent_at,
