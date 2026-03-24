@@ -13,6 +13,7 @@ type ParsedListing = {
   id: number; make: string; model: string; year: string;
   loa: string; asking_price: string; location: string;
   vessel_type: string; listing_url: string; broker_notes: string;
+  denison_url?: string;
 };
 
 type Match = {
@@ -76,6 +77,59 @@ const TONE_OPTIONS: { id: SendTone; label: string; desc: string }[] = [
   { id: "new-listing",  label: "Just listed",              desc: "Just came to market, wanted you to see it first" },
   { id: "price-drop",   label: "Price reduced",            desc: "Meaningful price adjustment — worth revisiting" },
 ];
+
+/* ─── ViewListingButton ─────────────────────────────────────────────────────
+   Resolves the PSP BoatWizard URL to a public Denison URL on first click,
+   caches the result back to the DB, then opens it. Subsequent clicks are
+   instant (denison_url already populated). Shows a spinner during lookup. */
+function ViewListingButton({ listing }: { listing: ParsedListing }) {
+  const [resolving, setResolving] = useState(false);
+  const [resolved, setResolved] = useState<string>(listing.denison_url || "");
+
+  const handleClick = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    // Already resolved — just open it
+    const target = resolved || listing.denison_url;
+    if (target) { window.open(target, "_blank", "noopener,noreferrer"); return; }
+
+    // Need to look up
+    setResolving(true);
+    try {
+      const res = await fetch("/api/matches/denison-lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          listing_url: listing.listing_url,
+          make: listing.make, model: listing.model,
+          year: listing.year, loa: listing.loa,
+          listing_id: listing.id,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok && data.url) {
+        setResolved(data.url);
+        listing.denison_url = data.url; // update in-memory so next click is instant
+        window.open(data.url, "_blank", "noopener,noreferrer");
+      }
+    } catch { /* silent */ } finally {
+      setResolving(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={resolving}
+      className="inline-flex items-center gap-1 text-xs mt-1"
+      style={{ color: "var(--brass-400)", background: "none", border: "none", cursor: resolving ? "wait" : "pointer", padding: 0 }}
+    >
+      {resolving
+        ? <><RefreshCw className="w-3 h-3 animate-spin" /> Finding listing…</>
+        : <><ExternalLink className="w-3 h-3" /> View Listing</>
+      }
+    </button>
+  );
+}
 
 /* ═══ MAIN COMPONENT ═══ */
 export default function MatchesPage() {
@@ -230,7 +284,9 @@ export default function MatchesPage() {
       (l as any)?.brokerage ? `Listed by: ${(l as any).brokerage}` : null,
     ].filter(Boolean).join("\n");
 
-    const listingLink = l?.listing_url ? `\n\nView listing: ${l.listing_url}` : "";
+    const listingLink = l?.denison_url
+      ? `\n\nView listing: ${l.denison_url}`
+      : ""; // resolved async below if needed
 
     const body = [
       `Hi ${firstName},`,
@@ -254,11 +310,50 @@ export default function MatchesPage() {
 
     setSending(true);
     try {
+      // Resolve a Denison URL if not already cached
+      let resolvedListingUrl = l?.denison_url || "";
+      if (!resolvedListingUrl && l?.listing_url) {
+        try {
+          const lookup = await fetch("/api/matches/denison-lookup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              listing_url: l.listing_url,
+              make: l.make, model: l.model,
+              year: l.year, loa: l.loa,
+              listing_id: l.id,
+            }),
+          }).then(r => r.json());
+          if (lookup.ok && lookup.url) resolvedListingUrl = lookup.url;
+        } catch { /* non-fatal — email sends without link */ }
+      }
+
+      const resolvedLink = resolvedListingUrl ? `\n\nView listing: ${resolvedListingUrl}` : "";
+
+      // Rebuild body with resolved URL
+      const bodyFinal = [
+        `Hi ${firstName},`,
+        ``,
+        intro,
+        ``,
+        boatTitle,
+        specLines,
+        resolvedLink,
+        personalNote.trim() ? `\n${personalNote.trim()}` : "",
+        ``,
+        `Happy to pull together more detail, arrange a showing, or get on a call whenever works for you. Just reply and let me know.`,
+        ``,
+        `Best,`,
+        `Will Noftsinger`,
+        `Denison Yachting`,
+        `850.461.3342 | WN@DenisonYachting.com`,
+      ].filter(l => l !== null).join("\n");
+
       // Use yotcrm:// scheme → YotCRM Compose.app → Mail.app with WN@DenisonYachting.com
       const payload = {
         to: match.lead_email,
         subject,
-        body,
+        body: bodyFinal,
         make: l?.make || "Yacht",
       };
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
@@ -553,10 +648,7 @@ export default function MatchesPage() {
                               {l?.loa && <p className="text-xs" style={{ color: "var(--navy-500)" }}>LOA: {l.loa}</p>}
                               {l?.location && <p className="text-xs" style={{ color: "var(--navy-500)" }}>Location: {l.location}</p>}
                               {l?.listing_url && (
-                                <a href={l.listing_url} target="_blank" rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 text-xs mt-1" style={{ color: "var(--brass-400)" }}>
-                                  View Listing <ExternalLink className="w-3 h-3" />
-                                </a>
+                                <ViewListingButton listing={l} />
                               )}
                             </div>
                           </div>
