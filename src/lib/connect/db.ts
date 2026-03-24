@@ -1,5 +1,6 @@
 // src/lib/connect/db.ts
 // Connect engine — SQLite table initialization
+import 'server-only';
 
 import Database from 'better-sqlite3';
 

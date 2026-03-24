@@ -5,10 +5,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMatches, runFullRescore } from '@/lib/connect/storage';
 import { initConnectTables } from '@/lib/connect/db';
+import { withGuard } from '@/lib/connect/guard';
 
 export const runtime = 'nodejs';
 
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   try {
     initConnectTables();
     const sp = req.nextUrl.searchParams;
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
     initConnectTables();
     // Run sync (for datasets <500 pairs, completes in <2s).
@@ -49,3 +50,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
   }
 }
+
+export const GET  = withGuard('matches', handleGET);
+export const POST = withGuard('matches', handlePOST);

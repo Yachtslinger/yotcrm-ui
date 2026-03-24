@@ -1,6 +1,7 @@
 // src/lib/connect/storage.ts
 // Connect engine — all database read/write operations.
 // Pure data layer — no scoring logic, no HTTP concerns.
+import 'server-only';
 
 import { getConnectDb, initConnectTables } from './db';
 import { calculateConnectScore, computePriorityScore } from './scoring';

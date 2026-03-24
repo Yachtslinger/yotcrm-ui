@@ -10,11 +10,20 @@ const nextConfig: NextConfig = {
   experimental: {
     serverActions: { bodySizeLimit: "10mb" },
   },
-  webpack: (config: { externals: unknown[] }) => {
-    // googleapis is optional — only used when Gmail OAuth is configured.
-    // Prevent webpack from failing the build when it's not installed.
+  webpack: (config: { externals: unknown[]; resolve?: { fallback?: Record<string,unknown> } }, { isServer }: { isServer: boolean }) => {
     config.externals = config.externals || [];
+    // googleapis is optional — only used when Gmail OAuth is configured.
     config.externals.push("googleapis");
+    // Prevent native Node modules from being bundled into the client build.
+    // better-sqlite3 uses fs/path bindings that webpack cannot resolve client-side.
+    if (!isServer) {
+      config.externals.push("better-sqlite3");
+      config.resolve = config.resolve || {};
+      config.resolve.fallback = {
+        ...(config.resolve.fallback || {}),
+        fs: false, path: false, crypto: false, os: false,
+      };
+    }
     return config;
   },
   async headers() {

@@ -1,6 +1,7 @@
 // src/lib/connect/scoring.ts
 // Connect engine — pure scoring logic, no DB dependencies.
 // Scores a CRM lead (from leads table) against a CRM brochure (from brochures table).
+import 'server-only';
 
 import type {
   ConnectLead, ConnectBrochure, ConnectScoreResult,
