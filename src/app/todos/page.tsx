@@ -25,7 +25,7 @@ function parseMatchMeta(todo: { text: string; email_draft?: string | null }) {
   const location  = get("Location:");
   const brokerage = get("Listed by:");
 
-  const bwLine = lines.find(l => l.includes("BoatWizard listing:")) || "";
+  const bwLine = lines.find(l => l.includes("View listing:")) || lines.find(l => l.includes("BoatWizard listing:")) || "";
   const listingUrl = (() => {
     const m = bwLine.match(/(https?:\/\/[^\s]+)/);
     return m ? m[1] : "";
@@ -35,37 +35,23 @@ function parseMatchMeta(todo: { text: string; email_draft?: string | null }) {
     const m = l.match(/(https?:\/\/[^\s]+)/);
     return m ? m[1] : "";
   })();
+  const ywUrl = (() => {
+    const l = lines.find(x => x.includes("yachtworld.com")) || "";
+    const m = l.match(/(https?:\/\/[^\s]+)/);
+    return m ? m[1] : "";
+  })();
 
-  // ── Machine-readable metadata section ────────────────────────────────────
-  const metaStart = lines.indexOf("---match-metadata---");
-  let matchScore = 0;
-  let allSignals: string[] = [];
-  let allConflicts: string[] = [];
-  let allPenalties: string[] = [];
+  // top reason — last (...) in todo text
+  const reasonMatch = todo.text.match(/\(([^)]+)\)\s*$/);
+  const topReason = reasonMatch ? reasonMatch[1] : "";
 
-  if (metaStart >= 0) {
-    const metaLines = lines.slice(metaStart + 1);
-    for (const ml of metaLines) {
-      if (ml.startsWith("---")) break;
-      if (ml.startsWith("score:"))     matchScore   = parseInt(ml.slice(6)) || 0;
-      if (ml.startsWith("signals:"))   allSignals   = ml.slice(8).split(" | ").filter(Boolean);
-      if (ml.startsWith("conflicts:")) allConflicts = ml.slice(10).split(" | ").filter(Boolean);
-      if (ml.startsWith("penalties:")) allPenalties = ml.slice(10).split(" | ").filter(Boolean);
-    }
-  }
-
-  // Fallback: top reason from todo text (pre-metadata todos)
-  const reasonMatch = todo.text.match(/\(([^)]+)\)\s*\[Score:/);
-  const topReason = allSignals[0] || (reasonMatch ? reasonMatch[1] : "");
-
-  return { boatTitle, year, loa, price, location, brokerage, listingUrl, denisonUrl,
-           topReason, matchScore, allSignals, allConflicts, allPenalties };
+  return { boatTitle, year, loa, price, location, brokerage, listingUrl, denisonUrl, ywUrl, topReason };
 }
 
 type Todo = {
   id: number; text: string; completed: number; priority: string;
-  lead_id: number | null; listing_id: number | null; due_date: string | null;
-  created_at: string; completed_at: string | null; assignee: string;
+  lead_id: number | null; due_date: string | null; created_at: string;
+  completed_at: string | null; assignee: string;
   email_draft?: string | null; lead_name?: string; lead_email?: string;
 };
 type Filter = "all" | "active" | "completed";
@@ -79,6 +65,87 @@ const FOLLOW_UPS: FollowUpType[] = [
   { icon: "📅", label: "Meeting", prefix: "Schedule meeting with" },
   { icon: "📝", label: "Note",    prefix: "Follow up:"    },
 ];
+
+// ── Shared team scratchpad ────────────────────────────────────────────────
+function SharedNotes() {
+  const [text, setText] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+  const [saved, setSaved] = React.useState(false);
+  const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  React.useEffect(() => {
+    fetch("/api/todos/note").then(r => r.json()).then(d => { if (d.ok) setText(d.content || ""); }).catch(() => {});
+  }, []);
+  function onChange(val: string) {
+    setText(val); setSaved(false);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(async () => {
+      setSaving(true);
+      try { await fetch("/api/todos/note", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: val }) }); setSaved(true); setTimeout(() => setSaved(false), 2000); } catch {}
+      setSaving(false);
+    }, 900);
+  }
+  return (
+    <div className="card-elevated p-4 flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-bold uppercase tracking-widest" style={{ color: "var(--navy-400)" }}>📝 Team Notes</span>
+        <span className="text-[10px]" style={{ color: saving ? "var(--brass-400)" : saved ? "#059669" : "var(--navy-300)" }}>
+          {saving ? "Saving…" : saved ? "✓ Saved" : "Auto-saves"}
+        </span>
+      </div>
+      <textarea value={text} onChange={e => onChange(e.target.value)}
+        placeholder={"Shared scratchpad for Will & Paolo.\n\nAuto-saves as you type. Both of you see the same note."}
+        className="form-input resize-none" style={{ fontSize: 14, minHeight: 200, lineHeight: 1.65, fontFamily: "inherit" }} />
+    </div>
+  );
+}
+
+// ── High-value matches panel ───────────────────────────────────────────────
+type HighMatch = {
+  id: number; match_score: number; confidence: string; reasons: string;
+  listing?: { make: string; model: string; year: string; loa: string; asking_price: string };
+  lead_name?: string;
+};
+function HighMatches() {
+  const [matches, setMatches] = React.useState<HighMatch[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  React.useEffect(() => {
+    fetch("/api/matches/list?confidence=high&minScore=80&pageSize=8&sortBy=score")
+      .then(r => r.json())
+      .then(d => setMatches((d.matches || []).filter((m: HighMatch) => m.match_score >= 80).slice(0, 8)))
+      .catch(() => {}).finally(() => setLoading(false));
+  }, []);
+  function sc(s: number) { return s >= 90 ? "#059669" : "#d97706"; }
+  function sigs(m: HighMatch): string[] { try { return JSON.parse(m.reasons).slice(0, 2); } catch { return []; } }
+  return (
+    <div className="card-elevated p-4">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs font-bold uppercase tracking-widest" style={{ color: "var(--navy-400)" }}>⚡ High-Value Matches</span>
+        <Link href="/matches" className="text-[10px] font-semibold" style={{ color: "var(--brass-400)" }}>View all →</Link>
+      </div>
+      {loading ? <p className="text-xs text-center py-4" style={{ color: "var(--navy-300)" }}>Loading…</p>
+      : matches.length === 0 ? <p className="text-xs text-center py-4" style={{ color: "var(--navy-300)" }}>No high-confidence matches yet.<br />Process a listings email to generate matches.</p>
+      : <div className="space-y-2">{matches.map(m => {
+          const l = m.listing;
+          const color = sc(m.match_score);
+          return (
+            <div key={m.id} className="rounded-xl p-3 flex items-start gap-3"
+              style={{ background: "var(--sand-50,rgba(0,0,0,0.02))", border: "1px solid var(--border)" }}>
+              <div className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold"
+                style={{ background: `${color}18`, color, border: `2px solid ${color}40` }}>{m.match_score}</div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline gap-1.5 flex-wrap">
+                  <span className="text-sm font-semibold" style={{ color: "var(--foreground)" }}>{m.lead_name?.trim() || "Unknown"}</span>
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: `${color}14`, color }}>{m.confidence}</span>
+                </div>
+                {l && <p className="text-xs mt-0.5 truncate" style={{ color: "var(--navy-500)" }}>{l.year} {l.make} {l.model}{l.asking_price ? ` · ${l.asking_price}` : ""}</p>}
+                {sigs(m).length > 0 && <div className="flex flex-wrap gap-1 mt-1">{sigs(m).map((s, i) => <span key={i} className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: "rgba(16,185,129,0.08)", color: "#059669" }}>✓ {s}</span>)}</div>}
+              </div>
+            </div>
+          );
+        })}</div>}
+    </div>
+  );
+}
 
 export default function TodosPage() {
   const { toast } = useToast();
@@ -94,12 +161,6 @@ export default function TodosPage() {
   const [expandedDraft, setExpandedDraft] = React.useState<number | null>(null);
   const [copiedDraftId, setCopiedDraftId] = React.useState<number | null>(null);
   const [selected, setSelected] = React.useState<Set<number>>(new Set());
-  // Denison lookup state: todoId → { url, method, verified, loading }
-  const [denisonLookup, setDenisonLookup] = React.useState<Record<number, {
-    url: string; method: string; verified: boolean; loading: boolean;
-  }>>({});
-  // PDF generation state: todoId → loading bool
-  const [pdfLoading, setPdfLoading] = React.useState<Record<number, boolean>>({});
   const [selectMode, setSelectMode] = React.useState(false);
   // Follow-up modal state
   const [followUpTodo, setFollowUpTodo] = React.useState<Todo | null>(null);
@@ -110,62 +171,6 @@ export default function TodosPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = React.useRef<any>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
-
-  // ── Denison Lookup ──────────────────────────────────────────────────────────
-  async function lookupDenison(todo: Todo, meta: ReturnType<typeof parseMatchMeta>) {
-    setDenisonLookup(p => ({ ...p, [todo.id]: { url: "", method: "", verified: false, loading: true } }));
-    try {
-      const body: Record<string, string | number> = {};
-      if (meta.listingUrl) body.listing_url = meta.listingUrl;
-      if (todo.listing_id) body.listing_id  = todo.listing_id;
-      const yearMatch = meta.boatTitle.match(/\((\d{4})\)/);
-      if (yearMatch)  body.year = yearMatch[1];
-      if (meta.loa)   body.loa  = meta.loa.replace(/[^0-9]/g, "");
-      const titleParts = meta.boatTitle.split(/\s+/);
-      if (titleParts[0]) body.make = titleParts[0];
-      const res  = await fetch("/api/matches/denison-lookup", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        setDenisonLookup(p => ({ ...p, [todo.id]: { url: data.url, method: data.method, verified: data.verified, loading: false } }));
-        toast(data.verified ? "✅ Denison listing found!" : "🔍 Filtered search ready — verify on Denison");
-      } else {
-        setDenisonLookup(p => { const n = { ...p }; delete n[todo.id]; return n; });
-        toast("Lookup failed", "error");
-      }
-    } catch {
-      setDenisonLookup(p => { const n = { ...p }; delete n[todo.id]; return n; });
-      toast("Lookup error", "error");
-    }
-  }
-
-  // ── Generate PDF via Denison URL ────────────────────────────────────────────
-  async function generatePdf(todo: Todo, meta: ReturnType<typeof parseMatchMeta>) {
-    const dl = denisonLookup[todo.id];
-    const denisonUrl = (dl?.url && dl.url.includes("denisonyachtsales.com"))
-      ? dl.url
-      : (meta.denisonUrl && meta.denisonUrl.includes("denisonyachtsales.com") ? meta.denisonUrl : null);
-    if (!denisonUrl) {
-      toast("Find the Denison listing first, then generate the PDF", "info");
-      return;
-    }
-    setPdfLoading(p => ({ ...p, [todo.id]: true }));
-    try {
-      const res  = await fetch("/api/pdf", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url: denisonUrl, broker: todo.assignee || "will" }),
-      });
-      const data = await res.json();
-      if (data.ok && data.downloadUrl) {
-        const a = document.createElement("a");
-        a.href = data.downloadUrl; a.download = data.filename || "listing.pdf"; a.click();
-        toast("📄 PDF ready");
-      } else { toast(data.error || "PDF generation failed", "error"); }
-    } catch { toast("PDF error", "error"); }
-    finally { setPdfLoading(p => ({ ...p, [todo.id]: false })); }
-  }
 
   const fetchTodos = React.useCallback(async () => {
     try {
@@ -258,22 +263,6 @@ export default function TodosPage() {
     } catch { toast("Failed to save","error"); }
   }
 
-  // Dismiss a match todo — records dismissal in match engine so it never resurfaces
-  async function dismissMatchTodo(todo: Todo) {
-    try {
-      await fetch("/api/todos", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "dismiss_match",
-          todo: { id: todo.id, listing_id: todo.listing_id, lead_id: todo.lead_id, assignee: todo.assignee },
-        }),
-      });
-      setTodos(p => p.filter(t => t.id !== todo.id));
-      setSelected(p => { const n = new Set(p); n.delete(todo.id); return n; });
-      toast("Dismissed — won't resurface for this lead");
-    } catch { toast("Failed to dismiss", "error"); }
-  }
-
   async function deleteTodo(id: number) {
     try {
       await fetch("/api/todos", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({ action:"delete", id }) });
@@ -305,15 +294,11 @@ export default function TodosPage() {
 
   function copyDraft(todo: Todo) {
     if (!todo.email_draft) return;
-    // Strip the machine-readable metadata section before copying
-    const cleanDraft = todo.email_draft
-      .replace(/\n---match-metadata---[\s\S]*?---\n?/g, "")
-      .trimEnd();
-    navigator.clipboard.writeText(cleanDraft).then(() => {
+    navigator.clipboard.writeText(todo.email_draft).then(() => {
       setCopiedDraftId(todo.id);
       setTimeout(() => setCopiedDraftId(null), 2500);
       toast("Email draft copied — paste into Apple Mail");
-    }, () => toast("Copy failed", "error"));
+    }, () => toast("Copy failed","error"));
   }
 
   // Selection helpers
@@ -353,7 +338,7 @@ export default function TodosPage() {
     <PageShell
       title="To Do"
       subtitle={`${activeCount} item${activeCount!==1?"s":""} remaining`}
-      maxWidth="narrow"
+      maxWidth="full"
       actions={
         completedCount>0 ? (
           <button onClick={clearCompleted} className="btn-ghost text-[var(--navy-300)] hover:text-[var(--coral-500)] text-sm">
@@ -362,6 +347,8 @@ export default function TodosPage() {
         ) : undefined
       }
     >
+      <div className="flex gap-6 items-start" style={{ maxWidth: 1160, margin: "0 auto" }}>
+      <div className="flex-1 min-w-0">
       {/* Person Tabs */}
       <div className="flex gap-2 mb-4">
         {([["will","Will",willCount],["paolo","Paolo",paoloCount]] as const).map(([key,label,count])=>(
@@ -567,33 +554,14 @@ export default function TodosPage() {
                         {meta.price ? ` · ${meta.price}` : ""}
                         {meta.location ? ` · ${meta.location}` : ""}
                       </p>
-                      {/* Signal count + top reason tags (collapsed header) */}
+                      {/* Reason + due date tags */}
                       <div className="flex flex-wrap gap-1 mt-2">
-                        {meta.allSignals.length > 0 ? (
-                          <>
-                            <span className="px-2 py-0.5 rounded text-[10px] font-medium"
-                              style={{ background: "rgba(16,185,129,0.08)", color: "#059669" }}>
-                              ✓ {meta.allSignals[0]}
-                            </span>
-                            {meta.allSignals.length > 1 && (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-medium"
-                                style={{ background: "rgba(16,185,129,0.06)", color: "#059669" }}>
-                                +{meta.allSignals.length - 1} more
-                              </span>
-                            )}
-                            {meta.allPenalties.length > 0 && (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-medium"
-                                style={{ background: "rgba(239,68,68,0.07)", color: "#ef4444" }}>
-                                ↓ {meta.allPenalties[0]}
-                              </span>
-                            )}
-                          </>
-                        ) : meta.topReason ? (
+                        {meta.topReason && (
                           <span className="px-2 py-0.5 rounded text-[10px] font-medium"
                             style={{ background: "rgba(16,185,129,0.08)", color: "#059669" }}>
                             ✓ {meta.topReason}
                           </span>
-                        ) : null}
+                        )}
                         {todo.due_date && (
                           <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${todo.due_date < today && !todo.completed ? "bg-red-50 text-red-600" : ""}`}
                             style={!(todo.due_date < today && !todo.completed) ? { background: "var(--sand-100)", color: "var(--navy-500)" } : {}}>
@@ -656,33 +624,13 @@ export default function TodosPage() {
                         </div>
                       </div>
 
-                      {/* Match Reasoning — all signals, conflicts, penalties */}
-                      {(meta.allSignals.length > 0 || meta.allConflicts.length > 0 || meta.allPenalties.length > 0) && (
-                        <div className="py-3" style={{ borderTop: "1px solid var(--border)" }}>
-                          <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--navy-400)" }}>
-                            Match Reasoning {meta.matchScore > 0 && <span className="ml-1 font-bold" style={{ color: meta.matchScore >= 88 ? "#059669" : "#d97706" }}>· Score {meta.matchScore}</span>}
-                          </h4>
-                          <div className="flex flex-wrap gap-1.5">
-                            {meta.allSignals.map((s, i) => (
-                              <span key={i} className="px-2 py-1 rounded text-xs"
-                                style={{ background: "rgba(16,185,129,0.08)", color: "#059669" }}>✓ {s}</span>
-                            ))}
-                            {meta.allConflicts.map((c, i) => (
-                              <span key={i} className="px-2 py-1 rounded text-xs"
-                                style={{ background: "rgba(245,158,11,0.08)", color: "#d97706" }}>⚠ {c}</span>
-                            ))}
-                            {meta.allPenalties.map((p, i) => (
-                              <span key={i} className="px-2 py-1 rounded text-xs"
-                                style={{ background: "rgba(239,68,68,0.07)", color: "#ef4444" }}>↓ {p}</span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {/* Fallback for pre-metadata todos */}
-                      {meta.allSignals.length === 0 && meta.topReason && (
+                      {/* Match Reasoning */}
+                      {meta.topReason && (
                         <div className="py-3" style={{ borderTop: "1px solid var(--border)" }}>
                           <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--navy-400)" }}>Match Reasoning</h4>
-                          <span className="px-2 py-1 rounded text-xs" style={{ background: "rgba(16,185,129,0.08)", color: "#059669" }}>✓ {meta.topReason}</span>
+                          <div className="flex flex-wrap gap-1.5">
+                            <span className="px-2 py-1 rounded text-xs" style={{ background: "rgba(16,185,129,0.08)", color: "#059669" }}>✓ {meta.topReason}</span>
+                          </div>
                         </div>
                       )}
 
@@ -695,43 +643,21 @@ export default function TodosPage() {
                             ✉️ Email
                           </a>
                         )}
-
-                        {/* ── Denison Lookup Button ── */}
-                        {(() => {
-                          const dl = denisonLookup[todo.id];
-                          if (dl && !dl.loading && dl.url) {
-                            // Already resolved — show the link
-                            return (
-                              <a href={dl.url} target="_blank" rel="noopener noreferrer"
-                                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold"
-                                style={{ background: dl.verified ? "rgba(16,185,129,0.12)" : "rgba(180,142,60,0.1)", color: dl.verified ? "#059669" : "var(--brass-400)", minHeight: 44 }}>
-                                {dl.verified ? "✅ View on Denison" : "🔍 Search on Denison"} <ExternalLink className="w-3 h-3" />
-                              </a>
-                            );
-                          }
-                          return (
-                            <button
-                              onClick={() => lookupDenison(todo, meta)}
-                              disabled={dl?.loading}
-                              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all"
-                              style={{ background: "rgba(180,142,60,0.1)", color: "var(--brass-400)", minHeight: 44,
-                                       opacity: dl?.loading ? 0.6 : 1 }}>
-                              {dl?.loading ? "🔍 Looking up…" : "🏢 Find on Denison"}
-                            </button>
-                          );
-                        })()}
-
-                        {/* ── Generate PDF Button ── */}
-                        <button
-                          onClick={() => generatePdf(todo, meta)}
-                          disabled={pdfLoading[todo.id]}
-                          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all"
-                          style={{ background: "rgba(99,102,241,0.1)", color: "#6366f1", minHeight: 44,
-                                   opacity: pdfLoading[todo.id] ? 0.6 : 1 }}>
-                          {pdfLoading[todo.id] ? "⏳ Generating…" : "📄 Generate PDF"}
-                        </button>
-
-                        <button onClick={() => dismissMatchTodo(todo)}
+                        {meta.denisonUrl && (
+                          <a href={meta.denisonUrl} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold"
+                            style={{ background: "rgba(180,142,60,0.1)", color: "var(--brass-400)", minHeight: 44 }}>
+                            🏢 Search Denison
+                          </a>
+                        )}
+                        {meta.ywUrl && (
+                          <a href={meta.ywUrl} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold"
+                            style={{ background: "rgba(14,116,144,0.1)", color: "#0e7490", minHeight: 44 }}>
+                            ⚓ Search YachtWorld
+                          </a>
+                        )}
+                        <button onClick={() => deleteTodo(todo.id)}
                           className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold ml-auto"
                           style={{ background: "rgba(107,114,128,0.1)", color: "#6b7280", minHeight: 44 }}>
                           ✕ Dismiss
@@ -798,6 +724,12 @@ export default function TodosPage() {
           })}
         </div>
       )}
+      </div>{/* end left column */}
+      <div className="shrink-0 flex flex-col gap-4" style={{ width: 340 }}>
+        <SharedNotes />
+        <HighMatches />
+      </div>
+      </div>{/* end flex */}
     </PageShell>
 
       {/* ── Follow-up Modal ── */}

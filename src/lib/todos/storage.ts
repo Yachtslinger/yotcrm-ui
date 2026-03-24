@@ -116,3 +116,33 @@ export function clearCompleted(assignee?: string): number {
     db.close();
   }
 }
+
+// ── Shared team notes (single persistent scratchpad for Will + Paolo) ──────
+
+export function getSharedNote(): string {
+  const db = getDb();
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS shared_notes (
+      id      INTEGER PRIMARY KEY DEFAULT 1,
+      content TEXT    NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`);
+    const row = db.prepare("SELECT content FROM shared_notes WHERE id = 1").get() as { content: string } | undefined;
+    return row?.content ?? "";
+  } finally { db.close(); }
+}
+
+export function setSharedNote(content: string): void {
+  const db = getDb();
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS shared_notes (
+      id      INTEGER PRIMARY KEY DEFAULT 1,
+      content TEXT    NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`);
+    db.prepare(`
+      INSERT INTO shared_notes (id, content, updated_at) VALUES (1, ?, datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at
+    `).run(content);
+  } finally { db.close(); }
+}
