@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { readContact, updateContact, deleteContact } from "@/lib/clients/storage";
 import { getBatchIds, runMatchesForBatch, generateMatchTodos } from "@/lib/matches/storage";
+import { rescoreForLead } from "@/lib/connect/storage";
 
 export const runtime = "nodejs";
 
@@ -105,6 +106,13 @@ export async function PUT(
       } catch (e) {
         console.error("[criteria-rerun] Failed:", e);
         // Non-fatal — criteria saved successfully even if rerun fails
+      }
+      // ── Also rescore Connect engine pairs for this lead ──────────────────
+      try {
+        rescoreForLead(parseInt(id));
+        console.log(`[connect-rescore] Rescored connect pairs for lead ${id}`);
+      } catch (e) {
+        console.error("[connect-rescore] Failed:", e);
       }
     }
 

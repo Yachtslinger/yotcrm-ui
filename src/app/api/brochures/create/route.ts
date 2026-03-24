@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { saveBrochure } from "@/lib/brochure-storage";
 import { syncPocketListingFromBrochure } from "@/lib/pocket-brochure-sync";
+import { rescoreForBrochure } from "@/lib/connect/storage";
 import type { VesselData, BrokerInfo } from "@/lib/brochure-storage";
 
 export const runtime = "nodejs";
@@ -26,6 +27,11 @@ export async function POST(req: NextRequest) {
       const brochureUrl = `${BASE}/brochures/${slug}`;
       const pdfUrl      = `${BASE}/api/brochures/pdf?slug=${slug}`;
       syncPocketListingFromBrochure({ vessel, slug, brochureUrl, pdfUrl });
+    }
+
+    // ── Score new brochure against all active leads (fire-and-forget) ───────
+    try { rescoreForBrochure(id); } catch (e) {
+      console.error("[connect-rescore] brochure create failed:", e);
     }
 
     return NextResponse.json({ id, slug, vesselName: vessel.name }, { status: 201 });
