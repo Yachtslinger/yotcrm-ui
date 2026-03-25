@@ -95,7 +95,8 @@ function ViewListingButton({ listing }: { listing: ParsedListing }) {
 
     // Open the window immediately — before any await — to preserve the user
     // gesture context. Browsers block window.open() called after async gaps.
-    const win = window.open("", "_blank", "noopener,noreferrer");
+    // Do NOT use noopener here — it severs the win reference so we can't navigate it.
+    const win = window.open("about:blank", "_blank");
 
     setResolving(true);
     try {
@@ -116,7 +117,7 @@ function ViewListingButton({ listing }: { listing: ParsedListing }) {
         if (win) win.location.href = data.url;
       } else {
         setNotOnDenison(true);
-        const make = encodeURIComponent((listing.make || "").split(" ")[0]);
+        const make = (listing.make || "").split(" ")[0]; // raw — URLSearchParams encodes it
         const year = listing.year ? parseInt(listing.year) : null;
         const loa  = listing.loa  ? parseFloat(listing.loa.replace(/[^0-9.]/g,"")) : null;
         const params = new URLSearchParams();
