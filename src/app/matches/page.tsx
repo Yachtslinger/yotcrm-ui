@@ -93,6 +93,10 @@ function ViewListingButton({ listing }: { listing: ParsedListing }) {
     const target = resolved || listing.denison_url;
     if (target) { window.open(target, "_blank", "noopener,noreferrer"); return; }
 
+    // Open the window immediately — before any await — to preserve the user
+    // gesture context. Browsers block window.open() called after async gaps.
+    const win = window.open("", "_blank", "noopener,noreferrer");
+
     setResolving(true);
     try {
       const res = await fetch("/api/matches/denison-lookup", {
@@ -109,10 +113,9 @@ function ViewListingButton({ listing }: { listing: ParsedListing }) {
       if (data.ok && data.url) {
         setResolved(data.url);
         listing.denison_url = data.url;
-        window.open(data.url, "_blank", "noopener,noreferrer");
+        if (win) win.location.href = data.url;
       } else {
         setNotOnDenison(true);
-        // Not in Denison's feed — open a filtered Denison search as fallback
         const make = encodeURIComponent((listing.make || "").split(" ")[0]);
         const year = listing.year ? parseInt(listing.year) : null;
         const loa  = listing.loa  ? parseFloat(listing.loa.replace(/[^0-9.]/g,"")) : null;
@@ -120,11 +123,10 @@ function ViewListingButton({ listing }: { listing: ParsedListing }) {
         if (make) params.set("make", make);
         if (year) { params.set("year_min", String(year - 1)); params.set("year_max", String(year + 1)); }
         if (loa && !isNaN(loa)) { params.set("length_min", String(Math.round(loa - 10))); params.set("length_max", String(Math.round(loa + 10))); }
-        window.open(`https://www.denisonyachtsales.com/yachts-for-sale/?${params}`, "_blank", "noopener,noreferrer");
+        if (win) win.location.href = `https://www.denisonyachtsales.com/yachts-for-sale/?${params}`;
       }
     } catch {
-      // Silent fallback to generic Denison search
-      window.open("https://www.denisonyachtsales.com/yachts-for-sale/", "_blank", "noopener,noreferrer");
+      if (win) win.location.href = "https://www.denisonyachtsales.com/yachts-for-sale/";
     } finally {
       setResolving(false);
     }
@@ -672,7 +674,14 @@ export default function MatchesPage() {
                               {l?.loa && <p className="text-xs" style={{ color: "var(--navy-500)" }}>LOA: {l.loa}</p>}
                               {l?.location && <p className="text-xs" style={{ color: "var(--navy-500)" }}>Location: {l.location}</p>}
                               {l?.listing_url && (
-                                <ViewListingButton listing={l} />
+                                <div className="flex flex-col gap-1 mt-1">
+                                  <ViewListingButton listing={l} />
+                                  <a href={l.listing_url} target="_blank" rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 text-xs"
+                                    style={{ color: "var(--navy-400)" }}>
+                                    <ExternalLink className="w-3 h-3" /> BoatWizard (broker portal)
+                                  </a>
+                                </div>
                               )}
                             </div>
                           </div>
