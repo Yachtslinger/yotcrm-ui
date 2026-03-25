@@ -78,80 +78,36 @@ const TONE_OPTIONS: { id: SendTone; label: string; desc: string }[] = [
   { id: "price-drop",   label: "Price reduced",            desc: "Meaningful price adjustment — worth revisiting" },
 ];
 
-/* ─── ViewListingButton ─────────────────────────────────────────────────────
-   Resolves the PSP BoatWizard URL to a public Denison URL on first click,
-   caches the result back to the DB, then opens it. Subsequent clicks are
-   instant (denison_url already populated). Shows a spinner during lookup. */
+/* ─── Static listing links — no async, no popup issues ─────────────────────
+   Denison: cached exact URL if available, otherwise filtered search by spec.
+   BoatWizard: always shown for broker portal access. Both are plain <a> tags. */
 function ViewListingButton({ listing }: { listing: ParsedListing }) {
-  const [resolving, setResolving] = useState(false);
-  const [resolved, setResolved] = useState<string>(listing.denison_url || "");
-
-  const [notOnDenison, setNotOnDenison] = useState(false);
-
-  const handleClick = async (e: React.MouseEvent) => {
-    e.preventDefault();
-    const target = resolved || listing.denison_url;
-    if (target) { window.open(target, "_blank", "noopener,noreferrer"); return; }
-
-    // Open the window immediately — before any await — to preserve the user
-    // gesture context. Browsers block window.open() called after async gaps.
-    // Do NOT use noopener here — it severs the win reference so we can't navigate it.
-    const win = window.open("about:blank", "_blank");
-
-    setResolving(true);
-    try {
-      const res = await fetch("/api/matches/denison-lookup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          listing_url: listing.listing_url,
-          make: listing.make, model: listing.model,
-          year: listing.year, loa: listing.loa,
-          listing_id: listing.id,
-        }),
-      });
-      const data = await res.json();
-      if (data.ok && data.url) {
-        setResolved(data.url);
-        listing.denison_url = data.url;
-        if (win) win.location.href = data.url;
-      } else {
-        setNotOnDenison(true);
-        const make = (listing.make || "").split(" ")[0]; // raw — URLSearchParams encodes it
-        const year = listing.year ? parseInt(listing.year) : null;
-        const loa  = listing.loa  ? parseFloat(listing.loa.replace(/[^0-9.]/g,"")) : null;
-        const params = new URLSearchParams();
-        if (make) params.set("make", make);
-        if (year) { params.set("year_min", String(year - 1)); params.set("year_max", String(year + 1)); }
-        if (loa && !isNaN(loa)) { params.set("length_min", String(Math.round(loa - 10))); params.set("length_max", String(Math.round(loa + 10))); }
-        if (win) win.location.href = `https://www.denisonyachtsales.com/yachts-for-sale/?${params}`;
-      }
-    } catch {
-      if (win) win.location.href = "https://www.denisonyachtsales.com/yachts-for-sale/";
-    } finally {
-      setResolving(false);
-    }
-  };
+  const denisonUrl = listing.denison_url || (() => {
+    const params = new URLSearchParams();
+    const make = (listing.make || "").trim().split(/\s+/)[0];
+    if (make) params.set("make", make);
+    const year = parseInt(listing.year || "");
+    if (!isNaN(year)) { params.set("year_min", String(year - 1)); params.set("year_max", String(year + 1)); }
+    const loa = parseFloat((listing.loa || "").replace(/[^0-9.]/g, ""));
+    if (!isNaN(loa) && loa > 0) { params.set("length_min", String(Math.round(loa - 10))); params.set("length_max", String(Math.round(loa + 10))); }
+    return `https://www.denisonyachtsales.com/yachts-for-sale/?${params}`;
+  })();
+  const isExact = !!listing.denison_url;
 
   return (
-    <button
-      onClick={handleClick}
-      disabled={resolving}
-      className="inline-flex items-center gap-1 text-xs mt-1"
-      style={{
-        color: notOnDenison ? "var(--navy-400, #6b7280)" : "var(--brass-400)",
-        background: "none", border: "none",
-        cursor: resolving ? "wait" : "pointer", padding: 0,
-      }}
-      title={notOnDenison ? "Not found in Denison's feed — opening search" : "Find on Denison Yachting"}
-    >
-      {resolving
-        ? <><RefreshCw className="w-3 h-3 animate-spin" /> Searching Denison…</>
-        : notOnDenison
-        ? <><ExternalLink className="w-3 h-3" /> Search Denison</>
-        : <><ExternalLink className="w-3 h-3" /> View on Denison</>
-      }
-    </button>
+    <div className="flex flex-col gap-0.5 mt-1">
+      <a href={denisonUrl} target="_blank" rel="noopener noreferrer"
+        className="inline-flex items-center gap-1 text-xs"
+        style={{ color: "var(--brass-400)" }}>
+        <ExternalLink className="w-3 h-3" />
+        {isExact ? "View on Denison" : "Search Denison"}
+      </a>
+      <a href={listing.listing_url} target="_blank" rel="noopener noreferrer"
+        className="inline-flex items-center gap-1 text-xs"
+        style={{ color: "var(--navy-400)" }}>
+        <ExternalLink className="w-3 h-3" /> BoatWizard (broker portal)
+      </a>
+    </div>
   );
 }
 
@@ -675,14 +631,7 @@ export default function MatchesPage() {
                               {l?.loa && <p className="text-xs" style={{ color: "var(--navy-500)" }}>LOA: {l.loa}</p>}
                               {l?.location && <p className="text-xs" style={{ color: "var(--navy-500)" }}>Location: {l.location}</p>}
                               {l?.listing_url && (
-                                <div className="flex flex-col gap-1 mt-1">
-                                  <ViewListingButton listing={l} />
-                                  <a href={l.listing_url} target="_blank" rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1 text-xs"
-                                    style={{ color: "var(--navy-400)" }}>
-                                    <ExternalLink className="w-3 h-3" /> BoatWizard (broker portal)
-                                  </a>
-                                </div>
+                                <ViewListingButton listing={l} />
                               )}
                             </div>
                           </div>
