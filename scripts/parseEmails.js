@@ -210,6 +210,24 @@ function cleanPhone(phone) {
     return phone.replace(/[^\d+]/g, '');
 }
 
+/**
+ * Strip mailto: links, angle brackets, and other HTML artifacts from extracted emails.
+ * Handles: "rick@owyg.com<mailto:rick@owyg.com>", "<rick@owyg.com>", "Rick <rick@owyg.com>"
+ */
+function cleanEmail(raw) {
+    if (!raw) return '';
+    let s = raw.trim();
+    // Strip trailing <mailto:...> or <tel:...> artifacts
+    s = s.replace(/<mailto:[^>]*>/gi, '').replace(/<tel:[^>]*>/gi, '');
+    // Extract email from "Name <email>" format
+    const angleMatch = s.match(/<([^>]+@[^>]+)>/);
+    if (angleMatch) return angleMatch[1].trim().toLowerCase();
+    // Strip any remaining angle brackets
+    s = s.replace(/[<>]/g, '').trim();
+    // Return lowercase if it looks like an email
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s) ? s.toLowerCase() : s;
+}
+
 function parseName(fullName) {
     if (!fullName) return { firstName: '', lastName: '' };
     const parts = fullName.trim().split(/\s+/);
@@ -354,7 +372,7 @@ function parseYachtWorldEmail(body) {
     lead.name = extractField(body, [/INDIVIDUAL PROSPECT:[\s\S]*?Name:\s*(.+?)(?:\r?\n|$)/i, /Name:\s+(.+?)(?:\r?\n|$)/i]);
     let email = extractField(body, [/Email:\s+([^\s]+@[^\s]+)/i]);
     if (isInternalEmail(email)) email = '';
-    lead.email = email;
+    lead.email = cleanEmail(email);
     lead.phone = extractField(body, [/Telephone:\s+(.+?)(?:\r?\n|$)/i, /Phone:\s+(.+?)(?:\r?\n|$)/i]);
 
     // Try old BoatWizard format first, then Denison-forwarded MLS format
@@ -402,7 +420,7 @@ function parseDenisonEmail(body) {
     lead.name = extractField(body, [/CLIENT INFORMATION[\s\S]*?Name:\s*(.+?)(?:\r?\n|$)/i, /Name:\s*(.+?)(?:\r?\n|$)/i]);
     let email = extractField(body, [/CLIENT INFORMATION[\s\S]*?Email:\s*([^\s]+@[^\s]+)/i, /Email:\s*([^\s]+@[^\s]+)/i]);
     if (isInternalEmail(email)) email = '';
-    lead.email = email;
+    lead.email = cleanEmail(email);
     lead.phone = extractField(body, [/CLIENT INFORMATION[\s\S]*?Phone:\s*(.+?)(?:\r?\n|$)/i, /Phone:\s*(.+?)(?:\r?\n|$)/i]);
     lead.boatLocation = extractField(body, [/Client Location:\s*(.+?)(?:\r?\n|$)/i]);
     const boatDesc = extractField(body, [/Boat Description:\s*(.+?)(?:\r?\n|$)/i, /Vessel Info:\s*(.+?)(?:\r?\n|$)/i]);
@@ -449,7 +467,7 @@ function parseBoatShowEmail(body) {
     lead.name = extractField(body, [/Name:\s*(.+?)(?:\r?\n|$)/i]);
     let email = extractField(body, [/Email:\s*([^\s]+@[^\s]+)/i]);
     if (isInternalEmail(email)) email = '';
-    lead.email = email;
+    lead.email = cleanEmail(email);
     lead.phone = extractField(body, [/Phone:\s*(.+?)(?:\r?\n|$)/i]);
     const boatOfInterest = extractField(body, [/Boat of Interest:\s*(.+?)(?:\r?\n|$)/i]);
     if (boatOfInterest) { const parts = boatOfInterest.split(/\s+/); lead.boatMake = parts[0] || ''; lead.boatModel = parts.slice(1).join(' '); }
@@ -473,7 +491,7 @@ function parseRightBoatEmail(body) {
     lead.name = extractField(body, [/^Name:\s+(.+?)$/im]);
     let email = extractField(body, [/^Email:\s+([^\s<>]+@[^\s<>]+)/im]);
     if (isInternalEmail(email)) email = '';
-    lead.email = email;
+    lead.email = cleanEmail(email);
     lead.phone = extractField(body, [/^Phone:\s+(.+?)$/im]);
 
     // Vessel Info: "2007 Cheoy Lee  Bravo"
@@ -510,7 +528,7 @@ function parseJamesEditionEmail(body) {
         /contact details are\s+([^\s<>.]+@[^\s<>.]+\.[^\s<>]+)/i
     ]);
     if (isInternalEmail(email)) email = '';
-    lead.email = email;
+    lead.email = cleanEmail(email);
 
     lead.phone = extractField(body, [
         /Lead phone number\s*\r?\n\s*\r?\n\s*(\+?[\d\s\-().]{5,}?)(?:\s*<|\s*\r?\n|$)/i,
@@ -680,7 +698,7 @@ function parseEmail(headers, body, emailType) {
         const fwdEmail = body.match(/(?:From|Reply-To):[^<]*?<([^>]+@[^>]+)>/i)
             || body.match(/(?:From|Reply-To):\s*([^\s<>]+@[^\s<>]+)/i);
         if (fwdEmail) {
-            const extracted = (fwdEmail[1] || fwdEmail[0]).trim();
+            const extracted = cleanEmail((fwdEmail[1] || fwdEmail[0]).trim());
             if (!isInternalEmail(extracted)) lead.email = extracted;
         }
     }
@@ -918,6 +936,7 @@ module.exports = {
   processOneEmail,
   parseName,
   cleanPhone,
+  cleanEmail,
   isInternalEmail,
   KNOWN_MAKES_SET,
 };
