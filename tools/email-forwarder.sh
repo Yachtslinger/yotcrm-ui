@@ -134,8 +134,13 @@ process_inbox() {
         local leadEmail=$(echo "$body" | python3 -c "import sys,json; l=json.load(sys.stdin).get('lead',{}); print(l.get('email',''))" 2>/dev/null)
         local leadBoat=$(echo "$body" | python3 -c "import sys,json; l=json.load(sys.stdin).get('lead',{}); print(l.get('boat',''))" 2>/dev/null)
         local leadSource=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('emailType',''))" 2>/dev/null)
-        send_notification "$leadName" "$leadEmail" "$leadBoat" "$leadSource"
-        log "📱 Texted notification for $leadName"
+        local leadType=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('leadType','buyer'))" 2>/dev/null)
+        if [ "$leadType" = "broker" ]; then
+          send_notification "🤝 BROKER/INDUSTRY" "$leadName" "$leadEmail" "$leadSource"
+        else
+          send_notification "$leadName" "$leadEmail" "$leadBoat" "$leadSource"
+        fi
+        log "📱 Texted notification for $leadName (type: $leadType)"
       fi
 
     elif [ "$http_code" = "422" ]; then

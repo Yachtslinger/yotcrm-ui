@@ -366,6 +366,61 @@ function isInternalEmail(email) {
     return lower.includes('@denisonyachting.com') || lower.includes('@denisonyachtsales.com') || lower.includes('@denison.com');
 }
 
+/**
+ * Detect if an email is from an industry contact (broker, dealer, marina, etc.)
+ * rather than a buyer prospect.
+ *
+ * Two failure modes we're guarding against:
+ *   1. Denison broker emails (from @denisonyachting.com) stored as buyers.
+ *      → isInternalEmail() already strips their address, but body signals
+ *        like "co-broke" or "my client" make intent explicit.
+ *   2. External brokers (Lime Yachts, etc.) stored as buyers with status 'new'.
+ *      → Needs domain + body signal detection.
+ *
+ * Returns { isBroker: true } if detected as industry, null if buyer.
+ */
+function detectIndustryContact(headers, body) {
+    const from = (headers.from || '').toLowerCase();
+    const subject = (headers.subject || '').toLowerCase();
+
+    // ── FROM domain is a known external brokerage ──
+    const brokerDomains = [
+        'burgess', 'edmiston', 'fraser', 'northropjohnson', 'campernicholsons',
+        'iyc.com', 'bluewater', 'worthavenueyachts', 'hmy.com', 'marinemax',
+        'galati', 'unitedyacht', 'suncoastyachts', 'yachtnetwork',
+        'limeyacht', 'lime-yacht', 'selectyachts', 'superyacht.com',
+        'burgessyachts', 'eyachts', 'rwlmyachts', 'berthon', 'moranyachts',
+        'fraseryachts', 'vripack', 'ocean-independence', 'yachtcharterfleet',
+    ];
+    for (const domain of brokerDomains) {
+        if (from.includes(domain)) return { isBroker: true };
+    }
+
+    // ── Subject signals ──
+    if (/co-?broke|broker\s+(?:inquiry|referral|intro|to\s+broker)|industry\s+inquiry/i.test(subject)) {
+        return { isBroker: true };
+    }
+
+    // ── Body signals — broker identifying themselves ──
+    const brokerBodyPatterns = [
+        /i'?m\s+a\s+(?:licensed\s+)?(?:yacht\s+)?broker/i,
+        /i\s+am\s+a\s+(?:licensed\s+)?(?:yacht\s+|marine\s+)?broker/i,
+        /(?:my|our)\s+(?:client|buyer)\s+(?:is\s+)?(?:interested|looking|inquiring)/i,
+        /i\s+(?:represent|am\s+representing)\s+(?:a\s+)?(?:client|buyer)/i,
+        /co-?brok(?:e|ing|age)/i,
+        /as\s+a\s+(?:yacht\s+)?broker\b/i,
+        /(?:yacht|marine|boat)\s+(?:broker|brokerage)\s+(?:at|with|for)\b/i,
+        /broker\s+at\s+\w/i,
+        /(?:my|our)\s+brokerage\b/i,
+        /i\s+(?:work|operate)\s+(?:out\s+of\s+)?(?:at|with|for)\s+\w+\s+yacht/i,
+    ];
+    for (const pattern of brokerBodyPatterns) {
+        if (pattern.test(body)) return { isBroker: true };
+    }
+
+    return null;
+}
+
 function parseYachtWorldEmail(body) {
     const lead = { name: '', email: '', phone: '', boatMake: '', boatModel: '', boatYear: '',
         boatLength: '', boatPrice: '', boatLocation: '', listingUrl: '', notes: '', source: 'YachtWorld' };
@@ -743,10 +798,10 @@ function saveLead(lead) {
             last_name: lastName,
             email: email,
             phone: phone,
-            tags: lead.source || '',
+            tags: lead.tags || lead.source || '',
             notes: lead.notes || '',
             source: lead.source || '',
-            status: 'new',
+            status: lead.status || 'new',
         });
         leadId = result.lastInsertRowid;
         isNew = true;
@@ -907,10 +962,22 @@ function processOneEmail(emlContent) {
     return { ok: false, error: 'No valid email found in this lead', emailType, lead };
   }
 
+  // ── Broker/industry detection ──
+  // Prevents external brokers (e.g. Lime Yachts) from being stored as buyers.
+  // Internal Denison addresses are already stripped by isInternalEmail() in each
+  // parser function — but body signals catch co-broke intent from any sender.
+  const industrySignal = detectIndustryContact(headers, body);
+  const leadType = industrySignal ? 'broker' : 'buyer';
+  if (industrySignal) {
+    lead.status = 'industry';
+    lead.tags = [lead.source, 'broker'].filter(Boolean).join(',');
+  }
+
   const result = saveLead(lead);
   return {
     ok: true,
     emailType,
+    leadType,
     lead: {
       name: lead.name,
       email: lead.email,
@@ -938,5 +1005,6 @@ module.exports = {
   cleanPhone,
   cleanEmail,
   isInternalEmail,
+  detectIndustryContact,
   KNOWN_MAKES_SET,
 };
