@@ -57,13 +57,11 @@ function parseYatco(url: string, html: string): CampaignDraft {
         const type = String(node["@type"] || "").toLowerCase();
 
         if (/vehicle|product|boat/i.test(type) || node.offers) {
-          // Title — YATCO uses boat name in "name" field
+          // Title — prefer H1 (set after JSON-LD loop); seed from node.name as fallback
+          // H1 format: "Probability 1997 122' 1" DELTA MARINE Motor Yacht" — much richer
           if (node.name && !draft.headline) {
-            // Build full title from brand + name
             const brand = node.brand?.name || "";
-            draft.headline = brand
-              ? `${brand} ${node.name}`
-              : String(node.name);
+            draft.headline = brand ? `${brand} ${node.name}` : String(node.name);
           }
 
           if (node.description && !draft.description) {
@@ -127,28 +125,58 @@ function parseYatco(url: string, html: string): CampaignDraft {
           if (node.brand?.name && !draft.specs.builder) {
             draft.specs.builder = node.brand.name;
           }
+
+          // Speed — array of QuantitativeValue: [{name:"Max Speed",value:"17 Knots"}, ...]
+          if (Array.isArray(node.speed)) {
+            for (const s of node.speed) {
+              const n = String(s.name || "").toLowerCase();
+              const v = String(s.value || "");
+              if (n.includes("max") && v && !draft.specs.maxSpeed) draft.specs.maxSpeed = v;
+              if (n.includes("cruis") && v && !draft.specs.cruiseSpeed) draft.specs.cruiseSpeed = v;
+            }
+          }
+
+          // Gross tonnage — single QuantitativeValue in weight field
+          if (node.weight?.value && !draft.specs.grossTonnage) {
+            draft.specs.grossTonnage = String(node.weight.value);
+          }
         }
       }
     } catch { /* skip */ }
   });
 
+  // H1 is the richest headline on YATCO — overrides the node.name seed
+  // Format: "Probability 1997 122' 1\" DELTA MARINE Motor Yacht"
+  const h1 = clean($("h1").first().text());
+  if (h1) draft.headline = h1;
+
   // DOM fallbacks
   if (!draft.headline) {
-    draft.headline = clean($("h1").first().text()) || clean($("title").text());
+    draft.headline = clean($("title").text());
+  }
+
+  // Location — YATCO JSON-LD has no address; it lives in body text only
+  // Pattern: "Palm Beach Gardens, Florida, United States"
+  if (!draft.location) {
+    const bodyText = $("body").text();
+    const locMatch = bodyText.match(/Location[:\s]+([A-Za-z][A-Za-z\s,]+(?:United States|United Kingdom|France|Italy|Spain|Australia|Netherlands|Croatia|Greece|Turkey|Bahamas|UAE|[A-Z][a-z]+))/);
+    if (locMatch) draft.location = locMatch[1].trim();
   }
   if (!draft.location) {
     draft.location = clean($('[class*="location" i]').first().text());
   }
 
-  // Gallery: grab YATCO CDN images
+  // Gallery: YATCO listing photos are on cloud.yatco.com/ForSale/Vessel/Photo/
+  // They come in small_ and large_ variants — keep large_ only, fall back to any
   if (!draft.gallery.length) {
-    $("img[src]").each((_, img) => {
-      const src = $(img).attr("src") || "";
-      if (/^https?:\/\//i.test(src) && !/icon|logo|flag|avatar|sprite|pixel/i.test(src)) {
-        const w = Number($(img).attr("width"));
-        if (!w || w >= 200) draft.gallery.push(src);
-      }
+    const allImgs: string[] = [];
+    $("img[src], img[data-src]").each((_, img) => {
+      const src = $(img).attr("src") || $(img).attr("data-src") || "";
+      if (src.includes("cloud.yatco.com") && src.includes("ForSale")) allImgs.push(src);
     });
+    // Prefer large_ variants; if none exist use whatever we have
+    const largeImgs = allImgs.filter(s => s.includes("large_"));
+    draft.gallery = largeImgs.length ? largeImgs : allImgs;
   }
 
   draft.gallery = Array.from(new Set(draft.gallery));
