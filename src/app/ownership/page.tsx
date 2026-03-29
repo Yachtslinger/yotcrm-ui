@@ -119,6 +119,36 @@ export default function OwnershipPage() {
     return ((model as any)[section][key] as Scenario)[sc];
   }
 
+  // Crew role breakdown uses a flat lookup keyed by role name
+  function getCrewRoleVal(role: string, sc: keyof Scenario): number {
+    const roleKey = `role__${role}`;
+    const override = edits["crew_roles"]?.[roleKey]?.[sc];
+    if (override !== undefined) return override;
+    // fall back to the breakdown item for this role
+    return model?.crew.salaries.breakdown?.find(r => r.role === role)?.[sc] ?? 0;
+  }
+
+  function setCrewRoleVal(role: string, sc: keyof Scenario, raw: string) {
+    const parsed = parseFloat(raw.replace(/[^0-9.-]/g, ""));
+    const val = isNaN(parsed) ? 0 : parsed;
+    const roleKey = `role__${role}`;
+    setEdits(prev => ({
+      ...prev,
+      crew_roles: { ...prev["crew_roles"], [roleKey]: { ...prev["crew_roles"]?.[roleKey], [sc]: val } },
+    }));
+  }
+
+  function crewSalariesTotal(): Scenario {
+    if (!model) return { low: 0, mid: 0, high: 0 };
+    const roles = model.crew.salaries.breakdown ?? [];
+    if (roles.length === 0) return { low: getVal("crew","salaries","low"), mid: getVal("crew","salaries","mid"), high: getVal("crew","salaries","high") };
+    return {
+      low:  roles.reduce((a, r) => a + getCrewRoleVal(r.role, "low"),  0),
+      mid:  roles.reduce((a, r) => a + getCrewRoleVal(r.role, "mid"),  0),
+      high: roles.reduce((a, r) => a + getCrewRoleVal(r.role, "high"), 0),
+    };
+  }
+
   function effectiveTotal(section: string, keys: string[]): Scenario {
     return {
       low:  keys.reduce((a,k)=>a+getVal(section,k,"low"),0),
@@ -186,10 +216,10 @@ export default function OwnershipPage() {
 
   function grandTotal(): Scenario {
     if (!model) return { low:0, mid:0, high:0 };
-    const crewSalaries: Scenario = { low: getVal("crew","salaries","low"), mid: getVal("crew","salaries","mid"), high: getVal("crew","salaries","high") };
+    const cst = crewSalariesTotal();
     const ct = effectiveTotal("crew", crewKeys);
     const allSections = [
-      { low: crewSalaries.low+ct.low, mid: crewSalaries.mid+ct.mid, high: crewSalaries.high+ct.high },
+      { low: cst.low+ct.low, mid: cst.mid+ct.mid, high: cst.high+ct.high },
       effectiveTotal("communications", commKeys),
       effectiveTotal("operations", opKeys),
       effectiveTotal("insurance", insKeys),
@@ -240,9 +270,9 @@ export default function OwnershipPage() {
 
         {model && (() => {
           const gt = grandTotal();
-          const crewSalTotal: Scenario = { low: getVal("crew","salaries","low"), mid: getVal("crew","salaries","mid"), high: getVal("crew","salaries","high") };
+          const cst = crewSalariesTotal();
           const crewRest = effectiveTotal("crew", crewKeys);
-          const crewTotal: Scenario = { low: crewSalTotal.low+crewRest.low, mid: crewSalTotal.mid+crewRest.mid, high: crewSalTotal.high+crewRest.high };
+          const crewTotal: Scenario = { low: cst.low+crewRest.low, mid: cst.mid+crewRest.mid, high: cst.high+crewRest.high };
           const commTotal  = effectiveTotal("communications", commKeys);
           const opTotal    = effectiveTotal("operations", opKeys);
           const insTotal   = effectiveTotal("insurance", insKeys);
@@ -307,8 +337,23 @@ export default function OwnershipPage() {
 
                       <SectionHeader show={showScenarios} label="CREW" />
                       {model.crew.salaries.breakdown?.map(r => (
-                        <EditRow key={r.role} label={`  ${r.role}`} fieldKey="salaries" section="crew"
-                          show={showScenarios} edits={edits} model={model} setVal={setVal} />
+                        <tr key={r.role} style={{ borderBottom: "1px solid rgba(255,255,255,.04)" }}>
+                          <td className="py-2 pr-4 text-sm" style={{ color: "var(--foreground)", paddingLeft: "1rem" }}>  {r.role}</td>
+                          {(["low","mid","high"] as (keyof Scenario)[]).filter(s => showScenarios[s]).map(s => {
+                            const roleKey = `role__${r.role}`;
+                            const edited = edits["crew_roles"]?.[roleKey]?.[s] !== undefined;
+                            const val = edited ? edits["crew_roles"][roleKey][s] : r[s];
+                            return (
+                              <td key={s} className="py-1 px-2">
+                                <input type="number" value={val}
+                                  onChange={e => setCrewRoleVal(r.role, s, e.target.value)}
+                                  className="text-sm text-right rounded px-2 py-1"
+                                  style={{ background: edited?"rgba(197,160,100,.12)":"var(--input,rgba(255,255,255,.06))", border: edited?"1px solid var(--brass-400)":"1px solid var(--border)", color:"var(--foreground)", width:"110px", outline:"none" }}
+                                />
+                              </td>
+                            );
+                          })}
+                        </tr>
                       ))}
                       {eRow("Recruitment Fees",  "recruitment",   "crew")}
                       {eRow("Travel",            "travel",        "crew")}
