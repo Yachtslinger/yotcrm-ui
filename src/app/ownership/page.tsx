@@ -115,6 +115,33 @@ export default function OwnershipPage() {
   const [model, setModel] = React.useState<CostModel | null>(null);
   const [error, setError] = React.useState("");
   const [pdfLoading, setPdfLoading] = React.useState(false);
+  const [opEdits, setOpEdits] = React.useState<Partial<Record<keyof CostModel["operations"], Partial<Scenario>>>>({});
+
+  function getOpValue(key: keyof CostModel["operations"], scenario: keyof Scenario): number {
+    return opEdits[key]?.[scenario] ?? (model?.operations[key][scenario] ?? 0);
+  }
+
+  function setOpValue(key: keyof CostModel["operations"], scenario: keyof Scenario, raw: string) {
+    const parsed = parseFloat(raw.replace(/[^0-9.-]/g, ""));
+    const val = isNaN(parsed) ? 0 : parsed;
+    setOpEdits(prev => ({
+      ...prev,
+      [key]: { ...prev[key], [scenario]: val },
+    }));
+  }
+
+  function effectiveOpTotal(show: ShowScenarios): Scenario {
+    const keys: (keyof CostModel["operations"])[] = [
+      "agency","audioVisual","auto","bridge","computer","deck","dockExpress","engineering",
+      "fuels","galley","interior","launches","mailFreight","office","dockage","safetyMedical",
+      "security","survey","warehousing",
+    ];
+    return {
+      low:  show.low  ? keys.reduce((a, k) => a + getOpValue(k, "low"),  0) : 0,
+      mid:  show.mid  ? keys.reduce((a, k) => a + getOpValue(k, "mid"),  0) : 0,
+      high: show.high ? keys.reduce((a, k) => a + getOpValue(k, "high"), 0) : 0,
+    };
+  }
 
   async function downloadPDF() {
     if (!model) return;
@@ -178,6 +205,7 @@ export default function OwnershipPage() {
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "Generation failed");
       setModel(data.model);
+      setOpEdits({});
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -198,7 +226,7 @@ export default function OwnershipPage() {
     high: 0,
   } : null;
 
-  // compute proper grand totals from model
+  // compute proper grand totals from model, using any user edits to operations
   function grandTotals(m: CostModel): Scenario {
     const crewItems = [
       m.crew.salaries, m.crew.recruitment, m.crew.travel, m.crew.accommodation,
@@ -206,20 +234,24 @@ export default function OwnershipPage() {
       m.crew.dayWorkers, m.crew.entertainment,
     ];
     const commItems = [m.communications.phone, m.communications.satTV, m.communications.satcom];
-    const opItems = [
-      m.operations.agency, m.operations.audioVisual, m.operations.auto, m.operations.bridge,
-      m.operations.computer, m.operations.deck, m.operations.dockExpress, m.operations.engineering,
-      m.operations.fuels, m.operations.galley, m.operations.interior, m.operations.launches,
-      m.operations.mailFreight, m.operations.office, m.operations.dockage, m.operations.safetyMedical,
-      m.operations.security, m.operations.survey, m.operations.warehousing,
-    ];
     const insItems = [m.insurance.hull, m.insurance.pi, m.insurance.crewHealth];
     const adminItems = [m.administrative.professionalFees, m.administrative.bankCharges,
       m.administrative.managementFee, m.administrative.managementTravel];
     const capItems = [m.capital.av, m.capital.engineeringDeck, m.capital.interior,
       m.capital.paint, m.capital.tendersToys, m.capital.other];
-    const all = [...crewItems, ...commItems, ...opItems, ...insItems, ...adminItems, ...capItems];
-    return sectionTotal(all);
+    const fixed = [...crewItems, ...commItems, ...insItems, ...adminItems, ...capItems];
+    const fixedTotals = sectionTotal(fixed);
+    // operations uses live edited values
+    const opKeys: (keyof CostModel["operations"])[] = [
+      "agency","audioVisual","auto","bridge","computer","deck","dockExpress","engineering",
+      "fuels","galley","interior","launches","mailFreight","office","dockage","safetyMedical",
+      "security","survey","warehousing",
+    ];
+    return {
+      low:  fixedTotals.low  + opKeys.reduce((a, k) => a + getOpValue(k, "low"),  0),
+      mid:  fixedTotals.mid  + opKeys.reduce((a, k) => a + getOpValue(k, "mid"),  0),
+      high: fixedTotals.high + opKeys.reduce((a, k) => a + getOpValue(k, "high"), 0),
+    };
   }
 
   return (
@@ -274,13 +306,7 @@ export default function OwnershipPage() {
             model.crew.dayWorkers, model.crew.entertainment,
           ]);
           const commTotal = sectionTotal([model.communications.phone, model.communications.satTV, model.communications.satcom]);
-          const opTotal = sectionTotal([
-            model.operations.agency, model.operations.audioVisual, model.operations.auto, model.operations.bridge,
-            model.operations.computer, model.operations.deck, model.operations.dockExpress, model.operations.engineering,
-            model.operations.fuels, model.operations.galley, model.operations.interior, model.operations.launches,
-            model.operations.mailFreight, model.operations.office, model.operations.dockage, model.operations.safetyMedical,
-            model.operations.security, model.operations.survey, model.operations.warehousing,
-          ]);
+          const opTotal = effectiveOpTotal(showScenarios);
           const insTotal = sectionTotal([model.insurance.hull, model.insurance.pi, model.insurance.crewHealth]);
           const adminTotal = sectionTotal([model.administrative.professionalFees, model.administrative.bankCharges,
             model.administrative.managementFee, model.administrative.managementTravel]);
@@ -390,26 +416,51 @@ export default function OwnershipPage() {
                       <Row show={showScenarios} label="TOTAL COMMUNICATIONS" s={commTotal} bold />
 
                       <SectionHeader show={showScenarios} label="OPERATIONS" />
-                      <Row show={showScenarios} label="Agency" s={model.operations.agency} />
-                      <Row show={showScenarios} label="Audio Visual" s={model.operations.audioVisual} />
-                      <Row show={showScenarios} label="Auto" s={model.operations.auto} />
-                      <Row show={showScenarios} label="Bridge" s={model.operations.bridge} />
-                      <Row show={showScenarios} label="Computer" s={model.operations.computer} />
-                      <Row show={showScenarios} label="Deck" s={model.operations.deck} />
-                      <Row show={showScenarios} label="Dock Express / Shipping" s={model.operations.dockExpress} />
-                      <Row show={showScenarios} label="Engineering" s={model.operations.engineering} />
-                      <Row show={showScenarios} label="Fuels & Lubricants" s={model.operations.fuels} />
-                      <Row show={showScenarios} label="Galley" s={model.operations.galley} />
-                      <Row show={showScenarios} label="Interior" s={model.operations.interior} />
-                      <Row show={showScenarios} label="Launches & Tenders" s={model.operations.launches} />
-                      <Row show={showScenarios} label="Mail & Freight" s={model.operations.mailFreight} />
-                      <Row show={showScenarios} label="Office" s={model.operations.office} />
-                      <Row show={showScenarios} label="Ports, Dockage & Customs" s={model.operations.dockage} />
-                      <Row show={showScenarios} label="Safety & Medical" s={model.operations.safetyMedical} />
-                      <Row show={showScenarios} label="Security" s={model.operations.security} />
-                      <Row show={showScenarios} label="Survey & Certification" s={model.operations.survey} />
-                      <Row show={showScenarios} label="Warehousing & Storage" s={model.operations.warehousing} />
-                      <Row show={showScenarios} label="TOTAL OPERATIONS" s={opTotal} bold />
+                      {(
+                        [
+                          ["agency",        "Agency"],
+                          ["audioVisual",   "Audio Visual"],
+                          ["auto",          "Auto"],
+                          ["bridge",        "Bridge"],
+                          ["computer",      "Computer"],
+                          ["dockExpress",   "Dock Express / Shipping"],
+                          ["engineering",   "Engineering"],
+                          ["fuels",         "Fuels & Lubricants"],
+                          ["galley",        "Galley"],
+                          ["interior",      "Interior"],
+                          ["launches",      "Launches & Tenders"],
+                          ["mailFreight",   "Mail & Freight"],
+                          ["office",        "Office"],
+                          ["dockage",       "Ports, Dockage & Customs"],
+                          ["safetyMedical", "Safety & Medical"],
+                          ["security",      "Security"],
+                          ["survey",        "Survey & Certification"],
+                          ["warehousing",   "Warehousing & Storage"],
+                          ["deck",          "Deck"],
+                        ] as [keyof CostModel["operations"], string][]
+                      ).map(([key, label]) => (
+                        <tr key={key} style={{ borderBottom: "1px solid rgba(255,255,255,.04)" }}>
+                          <td className="py-2 pr-4 text-sm" style={{ color: "var(--foreground)" }}>{label}</td>
+                          {(["low","mid","high"] as (keyof Scenario)[]).filter(s => showScenarios[s]).map(s => (
+                            <td key={s} className="py-1 px-2">
+                              <input
+                                type="number"
+                                value={getOpValue(key, s)}
+                                onChange={e => setOpValue(key, s, e.target.value)}
+                                className="w-full text-sm text-right rounded px-2 py-1"
+                                style={{
+                                  background: opEdits[key]?.[s] !== undefined ? "rgba(197,160,100,.12)" : "var(--input,rgba(255,255,255,.06))",
+                                  border: opEdits[key]?.[s] !== undefined ? "1px solid var(--brass-400)" : "1px solid var(--border)",
+                                  color: "var(--foreground)",
+                                  width: "110px",
+                                  outline: "none",
+                                }}
+                              />
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                      <Row show={showScenarios} label="TOTAL OPERATIONS" s={effectiveOpTotal(showScenarios)} bold />
 
                       <SectionHeader show={showScenarios} label="INSURANCE" />
                       <Row show={showScenarios} label="Hull & Machinery" s={model.insurance.hull} />
