@@ -70,6 +70,7 @@ function EditRow({
             <input
               type="number"
               value={val}
+              onFocus={e => e.target.select()}
               onChange={e => setVal(section, fieldKey, s, e.target.value)}
               className="text-sm text-right rounded px-2 py-1"
               style={{
@@ -346,6 +347,7 @@ export default function OwnershipPage() {
                             return (
                               <td key={s} className="py-1 px-2">
                                 <input type="number" value={val}
+                                  onFocus={e => e.target.select()}
                                   onChange={e => setCrewRoleVal(r.role, s, e.target.value)}
                                   className="text-sm text-right rounded px-2 py-1"
                                   style={{ background: edited?"rgba(197,160,100,.12)":"var(--input,rgba(255,255,255,.06))", border: edited?"1px solid var(--brass-400)":"1px solid var(--border)", color:"var(--foreground)", width:"110px", outline:"none" }}
