@@ -165,6 +165,7 @@ JSON structure (all numbers are annual USD amounts):
       body: JSON.stringify({
         model: "claude-opus-4-6",
         max_tokens: 8192,
+        temperature: 0,
         messages: [{ role: "user", content: prompt }],
       }),
     });

@@ -51,6 +51,37 @@ function TotalRow({ label, s, show }: { label: string; s: Scenario; show: ShowSc
   );
 }
 
+function NumericCell({
+  value, edited, onChange,
+}: {
+  value: number; edited: boolean; onChange: (raw: string) => void;
+}) {
+  const [display, setDisplay] = React.useState<string | null>(null);
+  const isFocused = display !== null;
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={isFocused ? display! : String(value)}
+      onFocus={() => setDisplay("")}
+      onChange={e => setDisplay(e.target.value)}
+      onBlur={() => {
+        if (display !== null && display.trim() !== "") {
+          onChange(display);
+        }
+        setDisplay(null);
+      }}
+      className="text-sm text-right rounded px-2 py-1"
+      style={{
+        background: edited ? "rgba(197,160,100,.12)" : "var(--input,rgba(255,255,255,.06))",
+        border: edited ? "1px solid var(--brass-400)" : "1px solid var(--border)",
+        color: "var(--foreground)", width: "110px", outline: "none",
+      }}
+    />
+  );
+}
+
 function EditRow({
   label, fieldKey, section, show, edits, model, setVal,
 }: {
@@ -64,21 +95,10 @@ function EditRow({
       <td className="py-2 pr-4 text-sm" style={{ color: "var(--foreground)" }}>{label}</td>
       {scenarios.filter(s => show[s]).map(s => {
         const edited = edits[section]?.[fieldKey]?.[s] !== undefined;
-        const val = edited ? edits[section][fieldKey][s] : base[s];
+        const val = edited ? edits[section][fieldKey][s]! : base[s];
         return (
           <td key={s} className="py-1 px-2">
-            <input
-              type="number"
-              value={val}
-              onFocus={e => e.target.select()}
-              onChange={e => setVal(section, fieldKey, s, e.target.value)}
-              className="text-sm text-right rounded px-2 py-1"
-              style={{
-                background: edited ? "rgba(197,160,100,.12)" : "var(--input,rgba(255,255,255,.06))",
-                border: edited ? "1px solid var(--brass-400)" : "1px solid var(--border)",
-                color: "var(--foreground)", width: "110px", outline: "none",
-              }}
-            />
+            <NumericCell value={val} edited={edited} onChange={raw => setVal(section, fieldKey, s, raw)} />
           </td>
         );
       })}
@@ -343,15 +363,10 @@ export default function OwnershipPage() {
                           {(["low","mid","high"] as (keyof Scenario)[]).filter(s => showScenarios[s]).map(s => {
                             const roleKey = `role__${r.role}`;
                             const edited = edits["crew_roles"]?.[roleKey]?.[s] !== undefined;
-                            const val = edited ? edits["crew_roles"][roleKey][s] : r[s];
+                            const val = edited ? edits["crew_roles"][roleKey][s]! : r[s];
                             return (
                               <td key={s} className="py-1 px-2">
-                                <input type="number" value={val}
-                                  onFocus={e => e.target.select()}
-                                  onChange={e => setCrewRoleVal(r.role, s, e.target.value)}
-                                  className="text-sm text-right rounded px-2 py-1"
-                                  style={{ background: edited?"rgba(197,160,100,.12)":"var(--input,rgba(255,255,255,.06))", border: edited?"1px solid var(--brass-400)":"1px solid var(--border)", color:"var(--foreground)", width:"110px", outline:"none" }}
-                                />
+                                <NumericCell value={val} edited={edited} onChange={raw => setCrewRoleVal(r.role, s, raw)} />
                               </td>
                             );
                           })}
