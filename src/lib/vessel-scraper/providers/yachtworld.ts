@@ -11,10 +11,10 @@
  * Strategy 2 — Puppeteer (slower, ~20s, bypasses CF JS challenges)
  * Slug fallback — always seeds name/year/builder from URL regardless
  */
-import puppeteer from "puppeteer";
 import type { VesselData } from "../types";
 import { emptyVessel } from "../types";
 import { clean, dedupeImages } from "../utils";
+import { stealthFetch } from "../../campaign/providers/stealthFetch";
 
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
@@ -246,52 +246,16 @@ export async function scrapeYachtWorld(url: string): Promise<VesselData> {
     console.log(`[YachtWorld] Strategy 1 fetch error: ${e instanceof Error ? e.message : e}`);
   }
 
-  // ── Strategy 2: Puppeteer ─────────────────────────────────────────────────
-  // Slower (~20s). Renders the page fully, defeating JS-based CF challenges.
-  // Uses page.content() → same parseHtml() path as Strategy 1.
-  let browser: any = null;
+  // ── Strategy 2: stealthFetch (puppeteer-extra + stealth plugin) ──────────
+  // Slower (~20s). Patches all known CF fingerprinting vectors, then waits
+  // for networkidle so the Redux state JS fully executes before capture.
   try {
-    browser = await (puppeteer as any).launch({
-      headless: true,
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-blink-features=AutomationControlled",
-      ],
-    });
-    const page = await browser.newPage();
-    await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, "webdriver", { get: () => false });
-    });
-    await page.setUserAgent(UA);
-    await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" });
-
-    // networkidle0 waits for CF challenge JS to complete and redirect
-    await page.goto(url, { waitUntil: "networkidle0", timeout: 45_000 });
-    let html: string = await page.content();
-
-    // If CF challenge is still present, wait up to 15s for it to resolve
-    if (!html.includes("__REDUX_STATE__")) {
-      try {
-        await page.waitForFunction(
-          () => document.documentElement.innerHTML.includes("__REDUX_STATE__"),
-          { timeout: 15_000, polling: 500 }
-        );
-        html = await page.content();
-      } catch {
-        // CF didn't resolve — will log below and return slug data
-      }
-    }
-
-    console.log(`[YachtWorld] Puppeteer: ${html.length} bytes, hasRedux=${html.includes("__REDUX_STATE__")}`);
+    const html = await stealthFetch(url);
+    console.log(`[YachtWorld] stealthFetch: ${html.length} bytes, hasRedux=${html.includes("__REDUX_STATE__")}`);
     parseHtml(html, vessel);
-    console.log(`[YachtWorld] Puppeteer done: ${vessel.images.length} images, loa=${vessel.loa}`);
+    console.log(`[YachtWorld] stealthFetch done: ${vessel.images.length} images, loa=${vessel.loa}`);
   } catch (err) {
-    console.error("[YachtWorld] Puppeteer error:", err instanceof Error ? err.message : err);
-  } finally {
-    if (browser) { try { await browser.close(); } catch { /**/ } }
+    console.error("[YachtWorld] stealthFetch error:", err instanceof Error ? err.message : err);
   }
 
   // Always return whatever we have — at minimum slug data (name/year/builder)

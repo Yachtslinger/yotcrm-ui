@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
 import { CampaignDraft } from "../providers/denison";
+import { stealthFetch } from "./stealthFetch";
 
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
@@ -7,7 +8,16 @@ const FETCH_TIMEOUT_MS = 15_000;
 
 export async function scrapeYatco(rawUrl: string): Promise<CampaignDraft> {
   const url = rawUrl.trim();
-  const html = await fetchPage(url);
+  let html: string;
+  try {
+    html = await fetchPage(url);
+    // If we got a Cloudflare challenge or a suspiciously short page, fall through to stealth
+    if (html.length < 5000 || /challenge-platform|just a moment/i.test(html)) {
+      throw new Error("CF challenge detected, falling back to stealthFetch");
+    }
+  } catch {
+    html = await stealthFetch(url);
+  }
   return parseYatco(url, html);
 }
 

@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
 import { CampaignDraft } from "../providers/denison";
+import { stealthFetch } from "./stealthFetch";
 
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
@@ -14,8 +15,8 @@ export async function scrapeYachtWorld(rawUrl: string): Promise<CampaignDraft> {
     }
   } catch { /* fall through to Puppeteer */ }
 
-  // Fallback to Puppeteer for Cloudflare-protected pages
-  const html = await fetchWithPuppeteer(url);
+  // Fallback to stealthFetch (puppeteer-extra + stealth plugin)
+  const html = await stealthFetch(url);
   return parseYachtWorld(url, html);
 }
 
@@ -29,68 +30,6 @@ async function fetchSimple(url: string): Promise<string> {
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return await res.text();
-}
-
-async function fetchWithPuppeteer(url: string): Promise<string> {
-  const puppeteer = (await import("puppeteer")).default;
-  const browser = await puppeteer.launch({
-    headless: "new" as never,
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-blink-features=AutomationControlled",
-      "--disable-gpu",
-    ],
-  });
-
-  try {
-    const page = await browser.newPage();
-    await page.setUserAgent(USER_AGENT);
-
-    // Hide webdriver flag from Cloudflare detection
-    await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, "webdriver", { get: () => false });
-      Object.defineProperty(navigator, "plugins", {
-        get: () => [1, 2, 3, 4, 5],
-      });
-      Object.defineProperty(navigator, "languages", {
-        get: () => ["en-US", "en"],
-      });
-      // @ts-expect-error chrome shim
-      window.chrome = { runtime: {} };
-    });
-
-    await page.setExtraHTTPHeaders({
-      "Accept-Language": "en-US,en;q=0.9",
-      Accept:
-        "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    });
-
-    // Block fonts/stylesheets for speed
-    await page.setRequestInterception(true);
-    page.on("request", (req) => {
-      const type = req.resourceType();
-      if (["font", "stylesheet", "image", "media"].includes(type)) {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
-
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
-
-    // Wait for content to appear (up to 10s)
-    await page.waitForSelector("h1, [data-testid]", { timeout: 10000 }).catch(() => {});
-
-    // Small delay to let JS render
-    await new Promise((r) => setTimeout(r, 3000));
-
-    return await page.content();
-  } finally {
-    await browser.close();
-  }
 }
 
 function parseYachtWorld(url: string, html: string): CampaignDraft {

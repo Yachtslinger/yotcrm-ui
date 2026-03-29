@@ -1,8 +1,18 @@
 /**
  * Puppeteer-based page fetcher with Cloudflare stealth bypass.
  * Used by campaign providers that face bot protection (YachtWorld, YATCO, etc).
+ *
+ * Uses puppeteer-extra + puppeteer-extra-plugin-stealth to patch all known
+ * Cloudflare fingerprinting vectors at the browser level (navigator.webdriver,
+ * plugin enumeration, chrome runtime stub, permissions API, etc).
+ * Both packages are already in package.json — this just wires them in.
  */
-import puppeteer, { type Browser } from "puppeteer";
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const puppeteer = require("puppeteer-extra");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const StealthPlugin = require("puppeteer-extra-plugin-stealth");
+puppeteer.use(StealthPlugin());
+import type { Browser } from "puppeteer";
 
 const TIMEOUT_MS = 30_000;
 
@@ -25,34 +35,13 @@ function launchArgs() {
  * Returns the fully-rendered HTML after JavaScript execution.
  */
 export async function stealthFetch(url: string): Promise<string> {
-  let browser: Browser | null = null;
+  let browser: Browser | undefined;
   try {
-    browser = await puppeteer.launch(launchArgs());
+    browser = await puppeteer.launch(launchArgs()) as Browser;
     const page = await browser.newPage();
 
-    // --- Stealth: hide automation signals ---
-    await page.evaluateOnNewDocument(() => {
-      // Hide webdriver
-      Object.defineProperty(navigator, "webdriver", { get: () => false });
-      // Fake plugins
-      Object.defineProperty(navigator, "plugins", {
-        get: () => [1, 2, 3, 4, 5],
-      });
-      // Fake languages
-      Object.defineProperty(navigator, "languages", {
-        get: () => ["en-US", "en"],
-      });
-      // Chrome runtime stub
-      (window as unknown as Record<string, unknown>).chrome = { runtime: {} };
-      // Permissions API patch
-      const origQuery = window.navigator.permissions.query.bind(
-        window.navigator.permissions
-      );
-      window.navigator.permissions.query = (params: PermissionDescriptor) =>
-        params.name === "notifications"
-          ? Promise.resolve({ state: "denied" } as PermissionStatus)
-          : origQuery(params);
-    });
+    // Note: navigator.webdriver, plugins, chrome runtime, permissions — all
+    // patched automatically by puppeteer-extra-plugin-stealth above.
 
     // Realistic viewport
     await page.setViewport({ width: 1920, height: 1080 });
