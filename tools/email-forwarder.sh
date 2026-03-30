@@ -130,17 +130,34 @@ process_inbox() {
       # ── Send text notification for NEW leads ──
       local isNew=$(echo "$body" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('isNew',''))" 2>/dev/null)
       if [ "$isNew" = "True" ] || [ "$isNew" = "true" ]; then
-        local leadName=$(echo "$body" | python3 -c "import sys,json; l=json.load(sys.stdin).get('lead',{}); print(l.get('name','Unknown'))" 2>/dev/null)
+        local leadName=$(echo "$body" | python3 -c "import sys,json; l=json.load(sys.stdin).get('lead',{}); print(l.get('name',''))" 2>/dev/null)
         local leadEmail=$(echo "$body" | python3 -c "import sys,json; l=json.load(sys.stdin).get('lead',{}); print(l.get('email',''))" 2>/dev/null)
         local leadBoat=$(echo "$body" | python3 -c "import sys,json; l=json.load(sys.stdin).get('lead',{}); print(l.get('boat',''))" 2>/dev/null)
         local leadSource=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('emailType',''))" 2>/dev/null)
         local leadType=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('leadType','buyer'))" 2>/dev/null)
+        # Fall back to email if name is empty
+        local displayName="${leadName:-$leadEmail}"
+        [ -z "$displayName" ] && displayName="Unknown"
         if [ "$leadType" = "broker" ]; then
-          send_notification "🤝 BROKER/INDUSTRY" "$leadName" "$leadEmail" "$leadSource"
+          local msg="🤝 BROKER/INDUSTRY CONTACT
+${displayName}
+${leadEmail}
+via ${leadSource}"
         else
-          send_notification "$leadName" "$leadEmail" "$leadBoat" "$leadSource"
+          local msg="🚨 NEW LEAD
+${displayName}
+${leadEmail}
+${leadBoat}
+via ${leadSource}"
         fi
-        log "📱 Texted notification for $leadName (type: $leadType)"
+        for number in "${NOTIFY_NUMBERS[@]}"; do
+          osascript -e "tell application \"Messages\"
+            set targetService to 1st account whose service type = iMessage
+            set targetBuddy to participant \"${number}\" of targetService
+            send \"${msg}\" to targetBuddy
+          end tell" >> "$LOG_FILE" 2>&1
+        done
+        log "📱 Texted notification for ${displayName} (type: ${leadType})"
       fi
 
     elif [ "$http_code" = "422" ]; then
