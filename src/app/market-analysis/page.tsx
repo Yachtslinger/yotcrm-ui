@@ -58,6 +58,15 @@ export default function MarketAnalysisPage() {
     { url: "", type: "sold", soldPrice: "", daysOnMarket: "", status: "idle", result: null, preview: null, error: "" }
   ]);
 
+  // Manual comp entries
+  const [manualComps, setManualComps] = React.useState<CompRecord[]>([]);
+  const [manualForm, setManualForm] = React.useState({
+    type: "sold" as "sold" | "active",
+    name: "", make: "", model: "", year: "", length: "", location: "",
+    askPrice: "", soldPrice: "", daysOnMarket: "", listedDate: "", soldDate: "",
+  });
+  const [showManualForm, setShowManualForm] = React.useState(false);
+
   const [genStatus, setGenStatus] = React.useState("");
   const [savedId, setSavedId] = React.useState<number | null>(null);
 
@@ -133,8 +142,28 @@ export default function MarketAnalysisPage() {
     setCompUrls(p => p.filter((_, i) => i !== idx));
   }
 
-  // Scrape a single comp URL
-  async function scrapeCompUrl(idx: number) {
+  function addManualComp() {
+    const f = manualForm;
+    if (!f.name && !f.make) return;
+    const parseAmt = (s: string) => { const n = parseInt(s.replace(/[$,]/g, "")); return isNaN(n) ? null : n; };
+    const comp: CompRecord = {
+      name: f.name || `${f.year} ${f.make} ${f.model}`.trim(),
+      make: f.make, model: f.model, year: f.year, length: f.length, location: f.location,
+      listedPrice: parseAmt(f.askPrice),
+      soldPrice: f.type === "sold" ? parseAmt(f.soldPrice) : null,
+      askPrice: f.type === "active" ? parseAmt(f.askPrice) : null,
+      listedDate: f.listedDate, soldDate: f.soldDate,
+      daysOnMarket: f.daysOnMarket ? parseInt(f.daysOnMarket) : null,
+      source: f.type === "sold" ? "sold_comps" : "active_comps",
+    };
+    setManualComps(p => [...p, comp]);
+    setManualForm({ type: f.type, name: "", make: "", model: "", year: "", length: "", location: "", askPrice: "", soldPrice: "", daysOnMarket: "", listedDate: "", soldDate: "" });
+    showToast(`✓ Added: ${comp.name}`, "success");
+  }
+
+  function removeManualComp(idx: number) {
+    setManualComps(p => p.filter((_, i) => i !== idx));
+  }
     const cu = compUrls[idx];
     if (!cu.url.trim()) return;
     updateCompUrl(idx, { status: "scraping", error: "", result: null, preview: null });
@@ -169,8 +198,10 @@ export default function MarketAnalysisPage() {
     // Merge PDF comps + URL comps
     const urlSoldComps = compUrls.filter(c => c.type === "sold" && c.result).map(c => c.result!);
     const urlActiveComps = compUrls.filter(c => c.type === "active" && c.result).map(c => c.result!);
-    const allSold = [...soldPdfComps, ...urlSoldComps];
-    const allActive = [...activePdfComps, ...urlActiveComps];
+    const manualSold = manualComps.filter(c => c.source === "sold_comps");
+    const manualActive = manualComps.filter(c => c.source === "active_comps");
+    const allSold = [...soldPdfComps, ...urlSoldComps, ...manualSold];
+    const allActive = [...activePdfComps, ...urlActiveComps, ...manualActive];
 
     setGenStatus("Analyzing with AI…");
     try {
@@ -213,6 +244,8 @@ export default function MarketAnalysisPage() {
     setSubjectVessel(""); setSubjectYear(""); setSubjectMake("");
     setSubjectModel(""); setSubjectLength(""); setSubjectAskingPrice(""); setNotes("");
     setSoldPdfComps([]); setActivePdfComps([]);
+    setManualComps([]); setShowManualForm(false);
+    setManualForm({ type: "sold", name: "", make: "", model: "", year: "", length: "", location: "", askPrice: "", soldPrice: "", daysOnMarket: "", listedDate: "", soldDate: "" });
     setCompUrls([{ url: "", type: "sold", soldPrice: "", daysOnMarket: "", status: "idle", result: null, preview: null, error: "" }]);
     setSavedId(null);
   }
@@ -225,8 +258,8 @@ export default function MarketAnalysisPage() {
 
   const urlCompsScraped = compUrls.filter(c => c.status === "done").length;
   const urlCompsPending = compUrls.filter(c => c.url.trim() && c.status !== "done").length;
-  const totalSold = soldPdfComps.length + compUrls.filter(c => c.type === "sold" && c.result).length;
-  const totalActive = activePdfComps.length + compUrls.filter(c => c.type === "active" && c.result).length;
+  const totalSold = soldPdfComps.length + compUrls.filter(c => c.type === "sold" && c.result).length + manualComps.filter(c => c.source === "sold_comps").length;
+  const totalActive = activePdfComps.length + compUrls.filter(c => c.type === "active" && c.result).length + manualComps.filter(c => c.source === "active_comps").length;
   const totalComps = totalSold + totalActive;
 
   return (
@@ -492,7 +525,113 @@ export default function MarketAnalysisPage() {
             </div>
           </div>
 
-          {/* Summary + Continue */}
+          {/* Manual Entry Section */}
+          <div style={{ background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:"20px 24px",marginBottom:16 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4 }}>
+              <div>
+                <p style={{ fontSize:13,fontWeight:600 }}>Manual Entry <span style={{ fontSize:11,fontWeight:400,color:"var(--navy-400)" }}>— type in comp data directly</span></p>
+                <p style={{ fontSize:12,color:"var(--navy-400)",marginTop:2 }}>For off-market sales and private transactions where data isn't published</p>
+              </div>
+              {manualComps.length > 0 && <span style={{ background:"var(--brass-400)",color:"#fff",borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700 }}>{manualComps.length} entered</span>}
+            </div>
+
+            {/* Existing manual comps */}
+            {manualComps.length > 0 && (
+              <div style={{ borderTop:"1px solid var(--border)",paddingTop:10,marginTop:10,marginBottom:12 }}>
+                {manualComps.map((c, i) => (
+                  <div key={i} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",fontSize:12,borderBottom:"1px solid rgba(255,255,255,.04)" }}>
+                    <span>
+                      <span style={{ color:c.source==="sold_comps"?"#22c55e":"#3b82f6",fontWeight:700,fontSize:10,textTransform:"uppercase",marginRight:6 }}>
+                        {c.source==="sold_comps"?"SOLD":"ACTIVE"}
+                      </span>
+                      {c.year} {c.make} {c.model} {c.name?`"${c.name}"`:""}
+                      {c.soldPrice?` · Sold $${c.soldPrice.toLocaleString()}`:c.askPrice?` · Ask $${c.askPrice.toLocaleString()}`:""}
+                      {c.daysOnMarket?` · ${c.daysOnMarket} DOM`:""}
+                      {c.location?` · ${c.location}`:""}
+                    </span>
+                    <button onClick={()=>removeManualComp(i)} style={{ background:"none",border:"none",color:"#f87171",cursor:"pointer",fontSize:15,padding:"0 6px" }}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Toggle form */}
+            {!showManualForm ? (
+              <button onClick={()=>setShowManualForm(true)}
+                style={{ background:"rgba(184,147,58,.08)",border:"1px dashed rgba(184,147,58,.4)",color:"var(--brass-400)",borderRadius:8,padding:"9px 18px",fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6,marginTop:manualComps.length>0?0:10 }}>
+                <span style={{ fontSize:16,lineHeight:1 }}>+</span> Add Comp Manually
+              </button>
+            ) : (
+              <div style={{ borderTop:"1px solid var(--border)",paddingTop:14,marginTop:10 }}>
+                {/* Sold / Active toggle */}
+                <div style={{ display:"flex",gap:8,marginBottom:14,alignItems:"center" }}>
+                  <span style={{ fontSize:11,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)" }}>Type:</span>
+                  <div style={{ display:"flex",borderRadius:8,overflow:"hidden",border:"1px solid var(--border)" }}>
+                    <button onClick={()=>setManualForm(f=>({...f,type:"sold"}))}
+                      style={{ padding:"6px 16px",background:manualForm.type==="sold"?"#22c55e":"transparent",color:manualForm.type==="sold"?"#fff":"var(--navy-400)",border:"none",cursor:"pointer",fontSize:12,fontWeight:700 }}>
+                      SOLD
+                    </button>
+                    <button onClick={()=>setManualForm(f=>({...f,type:"active"}))}
+                      style={{ padding:"6px 16px",background:manualForm.type==="active"?"#3b82f6":"transparent",color:manualForm.type==="active"?"#fff":"var(--navy-400)",border:"none",cursor:"pointer",fontSize:12,fontWeight:700 }}>
+                      ACTIVE
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10 }}>
+                  {([
+                    ["Vessel Name","e.g. KEMOSABE","name"],
+                    ["Make / Builder","e.g. Westport","make"],
+                    ["Model","e.g. 112","model"],
+                    ["Year","e.g. 2012","year"],
+                    ["Length","e.g. 112 ft","length"],
+                    ["Location","e.g. Fort Lauderdale, FL","location"],
+                  ] as [string,string,string][]).map(([label,ph,key]) => (
+                    <div key={key}>
+                      <label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>{label}</label>
+                      <input style={{ ...iStyle,padding:"8px 10px" }} placeholder={ph}
+                        value={(manualForm as Record<string,string>)[key]}
+                        onChange={e=>setManualForm(f=>({...f,[key]:e.target.value}))} />
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10,marginBottom:14 }}>
+                  <div>
+                    <label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>Ask / List Price</label>
+                    <input style={{ ...iStyle,padding:"8px 10px" }} placeholder="$5,500,000" value={manualForm.askPrice} onChange={e=>setManualForm(f=>({...f,askPrice:e.target.value}))} />
+                  </div>
+                  {manualForm.type === "sold" && <>
+                    <div>
+                      <label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"#22c55e",marginBottom:4,display:"block" }}>Sold Price</label>
+                      <input style={{ ...iStyle,padding:"8px 10px" }} placeholder="$5,100,000" value={manualForm.soldPrice} onChange={e=>setManualForm(f=>({...f,soldPrice:e.target.value}))} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>Days on Market</label>
+                      <input style={{ ...iStyle,padding:"8px 10px" }} placeholder="180" value={manualForm.daysOnMarket} onChange={e=>setManualForm(f=>({...f,daysOnMarket:e.target.value}))} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>Sale Year</label>
+                      <input style={{ ...iStyle,padding:"8px 10px" }} placeholder="2024" value={manualForm.soldDate} onChange={e=>setManualForm(f=>({...f,soldDate:e.target.value}))} />
+                    </div>
+                  </>}
+                </div>
+
+                <div style={{ display:"flex",gap:10 }}>
+                  <button onClick={addManualComp} disabled={!manualForm.name&&!manualForm.make}
+                    style={{ background:manualForm.name||manualForm.make?"var(--brass-400)":"var(--border)",color:manualForm.name||manualForm.make?"#fff":"var(--navy-400)",border:"none",borderRadius:8,padding:"9px 20px",fontWeight:700,fontSize:13,cursor:manualForm.name||manualForm.make?"pointer":"not-allowed" }}>
+                    + Add This Comp
+                  </button>
+                  <button onClick={()=>setShowManualForm(false)}
+                    style={{ background:"transparent",border:"1px solid var(--border)",color:"var(--navy-400)",borderRadius:8,padding:"9px 16px",fontSize:13,cursor:"pointer" }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Summary + Generate */}
           <div style={{ background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:"16px 20px",marginBottom:16,display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,textAlign:"center" }}>
             <div><div style={{ fontSize:24,fontWeight:700,color:"#22c55e" }}>{totalSold}</div><div style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginTop:3 }}>Sold Comps</div></div>
             <div><div style={{ fontSize:24,fontWeight:700,color:"#3b82f6" }}>{totalActive}</div><div style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginTop:3 }}>Active Comps</div></div>
