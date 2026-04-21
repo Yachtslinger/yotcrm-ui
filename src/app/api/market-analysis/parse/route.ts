@@ -17,15 +17,19 @@ export const maxDuration = 60;
 const execFileAsync = promisify(execFile);
 
 // Python script to extract raw text from PDF using pdfplumber
+// NOTE: Do NOT use layout=True — it adds whitespace padding that breaks parsing.
+// Plain extract_text() gives clean "Label: Value" lines that match our parser.
 const EXTRACT_SCRIPT = `
-import sys, json, pdfplumber
+import sys, json, warnings
+warnings.filterwarnings("ignore")
+import pdfplumber
 
 pdf_path = sys.argv[1]
 pages_text = []
 try:
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
-            text = page.extract_text(layout=True) or ""
+            text = page.extract_text() or ""
             pages_text.append(text)
 except Exception as e:
     pages_text = []

@@ -1,121 +1,137 @@
 /**
  * market-analysis/parser.ts
  * Parses Denison-format comp PDFs into CompRecord arrays.
- * Handles both sold comps (have Listed/Sold Price + Active days)
- * and active listings (have Price field only).
  *
- * Expected PDF text format per listing:
- *   "112 ft 2007 Westport 112, KEMOSABE\n$6,495,000\nFort Lauderdale, FL\n..."
- *   Fields: Make, Model, Year, Length, Price, Listed Date, Sold Date,
- *           Listed Price, Sold Price, Active, Boat Location, Name
+ * PDF format (extract_text WITHOUT layout=True):
+ *   US$3,300,000
+ *   112 ft 2001 Westport Raised Pilothouse Motor Yacht, SUPERSTAR
+ *   Fort Lauderdale, FL
+ *   <description>
+ *   Make: Westport   Listed Date: October 2, 2025   Name: SUPERSTAR
+ *   Model: Raised Pilothouse Motor Yacht   Sold Date: December 8, 2025   Fuel Type: Diesel
+ *   Year: 2001   Listed Price: $3,890,000   Max Draft: 5 ft 6 in
+ *   Length: 112 ft   Sold Price: US$3,300,000
+ *   Condition: Used   Hull Material: Fiberglass
+ *   Class: Motor Yacht   Beam: 23 ft
+ *   Active: 67   Boat Location: Fort Lauderdale, FL
  */
 
 import type { CompRecord } from "./storage";
 
-// ── Price parsing ─────────────────────────────────────────────────────────────
 function parsePrice(s: string | undefined | null): number | null {
   if (!s) return null;
-  // Strip currency symbols, commas, "Tax: Paid" suffixes, AU$/£/€ etc.
-  const cleaned = s.replace(/[A-Z$£€]/g, "").replace(/,/g, "").replace(/\s.*/g, "").trim();
+  // Handle "US$3,300,000", "$3,890,000", "€3,800,000 ($4,454,018)", "A$12,950,000 ($9,158,680)"
+  // Prefer USD value in parens if present (for EUR/AUD listings)
+  const parenUsd = s.match(/\(\$?([\d,]+)\)/);
+  if (parenUsd) return parseInt(parenUsd[1].replace(/,/g, ""));
+  const cleaned = s.replace(/US\$|A\$|£|€|\$/g, "").replace(/,/g, "").trim().split(/\s/)[0];
   const n = parseFloat(cleaned);
-  return isNaN(n) ? null : Math.round(n);
+  return isNaN(n) || n < 10000 ? null : Math.round(n);
 }
 
-// ── Date parsing ──────────────────────────────────────────────────────────────
 function parseDate(s: string | undefined | null): string {
-  if (!s) return "";
-  return s.trim();
+  return s?.trim() || "";
 }
 
-// ── Extract all listing blocks from raw PDF text ──────────────────────────────
-// Each block starts with a header like "112 ft 2007 Westport 112, VESSEL NAME"
-// and contains structured key: value pairs.
+function fieldVal(block: string, label: string): string {
+  // Match "Label: VALUE" — stop at two or more spaces (next column), newline, or another Label:
+  const re = new RegExp(`(?:^|\\s)${label}:\\s*(.+?)(?=\\s{2,}\\w|\\n|$)`, "im");
+  const m = block.match(re);
+  if (!m) return "";
+  // Strip any trailing label fragments like "Max Draft: 5 ft 6 in" bleeding in
+  return m[1].replace(/\s{2,}.+$/, "").trim();
+}
+
 export function parseCompPdf(rawText: string, source: string): CompRecord[] {
   const records: CompRecord[] = [];
 
-  // Split into individual listing blocks by the header pattern:
-  // e.g. "112 ft 2007 Westport 112, KEMOSABE" or "108 ft 2015 Benetti..."
-  const headerRe = /^\d{2,3}(?:\s+ft(?:\s+\d+\s+in)?)\s+\d{4}\s+.{3,}/gm;
+  // Each listing block starts with the header line pattern:
+  // "112 ft 2001 Westport Raised Pilothouse Motor Yacht, SUPERSTAR"
+  // which may be preceded by a price line "US$3,300,000"
+  const headerRe = /^(\d{2,3}(?:\s+ft(?:\s+\d+\s+in)?)?)\s+(\d{4})\s+(.{5,})/gm;
   const matches = [...rawText.matchAll(headerRe)];
 
   for (let i = 0; i < matches.length; i++) {
-    const start = matches[i].index!;
-    const end = i + 1 < matches.length ? matches[i + 1].index! : rawText.length;
-    const block = rawText.slice(start, end);
-    const record = parseBlock(block, source);
+    const headerStart = matches[i].index!;
+    const blockEnd = i + 1 < matches.length ? matches[i + 1].index! : rawText.length;
+
+    // Look back up to 3 lines before header to find price line
+    const lookback = rawText.slice(Math.max(0, headerStart - 200), headerStart);
+    const priceLineMatch = lookback.match(/(US\$|A\$|\$|£|€)[\d,]+(?:\s*\([^)]+\))?[\s]*$/m);
+    const priceLineFull = priceLineMatch ? priceLineMatch[0].trim() : "";
+
+    const block = rawText.slice(headerStart, blockEnd);
+    const record = parseBlock(block, priceLineFull, source);
     if (record) records.push(record);
   }
 
-  // Deduplicate by name+year+soldPrice (same vessel may appear twice in broader PDFs)
+  // Dedup by name+year+price
   const seen = new Set<string>();
   return records.filter(r => {
-    const key = `${r.name}|${r.year}|${r.soldPrice ?? r.askPrice}`;
+    const key = `${r.name}|${r.year}|${r.soldPrice ?? r.askPrice ?? r.listedPrice}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
 }
 
-function parseBlock(block: string, source: string): CompRecord | null {
-  // Helper: extract a field value from the block
-  const field = (label: string): string => {
-    const re = new RegExp(`^${label}[:\\s]+(.+)$`, "im");
-    const m = block.match(re);
-    return m ? m[1].trim() : "";
-  };
-
-  // Parse header line: "112 ft 2007 Westport 112, KEMOSABE"
+function parseBlock(block: string, priceLineFull: string, source: string): CompRecord | null {
+  // Parse header: "112 ft 2001 Westport Raised Pilothouse Motor Yacht, SUPERSTAR"
   const headerM = block.match(/^(\d{2,3}(?:\s+ft(?:\s+\d+\s+in)?)?)\s+(\d{4})\s+(.+)/);
   if (!headerM) return null;
 
-  const lengthRaw = headerM[1].trim();
+  const lengthFromHeader = headerM[1].replace(/\s+ft.*/, "ft").trim();
   const year = headerM[2];
-  const rest = headerM[3]; // "Westport 112, KEMOSABE" or "Westport 112" etc.
+  const rest = headerM[3]; // "Westport Raised Pilothouse Motor Yacht, SUPERSTAR"
 
-  // Extract vessel name (after comma if present)
-  const commaIdx = rest.indexOf(",");
-  const makeModel = commaIdx > -1 ? rest.slice(0, commaIdx).trim() : rest.trim();
-  const vesselName = field("Name") || (commaIdx > -1 ? rest.slice(commaIdx + 1).trim() : "");
+  // Vessel name is after last comma (if any)
+  const lastComma = rest.lastIndexOf(",");
+  const makeModel = lastComma > -1 ? rest.slice(0, lastComma).trim() : rest.trim();
+  const vesselName = lastComma > -1 ? rest.slice(lastComma + 1).trim() : "";
 
-  // Make/model split
-  const makeParts = makeModel.split(/\s+/);
-  const make = field("Make") || makeParts[0] || "";
-  const model = field("Model") || makeParts.slice(1).join(" ") || "";
+  // Extract fields from the spec block (the tabular section at bottom of each listing)
+  const make = fieldVal(block, "Make") || makeModel.split(/\s+/)[0] || "";
+  const model = fieldVal(block, "Model") || makeModel.split(/\s+/).slice(1).join(" ") || "";
+  const length = fieldVal(block, "Length") || lengthFromHeader;
+  const location = fieldVal(block, "Boat Location");
+  const name = fieldVal(block, "Name") || vesselName;
 
   // Prices
-  const listedPriceRaw = field("Listed Price");
-  const soldPriceRaw = field("Sold Price");
-  const askPriceRaw = field("Price");
+  const listedPriceRaw = fieldVal(block, "Listed Price");
+  const soldPriceRaw = fieldVal(block, "Sold Price");
   const listedPrice = parsePrice(listedPriceRaw);
   const soldPrice = parsePrice(soldPriceRaw);
-  const askPrice = parsePrice(askPriceRaw);
+
+  // For active listings PDFs: price comes from the header price line or "Price:" field
+  const priceFieldRaw = fieldVal(block, "Price");
+  const headerPrice = parsePrice(priceLineFull || priceFieldRaw);
+
+  // Days on market — "Active: 67"
+  const activeRaw = fieldVal(block, "Active");
+  const daysOnMarket = activeRaw && /^\d+$/.test(activeRaw.trim()) ? parseInt(activeRaw) : null;
 
   // Dates
-  const listedDate = parseDate(field("Listed Date"));
-  const soldDate = parseDate(field("Sold Date"));
+  const listedDate = parseDate(fieldVal(block, "Listed Date"));
+  const soldDate = parseDate(fieldVal(block, "Sold Date"));
 
-  // Days on market — "Active" field in sold comp PDFs
-  const activeRaw = field("Active");
-  const daysOnMarket = activeRaw ? parseInt(activeRaw) : null;
-
-  // Location
-  const location = field("Boat Location");
-
-  // Length normalization
-  const length = lengthRaw.replace(/\s+ft\s+\d+\s+in/, "ft").replace(/\s+ft/, "ft").trim();
+  // Determine if sold or active
+  const isSold = !!soldPrice || !!soldDate || source.includes("sold");
+  const askPrice = !isSold ? (headerPrice || listedPrice) : null;
+  const finalListedPrice = listedPrice || (!isSold ? null : headerPrice);
+  const finalSoldPrice = soldPrice;
 
   return {
-    name: vesselName || makeModel,
+    name: name || makeModel,
     make,
     model,
     year,
     length,
-    listedPrice: listedPrice || null,
-    soldPrice: soldPrice || null,
-    askPrice: askPrice || null,
+    listedPrice: finalListedPrice,
+    soldPrice: finalSoldPrice,
+    askPrice,
     listedDate,
     soldDate,
-    daysOnMarket: isNaN(daysOnMarket as number) ? null : daysOnMarket,
+    daysOnMarket,
     location,
     source,
   };
