@@ -195,6 +195,7 @@ export async function readContactsPaginated(opts: LeadFilters = {}): Promise<{
       else if (intelFilter === "scanned") conds.push("ep.lead_id IS NOT NULL");
       else { conds.push("ep.score_band = ?"); params.push(intelFilter); }
     }
+    // If hasIntel is false, silently ignore intelFilter — table doesn't exist yet
     const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
 
     const STATUS_CASE = `(CASE LOWER(l.status) WHEN 'hot' THEN 0 WHEN 'warm' THEN 1 WHEN 'new' THEN 2

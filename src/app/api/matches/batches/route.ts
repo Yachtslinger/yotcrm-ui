@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { listBatches } from "@/lib/matches/storage";
 
+export const runtime = "nodejs";
+
 export async function GET() {
   try {
     const batches = listBatches();

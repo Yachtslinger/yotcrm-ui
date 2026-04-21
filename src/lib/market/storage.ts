@@ -9,9 +9,12 @@ function getDb() {
   return db;
 }
 
+let _marketTablesReady = false;
+
 // ─── Init Tables ────────────────────────────────────────────────────
 
 export function initMarketTables() {
+  if (_marketTablesReady) return;
   const db = getDb();
   try {
     db.exec(`
@@ -99,6 +102,7 @@ export function initMarketTables() {
     try { db.exec("ALTER TABLE buyer_searches ADD COLUMN min_cabins TEXT DEFAULT ''"); } catch {}
     try { db.exec("ALTER TABLE buyer_searches ADD COLUMN engine_type_pref TEXT DEFAULT ''"); } catch {}
     try { db.exec("ALTER TABLE buyer_searches ADD COLUMN hull_material_pref TEXT DEFAULT ''"); } catch {}
+    _marketTablesReady = true;
   } finally {
     db.close();
   }

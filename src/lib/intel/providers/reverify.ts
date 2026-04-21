@@ -11,7 +11,7 @@
  * This is the "landlord background check" layer.
  */
 
-import { addSource, logAuditEvent, getSourcesByProfile } from "../storage";
+import { addSources, logAuditEvent, getSourcesByProfile } from "../storage";
 import { type IdentityAnchors, validateAgainstAnchors } from "../validation";
 import { ddgSearch } from "./ddg";
 
@@ -342,98 +342,33 @@ export async function reverifyAndDeepDive(
       }
     }
 
-    // ═══ 6. STORE ALL DISCOVERED DATA ═══
-    // Confirmations
-    for (const conf of result.confirmations) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "reverify", source_url: "",
-        source_label: `✓ ${conf.field}: ${conf.confirmed ? "CONFIRMED" : "UNCONFIRMED"} — ${conf.original}`,
-        layer: "identity", data_key: "reverify_confirmation",
-        data_value: JSON.stringify(conf),
-        confidence: conf.confirmed ? 80 : 20,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    // ═══ 6. STORE ALL DISCOVERED DATA — one batch, one DB open ═══
+    const now = new Date().toISOString();
+    const sourceBatch: Parameters<typeof addSources>[0] = [];
 
-    // Court records
-    for (const cr of result.court_records.slice(0, 8)) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "reverify", source_url: cr.url || "",
-        source_label: `Court: ${cr.type} — ${cr.description.substring(0, 80)}`,
-        layer: "risk", data_key: "court_record",
-        data_value: JSON.stringify(cr),
-        confidence: 50,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    for (const conf of result.confirmations)
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "reverify", source_url: "", source_label: `✓ ${conf.field}: ${conf.confirmed ? "CONFIRMED" : "UNCONFIRMED"} — ${conf.original}`, layer: "identity", data_key: "reverify_confirmation", data_value: JSON.stringify(conf), confidence: conf.confirmed ? 80 : 20, fetched_at: now });
 
-    // Additional properties
-    for (const prop of result.additional_properties.slice(0, 5)) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "reverify", source_url: "",
-        source_label: `Property: ${prop.address}${prop.estimated_value ? ` — Est. ${prop.estimated_value}` : ""}`,
-        layer: "capital", data_key: "additional_property",
-        data_value: JSON.stringify(prop),
-        confidence: prop.estimated_value ? 45 : 30,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    for (const cr of result.court_records.slice(0, 8))
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "reverify", source_url: cr.url || "", source_label: `Court: ${cr.type} — ${cr.description.substring(0, 80)}`, layer: "risk", data_key: "court_record", data_value: JSON.stringify(cr), confidence: 50, fetched_at: now });
 
-    // Relatives
-    for (const rel of [...new Set(result.relatives)].slice(0, 6)) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "reverify", source_url: "",
-        source_label: `Relative/Associate: ${rel}`,
-        layer: "identity", data_key: "relative",
-        data_value: rel,
-        confidence: 35,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    for (const prop of result.additional_properties.slice(0, 5))
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "reverify", source_url: "", source_label: `Property: ${prop.address}${prop.estimated_value ? ` — Est. ${prop.estimated_value}` : ""}`, layer: "capital", data_key: "additional_property", data_value: JSON.stringify(prop), confidence: prop.estimated_value ? 45 : 30, fetched_at: now });
 
-    // Age estimates (deduplicate)
+    for (const rel of [...new Set(result.relatives)].slice(0, 6))
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "reverify", source_url: "", source_label: `Relative/Associate: ${rel}`, layer: "identity", data_key: "relative", data_value: rel, confidence: 35, fetched_at: now });
+
     const uniqueAges = [...new Set(result.age_estimates)];
-    if (uniqueAges.length > 0) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "reverify", source_url: "",
-        source_label: `Age: ${uniqueAges[0]}`,
-        layer: "identity", data_key: "person_age",
-        data_value: uniqueAges[0],
-        confidence: uniqueAges.length > 1 ? 60 : 35,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    if (uniqueAges.length > 0)
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "reverify", source_url: "", source_label: `Age: ${uniqueAges[0]}`, layer: "identity", data_key: "person_age", data_value: uniqueAges[0], confidence: uniqueAges.length > 1 ? 60 : 35, fetched_at: now });
 
-    // Professional history
-    for (const ph of result.professional_history.slice(0, 5)) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "reverify", source_url: "",
-        source_label: `Career: ${ph.title} at ${ph.company}${ph.years ? ` (${ph.years})` : ""}`,
-        layer: "identity", data_key: "professional_history",
-        data_value: JSON.stringify(ph),
-        confidence: 40,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    for (const ph of result.professional_history.slice(0, 5))
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "reverify", source_url: "", source_label: `Career: ${ph.title} at ${ph.company}${ph.years ? ` (${ph.years})` : ""}`, layer: "identity", data_key: "professional_history", data_value: JSON.stringify(ph), confidence: 40, fetched_at: now });
 
-    // Additional addresses
-    for (const addr of [...new Set(result.additional_addresses)].slice(0, 5)) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "reverify", source_url: "",
-        source_label: `Address: ${addr}`,
-        layer: "identity", data_key: "secondary_address",
-        data_value: addr,
-        confidence: 35,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    for (const addr of [...new Set(result.additional_addresses)].slice(0, 5))
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "reverify", source_url: "", source_label: `Address: ${addr}`, layer: "identity", data_key: "secondary_address", data_value: addr, confidence: 35, fetched_at: now });
+
+    addSources(sourceBatch);
 
     logAuditEvent(leadId, "source_fetched", "system", {
       provider: "reverify",

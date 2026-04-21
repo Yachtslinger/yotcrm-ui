@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import Database from "better-sqlite3";
 
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 const DB_PATH = process.env.DB_PATH || "/app/data/yotcrm.db";
 const SYNC_SECRET = process.env.SYNC_SECRET || "yotcrm-sync-2026";
 

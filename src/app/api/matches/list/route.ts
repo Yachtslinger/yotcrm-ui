@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listMatchesForPage, updateListingMatchStatus, getMatchDetail } from "@/lib/matches/storage";
 
+export const runtime = "nodejs";
+
 export async function GET(req: NextRequest) {
   try {
     const sp = req.nextUrl.searchParams;

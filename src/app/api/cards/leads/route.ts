@@ -70,23 +70,24 @@ export async function POST(req: Request) {
 
     // 2. Also insert into main leads table for YotCRM UI visibility
     const db = new Database(DB_PATH);
-    const nameParts = name.trim().split(" ");
-    const firstName = nameParts[0] || "";
-    const lastName = nameParts.slice(1).join(" ") || "";
-    const notes = [
-      message ? `Message: ${message.trim()}` : "",
-      `Source: Digital Business Card`,
-      card_profile_id ? `Card Profile: ${card_profile_id}` : "",
-    ].filter(Boolean).join("\n");
-
-    const leadId = insertIntoLeads(db, {
-      first_name: firstName,
-      last_name: lastName,
-      email: email.trim().toLowerCase(),
-      phone: phone?.trim() || "",
-      notes,
-    });
-    db.close();
+    let leadId: number;
+    try {
+      const nameParts = name.trim().split(" ");
+      const firstName = nameParts[0] || "";
+      const lastName = nameParts.slice(1).join(" ") || "";
+      const notes = [
+        message ? `Message: ${message.trim()}` : "",
+        `Source: Digital Business Card`,
+        card_profile_id ? `Card Profile: ${card_profile_id}` : "",
+      ].filter(Boolean).join("\n");
+      leadId = insertIntoLeads(db, {
+        first_name: firstName,
+        last_name: lastName,
+        email: email.trim().toLowerCase(),
+        phone: phone?.trim() || "",
+        notes,
+      });
+    } finally { db.close(); }
 
     // 3. Fire iMessage notification (fire-and-forget)
     fireNotification(leadId, name.trim(), email.trim(), phone?.trim() || "");

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import Database from "better-sqlite3";
 
+export const runtime = "nodejs";
+
 const DB_PATH = process.env.DB_PATH || "/app/data/yotcrm.db";
 
 function getDb() {

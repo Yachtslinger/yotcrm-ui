@@ -245,23 +245,218 @@ export function scoreAndPersistPair(leadId: number, brochureId: number): MatchRo
 }
 
 // ─── Run full rescore (all active leads × all brochures) ─────────────────────
+// Optimised: loads all context data in one DB open, scores in memory,
+// writes all pairs in one transaction.  Replaces the old approach that
+// opened/closed the DB ~7× per pair (207k+ opens for 3k leads × 9 brochures).
 
 export function runFullRescore(): { pairs: number; errors: number } {
-  const leads = getAllActiveLeads();
-  const brochures = getAllActiveBrochures();
+  const db = getConnectDb();
   let pairs = 0; let errors = 0;
-  for (const lead of leads) {
-    for (const brochure of brochures) {
-      try {
-        scoreAndPersistPair(lead.id, brochure.id);
-        pairs++;
-      } catch { errors++; }
+
+  try {
+    initConnectTables();
+
+    // 0. Suppress stale scores for leads with no buyer criteria.
+    // These were scored in previous runs but their results are meaningless noise
+    // (every dimension scores neutral) — hide them from the queue.
+    db.prepare(`
+      UPDATE connect_match_scores SET routing = 'suppressed', is_stale = 1
+      WHERE lead_id IN (
+        SELECT id FROM leads
+        WHERE (budget_min  IS NULL OR budget_min  = '') AND
+              (budget_max  IS NULL OR budget_max  = '') AND
+              (loa_min     IS NULL OR loa_min     = '') AND
+              (loa_max     IS NULL OR loa_max     = '') AND
+              (year_min    IS NULL OR year_min    = '') AND
+              (year_max    IS NULL OR year_max    = '') AND
+              (make_preference    IS NULL OR make_preference    = '') AND
+              (preferred_location IS NULL OR preferred_location = '') AND
+              (vessel_type_pref   IS NULL OR vessel_type_pref   = '') AND
+              (flybridge_pref     IS NULL OR flybridge_pref     = '') AND
+              (stabilizers_pref   IS NULL OR stabilizers_pref   = '') AND
+              (min_cabins         IS NULL OR min_cabins         = '') AND
+              (engine_type_pref   IS NULL OR engine_type_pref   = '')
+      ) AND routing != 'suppressed'
+    `).run();
+
+    // 1. Load all active brochures once
+    const brochureRows = db.prepare(
+      `SELECT id, slug, vessel_name, builder, year, source_url, created_at, is_pocket_listing, vessel_data
+       FROM brochures ORDER BY created_at DESC`
+    ).all() as any[];
+    const brochures: ConnectBrochure[] = brochureRows.map(row => {
+      const parsed = parseJSON<{ vessel?: object }>(row.vessel_data, {});
+      return {
+        id: row.id, slug: row.slug, vessel_name: row.vessel_name,
+        builder: row.builder, year: row.year, source_url: row.source_url,
+        created_at: row.created_at, is_pocket_listing: row.is_pocket_listing ?? 0,
+        vessel: (parsed.vessel ?? {}) as ConnectBrochure['vessel'],
+      };
+    });
+    if (brochures.length === 0) return { pairs: 0, errors: 0 };
+
+    // 2. Load active leads that have at least one buyer criterion set.
+    // Leads with zero criteria score identically neutral on all dimensions —
+    // scoring them generates noise. With 3k+ Apple Contacts imports this is ~98% of leads.
+    const activeStatuses = ['active','warm','hot','qualified','interested','pipeline','new'];
+    const placeholders = activeStatuses.map(() => '?').join(',');
+    const leads: ConnectLead[] = db.prepare(
+      `SELECT id, (first_name || ' ' || last_name) AS name, email, phone, status, notes,
+              budget_min, budget_max, loa_min, loa_max, year_min, year_max,
+              make_preference, preferred_location, vessel_type_pref,
+              flybridge_pref, stabilizers_pref, min_cabins, engine_type_pref,
+              last_contacted_at, updated_at, created_at
+       FROM leads
+       WHERE status IN (${placeholders})
+         AND (
+           (budget_min  IS NOT NULL AND budget_min  != '') OR
+           (budget_max  IS NOT NULL AND budget_max  != '') OR
+           (loa_min     IS NOT NULL AND loa_min     != '') OR
+           (loa_max     IS NOT NULL AND loa_max     != '') OR
+           (year_min    IS NOT NULL AND year_min    != '') OR
+           (year_max    IS NOT NULL AND year_max    != '') OR
+           (make_preference   IS NOT NULL AND make_preference   != '') OR
+           (preferred_location IS NOT NULL AND preferred_location != '') OR
+           (vessel_type_pref   IS NOT NULL AND vessel_type_pref  != '') OR
+           (flybridge_pref     IS NOT NULL AND flybridge_pref    != '') OR
+           (stabilizers_pref   IS NOT NULL AND stabilizers_pref  != '') OR
+           (min_cabins         IS NOT NULL AND min_cabins        != '') OR
+           (engine_type_pref   IS NOT NULL AND engine_type_pref  != '')
+         )
+       ORDER BY updated_at DESC`
+    ).all(...activeStatuses) as ConnectLead[];
+    if (leads.length === 0) return { pairs: 0, errors: 0 };
+
+    // 3. Bulk-load exposure summaries (sent counts) for all pairs
+    const exposureMap = new Map<string, number>(); // "leadId:brochureId" → sent_count
+    const expRows = db.prepare(
+      `SELECT lead_id, brochure_id, sent_count FROM connect_exposure_summary`
+    ).all() as any[];
+    for (const r of expRows) exposureMap.set(`${r.lead_id}:${r.brochure_id}`, r.sent_count);
+
+    // 4. Bulk-load recent engagement counts (last 30d)
+    const cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
+    const engMap = new Map<string, number>();
+    const engRows = db.prepare(
+      `SELECT lead_id, brochure_id, COUNT(*) as cnt
+       FROM connect_engagement_events
+       WHERE occurred_at >= ? AND brochure_id IS NOT NULL
+       GROUP BY lead_id, brochure_id`
+    ).all(cutoff) as any[];
+    for (const r of engRows) engMap.set(`${r.lead_id}:${r.brochure_id}`, r.cnt);
+
+    // 5. Bulk-load active suppressions and boosts
+    const suppressSet = new Set<string>();
+    const boostMap = new Map<string, number>();
+    const overrideRows = db.prepare(
+      `SELECT lead_id, brochure_id, override_type, boost_value
+       FROM connect_broker_overrides
+       WHERE is_active = 1 AND (expires_at IS NULL OR expires_at > datetime('now'))`
+    ).all() as any[];
+    for (const r of overrideRows) {
+      const key = `${r.lead_id}:${r.brochure_id}`;
+      if (r.override_type === 'suppress') suppressSet.add(key);
+      if (r.override_type === 'boost') boostMap.set(key, r.boost_value ?? 15);
     }
+    const suppRuleRows = db.prepare(
+      `SELECT lead_id, brochure_id FROM connect_suppression_rules
+       WHERE (expires_at IS NULL OR expires_at > datetime('now'))`
+    ).all() as any[];
+    for (const r of suppRuleRows) suppressSet.add(`${r.lead_id}:${r.brochure_id}`);
+
+    // 6. Prepare write statements
+    const upsertScore = db.prepare(`
+      INSERT INTO connect_match_scores
+        (lead_id, brochure_id, score, confidence, routing, manual_priority_score, is_stale, scored_at)
+      VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+      ON CONFLICT(lead_id, brochure_id) DO UPDATE SET
+        score = excluded.score, confidence = excluded.confidence,
+        routing = excluded.routing, manual_priority_score = excluded.manual_priority_score,
+        is_stale = 0, scored_at = excluded.scored_at
+    `);
+
+    const getMatchId = db.prepare(
+      `SELECT id FROM connect_match_scores WHERE lead_id = ? AND brochure_id = ?`
+    );
+
+    const upsertExpl = db.prepare(`
+      INSERT INTO connect_match_explanations
+        (match_id, summary_sentence, top_reasons, top_penalties, caution_flags,
+         next_best_action, score_breakdown, routing_reason, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(match_id) DO UPDATE SET
+        summary_sentence = excluded.summary_sentence, top_reasons = excluded.top_reasons,
+        top_penalties = excluded.top_penalties, caution_flags = excluded.caution_flags,
+        next_best_action = excluded.next_best_action, score_breakdown = excluded.score_breakdown,
+        routing_reason = excluded.routing_reason, created_at = excluded.created_at
+    `);
+
+    const upsertQueue = db.prepare(`
+      INSERT INTO connect_routing_queue
+        (lead_id, brochure_id, match_id, queue_type, status, priority, added_at)
+      VALUES (?, ?, ?, ?, 'pending', ?, ?)
+      ON CONFLICT DO NOTHING
+    `);
+
+    const ts = now();
+
+    // 7. Score all pairs in one transaction
+    const scoreBatch = db.transaction(() => {
+      for (const lead of leads) {
+        for (const brochure of brochures) {
+          try {
+            const key = `${lead.id}:${brochure.id}`;
+            const sentCount = exposureMap.get(key) ?? 0;
+            const engagementCount = engMap.get(key) ?? 0;
+            const suppressionActive = suppressSet.has(key);
+            const brokerBoost = boostMap.get(key) ?? 0;
+
+            const result = calculateConnectScore(lead, brochure, {
+              sentCount, engagementCount, brokerBoost, suppressionActive,
+            });
+
+            const priorityScore = computePriorityScore(
+              result.score, !!(brochure.is_pocket_listing), brokerBoost, sentCount, engagementCount
+            );
+
+            upsertScore.run(lead.id, brochure.id, result.score, result.confidence, result.routing, priorityScore, ts);
+
+            const row = getMatchId.get(lead.id, brochure.id) as any;
+            if (!row) { errors++; continue; }
+
+            const exp = result.explanation;
+            upsertExpl.run(
+              row.id, exp.summary_sentence,
+              JSON.stringify(exp.top_reasons), JSON.stringify(exp.top_penalties),
+              JSON.stringify(exp.caution_flags), JSON.stringify(exp.next_best_action),
+              JSON.stringify(exp.score_breakdown), exp.routing_reason, ts
+            );
+
+            if (result.routing !== 'suppressed') {
+              upsertQueue.run(
+                lead.id, brochure.id, row.id,
+                result.routing === 'manual_queue' ? 'manual' : 'bot',
+                100 - priorityScore, ts
+              );
+            }
+
+            pairs++;
+          } catch { errors++; }
+        }
+      }
+    });
+
+    scoreBatch();
+  } finally {
+    db.close();
   }
+
   return { pairs, errors };
 }
 
 export function rescoreForLead(leadId: number): { pairs: number; errors: number } {
+  // Score this one lead against all brochures — no criteria filter here
+  // since a lead update should always show results immediately.
   const brochures = getAllActiveBrochures();
   let pairs = 0; let errors = 0;
   for (const b of brochures) {
@@ -271,7 +466,30 @@ export function rescoreForLead(leadId: number): { pairs: number; errors: number 
 }
 
 export function rescoreForBrochure(brochureId: number): { pairs: number; errors: number } {
-  const leads = getAllActiveLeads();
+  // Score a new/updated brochure against all leads that have criteria.
+  // Same criteria filter as runFullRescore to keep noise down.
+  const activeStatuses = ['active','warm','hot','qualified','interested','pipeline','new'];
+  const ph = activeStatuses.map(() => '?').join(',');
+  const db = getConnectDb();
+  let leads: ConnectLead[] = [];
+  try {
+    leads = db.prepare(
+      `SELECT id, (first_name || ' ' || last_name) AS name, email, phone, status, notes,
+              budget_min, budget_max, loa_min, loa_max, year_min, year_max,
+              make_preference, preferred_location, vessel_type_pref,
+              flybridge_pref, stabilizers_pref, min_cabins, engine_type_pref,
+              last_contacted_at, updated_at, created_at
+       FROM leads
+       WHERE status IN (${ph})
+         AND ((budget_min IS NOT NULL AND budget_min != '') OR
+              (budget_max IS NOT NULL AND budget_max != '') OR
+              (loa_min    IS NOT NULL AND loa_min    != '') OR
+              (loa_max    IS NOT NULL AND loa_max    != '') OR
+              (make_preference IS NOT NULL AND make_preference != '') OR
+              (vessel_type_pref IS NOT NULL AND vessel_type_pref != ''))`
+    ).all(...activeStatuses) as ConnectLead[];
+  } finally { db.close(); }
+
   let pairs = 0; let errors = 0;
   for (const l of leads) {
     try { scoreAndPersistPair(l.id, brochureId); pairs++; } catch { errors++; }

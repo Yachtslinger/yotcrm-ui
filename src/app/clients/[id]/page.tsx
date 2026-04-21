@@ -11,6 +11,7 @@ import {
   Briefcase, DollarSign, Activity,
 } from "lucide-react";
 import Dossier from "../Dossier";
+import ClientNotesPanel from "../ClientNotesPanel";
 
 const STATUS_OPTIONS = [
   { value: "new", label: "New", color: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300" },
@@ -43,7 +44,30 @@ function LeadDetailPageClient({ id }: { id: string }) {
   const [intel, setIntel] = useState<any>(null);
   const [intelSources, setIntelSources] = useState<any[]>([]);
   const [intelLoading, setIntelLoading] = useState(false);
+  const [emailingClient, setEmailingClient] = useState(false);
   const [enriching, setEnriching] = useState(false);
+
+  const emailClient = async () => {
+    if (!lead?.email) { toast("No email address on file for this client", "error"); return; }
+    setEmailingClient(true);
+    try {
+      const name = [lead.firstName, lead.lastName].filter(Boolean).join(" ");
+      const res = await fetch("/api/mail-compose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: lead.email,
+          subject: `Following up — ${name}`,
+          body: `Hi ${lead.firstName || name},\n\n`,
+          pdf_urls: [],
+        }),
+      });
+      const d = await res.json();
+      if (d.ok) toast("Apple Mail opened ✓");
+      else toast(d.error || "Could not open Mail", "error");
+    } catch { toast("Could not reach mail-compose — are you running locally?", "error"); }
+    finally { setEmailingClient(false); }
+  };
   const [activeTab, setActiveTab] = useState<"overview"|"notes"|"matches">("overview");
   const [leadMatches, setLeadMatches] = useState<any[]>([]);
   const [matchesLoading, setMatchesLoading] = useState(false);
@@ -76,6 +100,7 @@ function LeadDetailPageClient({ id }: { id: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lead_id: Number(id), action: "enrich" }),
       });
+      if (!res.ok) { toast(`Server error ${res.status} — check logs`, "error"); return; }
       const data = await res.json();
       if (data.ok) {
         toast(`Lighthouse: ${data.score}/100 — ${(data.band || "").replace(/_/g, " ")}`);
@@ -128,7 +153,7 @@ function LeadDetailPageClient({ id }: { id: string }) {
       } else {
         toast(data.error || "Enrichment failed", "error");
       }
-    } catch { toast("Enrichment failed", "error"); }
+    } catch (err: any) { toast(`Network error: ${err?.message || "unknown"}`, "error"); }
     finally { setEnriching(false); }
   };
 
@@ -136,12 +161,9 @@ function LeadDetailPageClient({ id }: { id: string }) {
     const fetchLead = async () => {
       try {
         const decodedId = decodeURIComponent(id);
-        console.log("Fetching lead with ID:", decodedId);
         const res = await fetch(`/api/clients/${encodeURIComponent(decodedId)}`);
-        console.log("Response status:", res.status);
         if (!res.ok) throw new Error("Failed to fetch");
         const data = await res.json();
-        console.log("Fetched data:", data);
         
         // Normalize the data
         const normalized: Contact = {
@@ -437,6 +459,15 @@ function LeadDetailPageClient({ id }: { id: string }) {
               </div>
             </div>
             <div className="flex gap-2 flex-wrap">
+              {lead.email && (
+                <button
+                  onClick={emailClient}
+                  disabled={emailingClient}
+                  className="px-3 py-1.5 border border-blue-500 text-blue-600 dark:text-blue-300 rounded-lg text-xs hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-50 font-semibold"
+                >
+                  {emailingClient ? "Opening…" : "✉ Email Client"}
+                </button>
+              )}
               <button
                 onClick={() => emailPaolo(lead)}
                 className="px-3 py-1.5 border border-purple-500 text-purple-600 dark:text-purple-300 rounded-lg text-xs hover:bg-purple-50 dark:hover:bg-purple-900/30"
@@ -937,11 +968,8 @@ function LeadDetailPageClient({ id }: { id: string }) {
           {/* ═══ NOTES & CRITERIA TAB ═══ */}
           {activeTab === "notes" && (
           <>
-          <BrokerNotesPanel
-            leadId={id}
-            initialValue={lead.broker_notes || ""}
-            onSaved={(val) => { setLead(l => l ? { ...l, broker_notes: val } : l); setForm(f => f ? { ...f, broker_notes: val } : f); }}
-          />
+          <ClientNotesPanel leadId={Number(id)} createdBy="will" />
+          <SentEmailsSection leadId={Number(id)} leadEmail={lead.email} />
           {lead.notes && (
             <div className="border-t border-gray-200 dark:border-gray-700 pt-6 mt-6">
               <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">
@@ -956,6 +984,79 @@ function LeadDetailPageClient({ id }: { id: string }) {
           )}
 
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+function SentEmailsSection({ leadId, leadEmail }: { leadId: number; leadEmail?: string }) {
+  const [emails, setEmails] = React.useState<any[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [expandedId, setExpandedId] = React.useState<number | null>(null);
+
+  React.useEffect(() => {
+    fetch(`/api/emails/by-lead?lead_id=${leadId}`)
+      .then(r => r.json())
+      .then(d => { if (d.ok) setEmails(d.emails || []); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [leadId]);
+
+  if (loading) return null;
+  if (emails.length === 0) return (
+    <div className="border-t border-gray-200 dark:border-gray-700 pt-6 mt-6">
+      <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide mb-3">
+        ✉ Sent Emails
+      </h2>
+      <p className="text-xs text-gray-400">
+        No sent emails captured yet.
+        {leadEmail && <span> Emails to <span className="font-medium">{leadEmail}</span> will appear here automatically once the email watcher is running.</span>}
+      </p>
+    </div>
+  );
+
+  return (
+    <div className="border-t border-gray-200 dark:border-gray-700 pt-6 mt-6">
+      <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide mb-3">
+        ✉ Sent Emails ({emails.length})
+      </h2>
+      <div className="space-y-2">
+        {emails.map((email: any) => {
+          const isExpanded = expandedId === email.id;
+          const sentDate = new Date(email.sent_at).toLocaleDateString("en-US", {
+            month: "short", day: "numeric", year: "numeric",
+          });
+          return (
+            <div key={email.id}
+              className="rounded-xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 overflow-hidden">
+              <button
+                onClick={() => setExpandedId(isExpanded ? null : email.id)}
+                className="w-full text-left px-4 py-3 flex items-start justify-between gap-3 hover:bg-gray-50 dark:hover:bg-neutral-800 transition-colors">
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 flex-shrink-0">
+                    → Sent
+                  </span>
+                  <span className="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">
+                    {email.subject || "(no subject)"}
+                  </span>
+                </div>
+                <span className="text-[10px] text-gray-400 flex-shrink-0">{sentDate}</span>
+              </button>
+              {isExpanded && (
+                <div className="px-4 pb-3 border-t border-gray-100 dark:border-neutral-700">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 mb-1">
+                    To: {(() => { try { return JSON.parse(email.to_addresses).join(", "); } catch { return email.to_addresses; } })()}
+                  </p>
+                  <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">
+                    {email.body_plain?.slice(0, 800) || "(no content)"}
+                    {email.body_plain?.length > 800 && <span className="text-gray-400">…</span>}
+                  </p>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

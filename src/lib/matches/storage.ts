@@ -10,7 +10,10 @@ function getDb() {
   return db;
 }
 
+let _matchTablesReady = false;
+
 export function initMatchTables() {
+  if (_matchTablesReady) return;
   const db = getDb();
   try {
     db.exec(`
@@ -113,6 +116,7 @@ export function initMatchTables() {
     try { db.exec("ALTER TABLE buyer_searches ADD COLUMN min_cabins TEXT DEFAULT ''"); } catch {}
     try { db.exec("ALTER TABLE buyer_searches ADD COLUMN engine_type_pref TEXT DEFAULT ''"); } catch {}
     try { db.exec("ALTER TABLE buyer_searches ADD COLUMN hull_material_pref TEXT DEFAULT ''"); } catch {}
+    _matchTablesReady = true;
   } finally { db.close(); }
 }
 

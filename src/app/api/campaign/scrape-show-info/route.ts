@@ -1,3 +1,4 @@
+export const runtime = "nodejs";
 /**
  * route.ts
  * Drop into: src/app/api/campaign/scrape-show-info/route.ts

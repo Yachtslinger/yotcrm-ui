@@ -4,7 +4,7 @@
  * Public data at: https://registry.faa.gov/AircraftInquiry/
  */
 
-import { addSource, logAuditEvent } from "../storage";
+import { addSources, logAuditEvent } from "../storage";
 import { type IdentityAnchors } from "../validation";
 
 export type FAAResult = {
@@ -50,32 +50,18 @@ export async function searchFAA(
       return true;
     });
 
-    // Store enrichment sources — lower confidence for name-only matches
-    // FAA doesn't provide owner address in search results, so we can't
-    // validate against location anchors. Flag as "unverified location".
     const hasLocationAnchors = anchors && (anchors.city || anchors.state);
-    const confidence = hasLocationAnchors ? 60 : 85; // Lower when we can't cross-verify
+    const confidence = hasLocationAnchors ? 60 : 85;
+    const now = new Date().toISOString();
 
-    for (const aircraft of result.aircraft) {
-      addSource({
-        profile_id: profileId,
-        lead_id: leadId,
-        source_type: "faa",
-        source_url: aircraft.source_url,
-        source_label: `FAA: N${aircraft.n_number} ${aircraft.manufacturer} ${aircraft.model}${hasLocationAnchors ? " (name match only)" : ""}`,
-        layer: "capital",
-        data_key: "aircraft_registration",
-        data_value: JSON.stringify({
-          n_number: aircraft.n_number,
-          manufacturer: aircraft.manufacturer,
-          model: aircraft.model,
-          year: aircraft.year,
-          type: aircraft.type,
-        }),
-        confidence: confidence,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    addSources(result.aircraft.map(aircraft => ({
+      profile_id: profileId, lead_id: leadId, source_type: "faa",
+      source_url: aircraft.source_url,
+      source_label: `FAA: N${aircraft.n_number} ${aircraft.manufacturer} ${aircraft.model}${hasLocationAnchors ? " (name match only)" : ""}`,
+      layer: "capital" as const, data_key: "aircraft_registration",
+      data_value: JSON.stringify({ n_number: aircraft.n_number, manufacturer: aircraft.manufacturer, model: aircraft.model, year: aircraft.year, type: aircraft.type }),
+      confidence, fetched_at: now,
+    })));
 
     logAuditEvent(leadId, "source_fetched", "system", {
       provider: "faa",

@@ -12,7 +12,7 @@
  * Uses: OpenCorporates, SEC EDGAR, DuckDuckGo web search
  */
 
-import { addSource, logAuditEvent, getSourcesByProfile } from "../storage";
+import { addSources, logAuditEvent, getSourcesByProfile } from "../storage";
 import { ddgSearch } from "./ddg";
 
 export type CompanyResult = {
@@ -84,7 +84,10 @@ export async function enrichCompanies(
       if (s.data_value) companyNames.push({ name: s.data_value, role: "Associated", type: "associated" });
     }
 
-    // Deduplicate and enrich top companies
+    // Batch all company sources — one DB write
+    const now = new Date().toISOString();
+    const sourceBatch: Parameters<typeof addSources>[0] = [];
+
     for (const co of companyNames.slice(0, 6)) {
       const upper = co.name.toUpperCase().trim();
       if (seenCompanies.has(upper) || upper.length < 2) continue;
@@ -92,32 +95,25 @@ export async function enrichCompanies(
 
       const details = await lookupCompanyDetails(co.name);
       const entry: CompanyResult["companies"][0] = {
-        name: co.name,
-        role: co.role,
-        source: details.source || "enrichment",
-        type: co.type,
+        name: co.name, role: co.role, source: details.source || "enrichment", type: co.type,
         source_url: details.source_url || `https://www.google.com/search?q=${encodeURIComponent(co.name)}+company`,
-        revenue: details.revenue,
-        employees: details.employees,
-        industry: details.industry,
-        founded: details.founded,
-        headquarters: details.headquarters,
-        website: details.website,
+        revenue: details.revenue, employees: details.employees, industry: details.industry,
+        founded: details.founded, headquarters: details.headquarters, website: details.website,
       };
-
       result.companies.push(entry);
 
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "company",
+      sourceBatch.push({
+        profile_id: profileId, lead_id: leadId, source_type: "company",
         source_url: entry.source_url,
         source_label: `Company: ${co.name} (${co.role})${entry.revenue ? ` — Rev: ${entry.revenue}` : ""}${entry.employees ? ` — ${entry.employees} employees` : ""}`,
         layer: "capital", data_key: "company_profile",
         data_value: JSON.stringify(entry),
         confidence: details.source === "sec" ? 85 : details.source === "opencorp" ? 70 : 45,
-        fetched_at: new Date().toISOString(),
+        fetched_at: now,
       });
     }
+
+    addSources(sourceBatch);
 
     logAuditEvent(leadId, "source_fetched", "system", {
       provider: "company",

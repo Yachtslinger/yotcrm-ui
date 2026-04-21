@@ -763,7 +763,11 @@ export default function Dossier({ lead, intel, sources, leadName, onRunEnrich, e
 // ─── Helper Components ──────────────────────────────────────────────
 
 function ScorePill({ score, band }: { score: number; band: string }) {
-  const bg = score >= 80 ? "#059669" : score >= 60 ? "#3b82f6" : score >= 40 ? "#d97706" : "#ef4444";
+  const bg = score >= 80 ? "#059669"
+    : score >= 60 ? "#3b82f6"
+    : score >= 35 ? "#d97706"
+    : score >= 15 ? "#64748b"
+    : "#ef4444";
   return (
     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold text-white" style={{ background: bg }}>
       {score}

@@ -6,6 +6,13 @@ import Database from "better-sqlite3";
 const DB_PATH = process.env.DB_PATH || "/app/data/yotcrm.db";
 export const runtime = "nodejs";
 
+/** Run a small write in its own connection — used for one-liner updates that
+ *  don't justify a full storage function. Always closes the DB. */
+function quickWrite(sql: string, ...params: any[]) {
+  const db = new Database(DB_PATH);
+  try { db.prepare(sql).run(...params); } finally { db.close(); }
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
@@ -32,10 +39,8 @@ export async function POST(req: Request) {
       // When marking a match todo complete, stamp last_contacted_at on the lead
       if (body.fields?.completed === true && todo.lead_id) {
         try {
-          const db2 = new Database(DB_PATH);
-          db2.prepare("UPDATE leads SET last_contacted_at = ? WHERE id = ?")
-            .run(new Date().toISOString(), todo.lead_id);
-          db2.close();
+          quickWrite("UPDATE leads SET last_contacted_at = ? WHERE id = ?",
+            new Date().toISOString(), todo.lead_id);
         } catch { /* non-fatal */ }
       }
       return NextResponse.json({ ok: true, todo });
@@ -52,14 +57,16 @@ export async function POST(req: Request) {
       };
       if (!todo?.id) return NextResponse.json({ ok: false, error: "Missing todo" }, { status: 400 });
       // Find the listing_match record for this todo
-      const db = new Database(DB_PATH);
       let matchId: number | null = null;
       try {
-        const row = db.prepare(
-          "SELECT id FROM listing_matches WHERE listing_id=? AND lead_id=? AND status != 'dismissed' LIMIT 1"
-        ).get(todo.listing_id ?? -1, todo.lead_id ?? -1) as any;
-        if (row) matchId = row.id;
-      } finally { db.close(); }
+        const db = new Database(DB_PATH, { readonly: true });
+        try {
+          const row = db.prepare(
+            "SELECT id FROM listing_matches WHERE listing_id=? AND lead_id=? AND status != 'dismissed' LIMIT 1"
+          ).get(todo.listing_id ?? -1, todo.lead_id ?? -1) as any;
+          if (row) matchId = row.id;
+        } finally { db.close(); }
+      } catch { /* non-fatal */ }
       // Record dismissal in match engine (prevents resurfacing)
       if (matchId && todo.listing_id && todo.lead_id) {
         dismissMatch(matchId, todo.lead_id, todo.listing_id, todo.assignee || "will");
@@ -80,20 +87,19 @@ export async function POST(req: Request) {
     }
     // Promote a bot-queue item to human queue
     if (action === "promote") {
-      const db = new Database(DB_PATH);
-      db.prepare("UPDATE todos SET queue='human' WHERE id=?").run(body.id);
-      db.close();
+      quickWrite("UPDATE todos SET queue='human' WHERE id=?", body.id);
       return NextResponse.json({ ok: true });
     }
     // Bulk-dismiss bot queue items (mark completed)
     if (action === "dismiss_bot_bulk") {
-      const db = new Database(DB_PATH);
       const now = new Date().toISOString();
       const ids: number[] = body.ids || [];
-      for (const id of ids) {
-        db.prepare("UPDATE todos SET completed=1, completed_at=? WHERE id=?").run(now, id);
-      }
-      db.close();
+      const db = new Database(DB_PATH);
+      try {
+        const stmt = db.prepare("UPDATE todos SET completed=1, completed_at=? WHERE id=?");
+        const batch = db.transaction(() => { for (const id of ids) stmt.run(now, id); });
+        batch();
+      } finally { db.close(); }
       return NextResponse.json({ ok: true, dismissed: ids.length });
     }
     return NextResponse.json({ ok: false, error: "Unknown action" }, { status: 400 });

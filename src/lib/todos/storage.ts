@@ -9,6 +9,15 @@ function getDb() {
   return db;
 }
 
+let _todoColumnsReady = false;
+function ensureTodoColumns(db: ReturnType<typeof getDb>) {
+  if (_todoColumnsReady) return;
+  try { db.exec("ALTER TABLE todos ADD COLUMN email_draft TEXT DEFAULT ''"); } catch {}
+  try { db.exec("ALTER TABLE todos ADD COLUMN todo_type TEXT DEFAULT 'manual'"); } catch {}
+  try { db.exec("ALTER TABLE todos ADD COLUMN queue TEXT DEFAULT 'human'"); } catch {}
+  _todoColumnsReady = true;
+}
+
 export type TodoRecord = {
   id: number;
   text: string;
@@ -29,10 +38,7 @@ export type TodoRecord = {
 export function getAllTodos(queue = "human"): TodoRecord[] {
   const db = getDb();
   try {
-    try { db.exec("ALTER TABLE todos ADD COLUMN email_draft TEXT DEFAULT ''"); } catch {}
-    try { db.exec("ALTER TABLE todos ADD COLUMN todo_type TEXT DEFAULT 'manual'"); } catch {}
-    try { db.exec("ALTER TABLE todos ADD COLUMN queue TEXT DEFAULT 'human'"); } catch {}
-    return db.prepare(`
+    ensureTodoColumns(db);    return db.prepare(`
       SELECT t.*,
         CASE WHEN t.lead_id IS NOT NULL
           THEN (l.first_name || ' ' || l.last_name) ELSE NULL END as lead_name,

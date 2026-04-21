@@ -93,6 +93,7 @@ const BAND_STYLES: Record<string, { bg: string; text: string; icon: typeof Check
   high_confidence:    { bg: "rgba(16,185,129,0.12)", text: "#059669", icon: CheckCircle },
   likely_legitimate:  { bg: "rgba(59,130,246,0.12)", text: "#3b82f6", icon: Shield },
   unverified:         { bg: "rgba(245,158,11,0.12)", text: "#d97706", icon: HelpCircle },
+  insufficient_data:  { bg: "rgba(100,116,139,0.12)", text: "#64748b", icon: HelpCircle },
   elevated_risk:      { bg: "rgba(239,68,68,0.12)",  text: "#ef4444", icon: AlertTriangle },
 };
 
@@ -103,7 +104,8 @@ function bandStyle(band: string) {
 function scoreGradient(score: number) {
   if (score >= 80) return "from-emerald-500 to-emerald-600";
   if (score >= 60) return "from-blue-500 to-blue-600";
-  if (score >= 40) return "from-amber-500 to-amber-600";
+  if (score >= 35) return "from-amber-500 to-amber-600";
+  if (score >= 15) return "from-slate-400 to-slate-500";
   return "from-red-500 to-red-600";
 }
 
@@ -171,6 +173,7 @@ export default function LighthousePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lead_id: leadId, action: "enrich" }),
       });
+      if (!res.ok) { toast(`Server error ${res.status} — check logs`); return; }
       const data = await res.json();
       if (data.ok) {
         toast(`Enriched — Score: ${data.score} (${data.band})`);
@@ -179,7 +182,7 @@ export default function LighthousePage() {
       } else {
         toast(data.error || "Enrichment failed");
       }
-    } catch { toast("Enrichment failed"); }
+    } catch (err: any) { toast(`Network error: ${err?.message || "unknown"}`); }
     finally { setEnriching(prev => { const s = new Set(prev); s.delete(leadId); return s; }); }
   };
 

@@ -1,3 +1,4 @@
+export const runtime = "nodejs";
 // src/app/api/dropbox/browse/route.ts
 // Lists folders and image files from a Dropbox path.
 // Uses Dropbox API v2 with a long-lived access token stored in env.

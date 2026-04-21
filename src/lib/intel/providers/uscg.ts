@@ -5,7 +5,7 @@
  * and NVDC abstract search.
  */
 
-import { addSource, logAuditEvent } from "../storage";
+import { addSources, logAuditEvent } from "../storage";
 import { type IdentityAnchors, validateAgainstAnchors } from "../validation";
 
 export type USCGResult = {
@@ -69,27 +69,16 @@ export async function searchUSCG(
       });
     }
 
-    // Store as enrichment sources
-    for (const vessel of result.vessels) {
-      addSource({
-        profile_id: profileId,
-        lead_id: leadId,
-        source_type: "uscg",
-        source_url: vessel.source_url,
-        source_label: `USCG: ${vessel.name} (${vessel.length}ft, ${vessel.year_built})`,
-        layer: "capital",
-        data_key: "vessel_registration",
-        data_value: JSON.stringify({
-          name: vessel.name,
-          hin: vessel.hin,
-          length: vessel.length,
-          year_built: vessel.year_built,
-          type: vessel.vessel_type,
-        }),
-        confidence: 85,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    // Batch USCG vessel sources — one DB write
+    const now = new Date().toISOString();
+    addSources(result.vessels.map(vessel => ({
+      profile_id: profileId, lead_id: leadId,
+      source_type: "uscg", source_url: vessel.source_url,
+      source_label: `USCG: ${vessel.name} (${vessel.length}ft, ${vessel.year_built})`,
+      layer: "capital" as const, data_key: "vessel_registration",
+      data_value: JSON.stringify({ name: vessel.name, hin: vessel.hin, length: vessel.length, year_built: vessel.year_built, type: vessel.vessel_type }),
+      confidence: 85, fetched_at: now,
+    })));
 
     logAuditEvent(leadId, "source_fetched", "system", {
       provider: "uscg",

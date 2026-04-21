@@ -198,14 +198,23 @@ export function EditorForm({
 
   function handleGalleryUpload(files: FileList | null) {
     if (!files || files.length === 0) return;
-    Array.from(files).forEach((file) => {
+    const fileArray = Array.from(files);
+    const newAssets: MediaAsset[] = new Array(fileArray.length);
+    let completed = 0;
+    fileArray.forEach((file, index) => {
       const reader = new FileReader();
       reader.onload = () => {
         const src = typeof reader.result === "string" ? reader.result : "";
-        if (!src) return;
-        const next = [...data.gallery, { src, width: 1200, height: 675, alt: file.name, tags: [] as string[] }];
-        const hero = pickHeroImage(next);
-        onDataChange({ ...data, hero, gallery: next });
+        if (src) {
+          newAssets[index] = { src, width: 1200, height: 675, alt: file.name, tags: [] as string[] };
+        }
+        completed++;
+        if (completed === fileArray.length) {
+          const validAssets = newAssets.filter(Boolean);
+          const next = [...data.gallery, ...validAssets];
+          const hero = pickHeroImage(next.length ? next : [data.hero]);
+          onDataChange({ ...data, hero, gallery: next });
+        }
       };
       reader.readAsDataURL(file);
     });

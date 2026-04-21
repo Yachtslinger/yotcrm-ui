@@ -31,9 +31,10 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // ── Legacy mode (backward compat — dashboard summary still uses this temporarily) ─
-    const contacts = await readContacts();
-    return NextResponse.json({ contacts });
+    // ── Legacy mode (backward compat — no ?page param) ─────────────────────
+    // Hard cap at 200 to prevent accidental full-table dumps
+    const result = await readContactsPaginated({ page: 1, pageSize: 200 });
+    return NextResponse.json({ contacts: result.contacts });
 
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

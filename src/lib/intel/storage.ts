@@ -2,6 +2,10 @@ import Database from "better-sqlite3";
 
 const DB_PATH = process.env.DB_PATH || "/app/data/yotcrm.db";
 
+// ── One-time init guard — prevents redundant CREATE TABLE calls during
+//    parallel enrichment (10 providers × allSettled = ~20 extra connections)
+let _intelTablesReady = false;
+
 function getDb() {
   const db = new Database(DB_PATH, { readonly: false });
   db.pragma("journal_mode = WAL");
@@ -110,6 +114,7 @@ export type EngagementLayer = {
 // ─── Init Tables ────────────────────────────────────────────────────
 
 export function initIntelTables() {
+  if (_intelTablesReady) return;
   const db = getDb();
   try {
     db.exec(`
@@ -194,6 +199,7 @@ export function initIntelTables() {
 
     // Always run seed — INSERT OR IGNORE safely adds new factors without touching existing
     seedDefaultWeights(db);
+    _intelTablesReady = true;
   } finally {
     db.close();
   }
@@ -327,6 +333,29 @@ export function addSource(source: Omit<EnrichmentSource, "id">): number {
   } finally { db.close(); }
 }
 
+// Batch insert — one transaction, one DB open. Use this instead of
+// calling addSource() in a loop (avoids N×DB opens per provider).
+export function addSources(sources: Omit<EnrichmentSource, "id">[]): void {
+  if (sources.length === 0) return;
+  if (!_intelTablesReady) initIntelTables();
+  const db = getDb();
+  try {
+    const stmt = db.prepare(`
+      INSERT INTO enrichment_sources (profile_id, lead_id, source_type, source_url, source_label,
+        layer, data_key, data_value, confidence, fetched_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertAll = db.transaction((rows: Omit<EnrichmentSource, "id">[]) => {
+      for (const s of rows) {
+        stmt.run(s.profile_id, s.lead_id, s.source_type, s.source_url,
+          s.source_label, s.layer, s.data_key, s.data_value,
+          s.confidence, s.fetched_at);
+      }
+    });
+    insertAll(sources);
+  } finally { db.close(); }
+}
+
 export function getSourcesByProfile(profileId: number): EnrichmentSource[] {
   const db = getDb();
   try {
@@ -446,7 +475,8 @@ export function optOutLead(leadId: number, actor: string): boolean {
 export function scoreBand(score: number): string {
   if (score >= 80) return "high_confidence";
   if (score >= 60) return "likely_legitimate";
-  if (score >= 40) return "unverified";
+  if (score >= 35) return "unverified";
+  if (score >= 15) return "insufficient_data";
   return "elevated_risk";
 }
 
@@ -455,6 +485,7 @@ export function scoreBandLabel(band: string): string {
     high_confidence: "High Confidence Capital",
     likely_legitimate: "Likely Legitimate",
     unverified: "Unverified",
+    insufficient_data: "Insufficient Data",
     elevated_risk: "Elevated Risk",
   };
   return labels[band] || "Unknown";

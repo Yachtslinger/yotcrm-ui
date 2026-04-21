@@ -79,6 +79,7 @@ function IntelBadge({ score, band, loading, onClick }: {
     high_confidence:   { bg: "rgba(16,185,129,0.15)", text: "#059669" },
     likely_legitimate: { bg: "rgba(59,130,246,0.15)", text: "#3b82f6" },
     unverified:        { bg: "rgba(245,158,11,0.15)", text: "#d97706" },
+    insufficient_data: { bg: "rgba(148,163,184,0.15)", text: "#64748b" },
     elevated_risk:     { bg: "rgba(239,68,68,0.15)",  text: "#ef4444" },
   };
   const c = colors[band || ""] || colors.unverified;
@@ -235,10 +236,11 @@ export default function ClientsPage(): React.ReactElement {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lead_id: Number(id), action: "enrich" }),
       });
+      if (!res.ok) { toast(`Server error ${res.status} — check Railway logs`, "error"); return; }
       const data = await res.json();
       if (data.ok) { toast(`Intel: ${data.score}/100 — ${(data.band||"").replace(/_/g," ")}`); fetchContacts(buildUrl()); }
       else toast(data.error || "Enrichment failed", "error");
-    } catch { toast("Enrichment failed", "error"); }
+    } catch (err: any) { toast(`Network error: ${err?.message || "unknown"}`, "error"); }
     finally { setEnriching(prev => { const s = new Set(prev); s.delete(id); return s; }); }
   };
 

@@ -6,7 +6,7 @@
  * - Company website detection
  */
 
-import { addSource, logAuditEvent } from "../storage";
+import { addSources, logAuditEvent } from "../storage";
 
 const FREEMAIL_DOMAINS = new Set([
   "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com",
@@ -45,56 +45,20 @@ export async function analyzeDomain(
     result.email_domain = domain;
     result.is_business_email = !FREEMAIL_DOMAINS.has(domain);
 
-    // If business email, probe the domain for a website
+    // Batch all domain sources — one DB write regardless of branch
+    const now = new Date().toISOString();
+    const sourceBatch: Parameters<typeof addSources>[0] = [];
+
     if (result.is_business_email) {
       const siteInfo = await probeWebsite(domain);
       result.domain_info = siteInfo;
-
-      addSource({
-        profile_id: profileId,
-        lead_id: leadId,
-        source_type: "domain",
-        source_url: `https://${domain}`,
-        source_label: `Business email: ${domain}${siteInfo?.title ? ` (${siteInfo.title})` : ""}`,
-        layer: "identity",
-        data_key: "business_ownership",
-        data_value: JSON.stringify({
-          company: siteInfo?.title || domain,
-          domain,
-          has_website: siteInfo?.has_website || false,
-          source: "email_domain",
-        }),
-        confidence: result.is_business_email ? 60 : 30,
-        fetched_at: new Date().toISOString(),
-      });
-
-      // Business email is a weak positive signal for professionalism
-      addSource({
-        profile_id: profileId,
-        lead_id: leadId,
-        source_type: "domain",
-        source_url: `https://${domain}`,
-        source_label: "Professional email domain",
-        layer: "engagement",
-        data_key: "email_tone",
-        data_value: "professional",
-        confidence: 40,
-        fetched_at: new Date().toISOString(),
-      });
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "domain", source_url: `https://${domain}`, source_label: `Business email: ${domain}${siteInfo?.title ? ` (${siteInfo.title})` : ""}`, layer: "identity", data_key: "business_ownership", data_value: JSON.stringify({ company: siteInfo?.title || domain, domain, has_website: siteInfo?.has_website || false, source: "email_domain" }), confidence: 60, fetched_at: now });
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "domain", source_url: `https://${domain}`, source_label: "Professional email domain", layer: "engagement", data_key: "email_tone", data_value: "professional", confidence: 40, fetched_at: now });
     } else {
-      addSource({
-        profile_id: profileId,
-        lead_id: leadId,
-        source_type: "domain",
-        source_url: "",
-        source_label: `Freemail: ${domain}`,
-        layer: "engagement",
-        data_key: "email_domain_type",
-        data_value: "freemail",
-        confidence: 95,
-        fetched_at: new Date().toISOString(),
-      });
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "domain", source_url: "", source_label: `Freemail: ${domain}`, layer: "engagement", data_key: "email_domain_type", data_value: "freemail", confidence: 95, fetched_at: now });
     }
+
+    addSources(sourceBatch);
 
     logAuditEvent(leadId, "source_fetched", "system", {
       provider: "domain",

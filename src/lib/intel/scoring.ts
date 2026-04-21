@@ -126,11 +126,20 @@ export function computeScore(profileId: number, leadId: number): ScoreResult {
     digital_score * 0.10 +
     engagement_score * 0.15
   );
-  const score = Math.max(0, Math.min(100, overall));
+
+  // Hard cap: OFAC sanctions match → max score 5 regardless of other signals
+  // A sanctioned person with strong identity/capital could otherwise score 50+
+  const hasSanctions = (sourcesByKey.get("sanctions_flag") || []).some(
+    s => s.data_value === "true" || s.data_value === "1"
+  );
+  const score = hasSanctions ? 5 : Math.max(0, Math.min(100, overall));
   const band = scoreBand(score);
 
   if (flags.some(f => f.includes("Sanctions"))) {
     flags.unshift("🚨 CRITICAL: OFAC sanctions match — DO NOT PROCEED without compliance review");
+  }
+  if (hasSanctions) {
+    flags.unshift("🔒 Score hard-capped at 5 due to OFAC match");
   }
 
   return { score, band, identity_score, capital_score, risk_score, digital_score, engagement_score, breakdown, flags };

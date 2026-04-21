@@ -1,6 +1,6 @@
 // src/app/brochures/[slug]/page.tsx
 // Serves the generated luxury brochure HTML for a given slug.
-// Adds a floating action bar: ← Back · Copy Link · Download PDF · ✉ Send
+// Action bar only shown internally (via ?internal=1). Public links are clean.
 
 import { getBrochure, DEFAULT_BROKERS } from "@/lib/brochure-storage";
 import { generateBrochureHTML } from "@/lib/brochure-template";
@@ -8,6 +8,7 @@ import { notFound } from "next/navigation";
 import fs from "fs";
 import path from "path";
 import { BrochureActionBar } from "./BrochureActionBar";
+import type { Metadata } from "next";
 
 const BROCHURES_DIR =
   process.env.BROCHURES_DIR ||
@@ -15,13 +16,55 @@ const BROCHURES_DIR =
 
 export const dynamic = "force-dynamic";
 
-export default async function BrochureSlugPage({
+export async function generateMetadata({
   params,
 }: {
   params: { slug: string };
+}): Promise<Metadata> {
+  const safeSlug = params.slug.replace(/[^a-zA-Z0-9._-]/g, "");
+  const row = getBrochure(safeSlug);
+  if (!row) return { title: "Yacht Brochure" };
+
+  const vessel = row.vessel;
+  const heroImg = vessel.images?.[0]?.src || "";
+  const title = `${vessel.name}${vessel.builder ? ` — ${vessel.builder}` : ""}`;
+  const specs = [vessel.loa, vessel.hullMaterial, vessel.year ? `${vessel.year} Delivery` : ""]
+    .filter(Boolean).join(" · ");
+  const description = specs
+    ? `${specs} · Available exclusively through Denison Yachting.`
+    : `${vessel.name} — Available exclusively through Denison Yachting.`;
+
+  return {
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      siteName: "Denison Yachting",
+      type: "website",
+      images: heroImg
+        ? [{ url: heroImg, width: 1200, height: 800, alt: vessel.name }]
+        : [],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: heroImg ? [heroImg] : [],
+    },
+  };
+}
+
+export default async function BrochureSlugPage({
+  params,
+  searchParams,
+}: {
+  params: { slug: string };
+  searchParams: { internal?: string };
 }) {
   const { slug } = params;
   const safeSlug = slug.replace(/[^a-zA-Z0-9._-]/g, "");
+  const isInternal = searchParams?.internal === "1";
 
   let html = "";
   let vesselName = "";
@@ -45,7 +88,7 @@ export default async function BrochureSlugPage({
 
   return (
     <>
-      <BrochureActionBar slug={safeSlug} vesselName={vesselName} />
+      {isInternal && <BrochureActionBar slug={safeSlug} vesselName={vesselName} />}
       <div style={{ margin: 0, padding: 0 }} dangerouslySetInnerHTML={{ __html: html }} />
     </>
   );

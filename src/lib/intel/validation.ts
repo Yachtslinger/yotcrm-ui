@@ -63,7 +63,6 @@ export function buildAnchors(lead: {
   let emailDomain = "";
   if (email && email.includes("@")) {
     emailDomain = email.split("@")[1] || "";
-    // Skip generic domains — they don't help with validation
     const generic = new Set([
       "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com",
       "icloud.com", "me.com", "mac.com", "live.com", "msn.com",
@@ -74,7 +73,7 @@ export function buildAnchors(lead: {
     if (generic.has(emailDomain)) emailDomain = "";
   }
 
-  return {
+  const anchors: IdentityAnchors = {
     fullName: [lead.first_name, lead.last_name].filter(Boolean).join(" "),
     firstName: (lead.first_name || "").toLowerCase().trim(),
     lastName: (lead.last_name || "").toLowerCase().trim(),
@@ -89,7 +88,7 @@ export function buildAnchors(lead: {
     company: (lead.company || "").toLowerCase().trim(),
   };
 
-  // Auto-enrich from phone area code if no city/state
+  // Auto-enrich from phone area code if no city/state known
   if (!anchors.city && !anchors.state && phoneDigits.length >= 10) {
     const areaCode = phoneDigits.slice(-10, -7);
     const loc = AREA_CODE_MAP[areaCode];

@@ -10,16 +10,17 @@ export async function POST(req: NextRequest) {
     if (!name || !email) return NextResponse.json({ ok: false, error: "Name and email required" }, { status: 400 });
 
     const db = new Database(DB_PATH);
-    const now = new Date().toISOString();
-    const parts = name.trim().split(" ");
-    const first = parts[0] || "";
-    const last = parts.slice(1).join(" ") || "";
+    try {
+      const now = new Date().toISOString();
+      const parts = name.trim().split(" ");
+      const first = parts[0] || "";
+      const last = parts.slice(1).join(" ") || "";
 
-    db.prepare(`
-      INSERT INTO leads (first_name, last_name, email, phone, source, status, notes, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'TheYachtCache', 'new', ?, ?, ?)
-    `).run(first, last, email, phone || "", `Website inquiry: ${interest || ""}\n\n${message || ""}`, now, now);
-    db.close();
+      db.prepare(`
+        INSERT INTO leads (first_name, last_name, email, phone, source, status, notes, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'TheYachtCache', 'new', ?, ?, ?)
+      `).run(first, last, email, phone || "", `Website inquiry: ${interest || ""}\n\n${message || ""}`, now, now);
+    } finally { db.close(); }
 
     return NextResponse.json({ ok: true });
   } catch (err) {

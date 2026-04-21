@@ -139,25 +139,14 @@ process_inbox() {
         local displayName="${leadName:-$leadEmail}"
         [ -z "$displayName" ] && displayName="Unknown"
         if [ "$leadType" = "broker" ]; then
-          local msg="🤝 BROKER/INDUSTRY CONTACT
-${displayName}
-${leadEmail}
-via ${leadSource}"
+          local notifMsg="🤝 BROKER: ${displayName} | ${leadEmail} | via ${leadSource}"
         else
-          local msg="🚨 NEW LEAD
-${displayName}
-${leadEmail}
-${leadBoat}
-via ${leadSource}"
+          local notifMsg="🚨 NEW LEAD: ${displayName} | ${leadEmail} | ${leadBoat} | via ${leadSource}"
         fi
         for number in "${NOTIFY_NUMBERS[@]}"; do
-          osascript -e "tell application \"Messages\"
-            set targetService to 1st account whose service type = iMessage
-            set targetBuddy to participant \"${number}\" of targetService
-            send \"${msg}\" to targetBuddy
-          end tell" >> "$LOG_FILE" 2>&1
+          osascript -e "tell application \"Messages\" to send \"${notifMsg}\" to participant \"${number}\" of (1st account whose service type = iMessage)" 2>/dev/null &
         done
-        log "📱 Texted notification for ${displayName} (type: ${leadType})"
+        log "📱 Texted: ${notifMsg}"
       fi
 
     elif [ "$http_code" = "422" ]; then

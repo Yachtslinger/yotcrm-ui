@@ -432,9 +432,17 @@ export default function ConnectPage() {
   async function handleRescore() {
     setRescoring(true);
     try {
-      await fetch("/api/connect/matches", { method: "POST" });
+      const res = await fetch("/api/connect/matches", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.error('[Connect] Rescore failed:', data.error);
+      } else {
+        console.log(`[Connect] Rescore: ${data.pairs} pairs, ${data.errors} errors`);
+      }
       await fetchMatches(1, queueType, minScore);
       fetchMetrics();
+    } catch (err: any) {
+      console.error('[Connect] Rescore network error:', err.message);
     } finally { setRescoring(false); }
   }
 

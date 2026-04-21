@@ -81,8 +81,22 @@ const TONE_OPTIONS: { id: SendTone; label: string; desc: string }[] = [
 /* ─── Static listing links — no async, no popup issues ─────────────────────
    Denison: cached exact URL if available, otherwise filtered search by spec.
    BoatWizard: always shown for broker portal access. Both are plain <a> tags. */
-function ViewListingButton({ listing }: { listing: ParsedListing }) {
-  const denisonUrl = listing.denison_url || (() => {
+type ResolveState = {
+  denisonUrl: string | null;
+  denisonConf: "exact" | "not_listed" | "no_id" | "error" | null;
+  denisonReason: string;
+};
+
+function ListingLinksPanel({ listing }: { listing: ParsedListing }) {
+  const [resolving, setResolving] = useState(false);
+  const [resolved, setResolved] = useState<ResolveState | null>(null);
+
+  const effectiveDenisonUrl = resolved?.denisonUrl ?? listing.denison_url ?? null;
+  const conf = resolved?.denisonConf ?? (listing.denison_url ? "exact" : null);
+  const confColor = conf === "exact" ? "#059669" : conf === "not_listed" ? "#6b7280" : conf === "error" ? "#ef4444" : "#d97706";
+
+  // Fuzzy fallback search URL (used before resolving)
+  const denisonFallback = (() => {
     const params = new URLSearchParams();
     const make = (listing.make || "").trim().split(/\s+/)[0];
     if (make) params.set("make", make);
@@ -92,21 +106,79 @@ function ViewListingButton({ listing }: { listing: ParsedListing }) {
     if (!isNaN(loa) && loa > 0) { params.set("length_min", String(Math.round(loa - 10))); params.set("length_max", String(Math.round(loa + 10))); }
     return `https://www.denisonyachtsales.com/yachts-for-sale/?${params}`;
   })();
-  const isExact = !!listing.denison_url;
+
+  async function handleResolve() {
+    setResolving(true);
+    try {
+      const res = await fetch("/api/matches/resolve-links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ listing_id: listing.id }),
+      });
+      const data = await res.json();
+      if (data.ok && data.result) {
+        setResolved({
+          denisonUrl: data.result.denison.url,
+          denisonConf: data.result.denison.confidence,
+          denisonReason: data.result.denison.reason,
+        });
+      } else {
+        setResolved({ denisonUrl: null, denisonConf: "error", denisonReason: data.error || "Lookup failed" });
+      }
+    } catch (e) {
+      setResolved({ denisonUrl: null, denisonConf: "error", denisonReason: "Network error" });
+    }
+    setResolving(false);
+  }
 
   return (
-    <div className="flex flex-col gap-0.5 mt-1">
-      <a href={denisonUrl} target="_blank" rel="noopener noreferrer"
-        className="inline-flex items-center gap-1 text-xs"
-        style={{ color: "var(--brass-400)" }}>
-        <ExternalLink className="w-3 h-3" />
-        {isExact ? "View on Denison" : "Search Denison"}
-      </a>
-      <a href={listing.listing_url} target="_blank" rel="noopener noreferrer"
-        className="inline-flex items-center gap-1 text-xs"
-        style={{ color: "var(--navy-400)" }}>
-        <ExternalLink className="w-3 h-3" /> BoatWizard (broker portal)
-      </a>
+    <div className="flex flex-col gap-1 mt-2">
+      {/* BoatWizard — always exact from the source email */}
+      {listing.listing_url && (
+        <a href={listing.listing_url} target="_blank" rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 text-xs font-medium"
+          style={{ color: "var(--navy-500)" }}>
+          <ExternalLink className="w-3 h-3" />
+          BoatWizard (broker portal)
+          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold" style={{ background: "rgba(16,185,129,0.1)", color: "#059669" }}>exact</span>
+        </a>
+      )}
+
+      {/* Denison — exact if resolved/cached, fuzzy search otherwise */}
+      {effectiveDenisonUrl && conf !== "not_listed" ? (
+        <a href={effectiveDenisonUrl} target="_blank" rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 text-xs font-medium"
+          style={{ color: "var(--brass-400)" }}>
+          <ExternalLink className="w-3 h-3" />
+          View on Denison
+          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold" style={{ background: "rgba(16,185,129,0.1)", color: "#059669" }}>exact</span>
+        </a>
+      ) : conf === "not_listed" ? (
+        <span className="text-xs" style={{ color: "#6b7280" }}>✕ Not currently listed on Denison</span>
+      ) : (
+        <a href={denisonFallback} target="_blank" rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 text-xs"
+          style={{ color: "var(--navy-400)" }}>
+          <ExternalLink className="w-3 h-3" />
+          Search Denison
+          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold" style={{ background: "rgba(245,158,11,0.1)", color: "#d97706" }}>approx</span>
+        </a>
+      )}
+
+      {/* Resolve button — only shown when no exact Denison URL yet */}
+      {!effectiveDenisonUrl && conf !== "not_listed" && conf !== "error" && (
+        <button onClick={handleResolve} disabled={resolving}
+          className="inline-flex items-center gap-1 text-xs mt-0.5 transition-opacity"
+          style={{ color: "var(--brass-400)", opacity: resolving ? 0.5 : 1, background: "none", border: "none", padding: 0, cursor: resolving ? "not-allowed" : "pointer" }}>
+          <Search className="w-3 h-3" />
+          {resolving ? "Resolving…" : "Find exact Denison listing"}
+        </button>
+      )}
+
+      {/* Result reason text */}
+      {resolved && (
+        <p className="text-[10px] mt-0.5 italic" style={{ color: confColor }}>{resolved.denisonReason}</p>
+      )}
     </div>
   );
 }
@@ -630,8 +702,8 @@ export default function MatchesPage() {
                               {l?.asking_price && <p className="text-xs" style={{ color: "var(--navy-500)" }}>Price: {l.asking_price}</p>}
                               {l?.loa && <p className="text-xs" style={{ color: "var(--navy-500)" }}>LOA: {l.loa}</p>}
                               {l?.location && <p className="text-xs" style={{ color: "var(--navy-500)" }}>Location: {l.location}</p>}
-                              {l?.listing_url && (
-                                <ViewListingButton listing={l} />
+                              {l && (
+                                <ListingLinksPanel listing={l} />
                               )}
                             </div>
                           </div>

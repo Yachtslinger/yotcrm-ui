@@ -12,7 +12,7 @@
  * Uses DuckDuckGo HTML search (no API key required)
  */
 
-import { addSource, logAuditEvent } from "../storage";
+import { addSources, logAuditEvent } from "../storage";
 import { type IdentityAnchors, validateAgainstAnchors, buildSmartQueries } from "../validation";
 import { ddgSearch } from "./ddg";
 
@@ -268,148 +268,52 @@ export async function searchWeb(
       result.results.push({ ...r, category });
     }
 
-    // Store extracted intelligence as enrichment sources
+    // Store all extracted intelligence in a single batch (one DB open instead of 13)
     const { extracted } = result;
+    const now = new Date().toISOString();
+    const firstUrl = result.results[0]?.url || "";
+    const sourceBatch: Parameters<typeof addSources>[0] = [];
 
-    // Store executive titles/companies found
-    for (const title of [...new Set(extracted.possible_titles)].slice(0, 3)) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "websearch", source_url: result.results[0]?.url || "",
-        source_label: `Web: Title — ${title}`,
-        layer: "identity", data_key: "web_title",
-        data_value: title, confidence: 45,
-        fetched_at: new Date().toISOString(),
-      });
-    }
-    for (const company of [...new Set(extracted.possible_companies)].slice(0, 3)) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "websearch", source_url: result.results[0]?.url || "",
-        source_label: `Web: Company — ${company}`,
-        layer: "identity", data_key: "web_company",
-        data_value: company, confidence: 40,
-        fetched_at: new Date().toISOString(),
-      });
-    }
-    // Yacht club memberships
-    for (const club of [...new Set(extracted.yacht_club)].slice(0, 3)) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "websearch", source_url: "",
-        source_label: `Web: Yacht Club — ${club}`,
-        layer: "engagement", data_key: "yacht_club",
-        data_value: club, confidence: 50,
-        fetched_at: new Date().toISOString(),
-      });
-    }
-    // Charity board memberships
-    for (const board of [...new Set(extracted.charity_boards)].slice(0, 3)) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "websearch", source_url: "",
-        source_label: `Web: Board Member — ${board}`,
-        layer: "capital", data_key: "charity_board",
-        data_value: board, confidence: 45,
-        fetched_at: new Date().toISOString(),
-      });
-    }
-    // Net worth / wealth signals
-    for (const signal of [...new Set(extracted.net_worth_signals)].slice(0, 2)) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "websearch", source_url: "",
-        source_label: `Web: Wealth Signal — ${signal}`,
-        layer: "capital", data_key: "wealth_signal",
-        data_value: signal, confidence: 35,
-        fetched_at: new Date().toISOString(),
-      });
-    }
-    // Education
-    for (const edu of [...new Set(extracted.education)].slice(0, 2)) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "websearch", source_url: "",
-        source_label: `Web: Education — ${edu}`,
-        layer: "identity", data_key: "education",
-        data_value: edu, confidence: 40,
-        fetched_at: new Date().toISOString(),
-      });
-    }
-    // Clubs (country clubs, yacht clubs, etc.)
-    for (const club of [...new Set([...extracted.clubs, ...extracted.yacht_club])].slice(0, 3)) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "websearch", source_url: "",
-        source_label: `Web: Club — ${club}`,
-        layer: "engagement", data_key: "yacht_club",
-        data_value: club, confidence: 45,
-        fetched_at: new Date().toISOString(),
-      });
-    }
-    // Store top search results as general web presence
-    for (const r of result.results.filter(r => r.category !== "other").slice(0, 8)) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "websearch", source_url: r.url,
-        source_label: `Web: ${r.title.substring(0, 100)}`,
-        layer: "identity", data_key: "web_mention",
-        data_value: JSON.stringify({ title: r.title, snippet: r.snippet, category: r.category }),
-        confidence: 40, fetched_at: new Date().toISOString(),
-      });
-    }
+    for (const title of [...new Set(extracted.possible_titles)].slice(0, 3))
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "websearch", source_url: firstUrl, source_label: `Web: Title — ${title}`, layer: "identity", data_key: "web_title", data_value: title, confidence: 45, fetched_at: now });
 
-    // Personal details found via web search
-    if (extracted.spouse_name) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "websearch", source_url: "",
-        source_label: `Web: Spouse — ${extracted.spouse_name}`,
-        layer: "identity", data_key: "spouse_name",
-        data_value: extracted.spouse_name, confidence: 35,
-        fetched_at: new Date().toISOString(),
-      });
-    }
-    if (extracted.age) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "websearch", source_url: "",
-        source_label: `Web: Age — ${extracted.age}`,
-        layer: "identity", data_key: "person_age",
-        data_value: extracted.age, confidence: 30,
-        fetched_at: new Date().toISOString(),
-      });
-    }
-    if (extracted.birth_year) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "websearch", source_url: "",
-        source_label: `Web: Born — ${extracted.birth_year}`,
-        layer: "identity", data_key: "date_of_birth",
-        data_value: extracted.birth_year, confidence: 30,
-        fetched_at: new Date().toISOString(),
-      });
-    }
-    if (extracted.date_of_birth) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "websearch", source_url: "",
-        source_label: `Web: DOB — ${extracted.date_of_birth}`,
-        layer: "identity", data_key: "date_of_birth",
-        data_value: extracted.date_of_birth, confidence: 35,
-        fetched_at: new Date().toISOString(),
-      });
-    }
-    for (const addr of [...new Set(extracted.secondary_addresses)].slice(0, 3)) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "websearch", source_url: "",
-        source_label: `Web: Address — ${addr}`,
-        layer: "identity", data_key: "secondary_address",
-        data_value: addr, confidence: 30,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    for (const company of [...new Set(extracted.possible_companies)].slice(0, 3))
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "websearch", source_url: firstUrl, source_label: `Web: Company — ${company}`, layer: "identity", data_key: "web_company", data_value: company, confidence: 40, fetched_at: now });
+
+    for (const club of [...new Set(extracted.yacht_club)].slice(0, 3))
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "websearch", source_url: "", source_label: `Web: Yacht Club — ${club}`, layer: "engagement", data_key: "yacht_club", data_value: club, confidence: 50, fetched_at: now });
+
+    for (const board of [...new Set(extracted.charity_boards)].slice(0, 3))
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "websearch", source_url: "", source_label: `Web: Board Member — ${board}`, layer: "capital", data_key: "charity_board", data_value: board, confidence: 45, fetched_at: now });
+
+    for (const signal of [...new Set(extracted.net_worth_signals)].slice(0, 2))
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "websearch", source_url: "", source_label: `Web: Wealth Signal — ${signal}`, layer: "capital", data_key: "wealth_signal", data_value: signal, confidence: 35, fetched_at: now });
+
+    for (const edu of [...new Set(extracted.education)].slice(0, 2))
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "websearch", source_url: "", source_label: `Web: Education — ${edu}`, layer: "identity", data_key: "education", data_value: edu, confidence: 40, fetched_at: now });
+
+    for (const club of [...new Set([...extracted.clubs, ...extracted.yacht_club])].slice(0, 3))
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "websearch", source_url: "", source_label: `Web: Club — ${club}`, layer: "engagement", data_key: "yacht_club", data_value: club, confidence: 45, fetched_at: now });
+
+    for (const r of result.results.filter(r => r.category !== "other").slice(0, 8))
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "websearch", source_url: r.url, source_label: `Web: ${r.title.substring(0, 100)}`, layer: "identity", data_key: "web_mention", data_value: JSON.stringify({ title: r.title, snippet: r.snippet, category: r.category }), confidence: 40, fetched_at: now });
+
+    if (extracted.spouse_name)
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "websearch", source_url: "", source_label: `Web: Spouse — ${extracted.spouse_name}`, layer: "identity", data_key: "spouse_name", data_value: extracted.spouse_name, confidence: 35, fetched_at: now });
+
+    if (extracted.age)
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "websearch", source_url: "", source_label: `Web: Age — ${extracted.age}`, layer: "identity", data_key: "person_age", data_value: extracted.age, confidence: 30, fetched_at: now });
+
+    if (extracted.birth_year)
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "websearch", source_url: "", source_label: `Web: Born — ${extracted.birth_year}`, layer: "identity", data_key: "date_of_birth", data_value: extracted.birth_year, confidence: 30, fetched_at: now });
+
+    if (extracted.date_of_birth)
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "websearch", source_url: "", source_label: `Web: DOB — ${extracted.date_of_birth}`, layer: "identity", data_key: "date_of_birth", data_value: extracted.date_of_birth, confidence: 35, fetched_at: now });
+
+    for (const addr of [...new Set(extracted.secondary_addresses)].slice(0, 3))
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "websearch", source_url: "", source_label: `Web: Address — ${addr}`, layer: "identity", data_key: "secondary_address", data_value: addr, confidence: 30, fetched_at: now });
+
+    addSources(sourceBatch);
 
     logAuditEvent(leadId, "source_fetched", "system", {
       provider: "websearch",

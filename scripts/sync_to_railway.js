@@ -6,7 +6,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 
-const DB_PATH = path.join(__dirname, '..', 'Data', 'yotcrm.db');
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../data/yotcrm.db');
 const RAILWAY_URL = 'https://yotcrm-production.up.railway.app/api/sync';
 const SYNC_SECRET = 'yotcrm-sync-2026';
 

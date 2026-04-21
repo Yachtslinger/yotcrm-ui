@@ -3,6 +3,8 @@ import { buildMatchEmail, buildMatchEmailText, buildSubjectLine, type MatchEmail
 import { sendViaGmail } from "@/lib/email/gmail-sender";
 import { logMatchSend, migrateMatchSendLog } from "@/lib/matching/match-send-log";
 
+export const runtime = "nodejs";
+
 const BROKER: Pick<MatchEmailData, "brokerName" | "brokerFull" | "brokerTitle" | "brokerEmail" | "brokerPhone" | "brokerCompany"> = {
   brokerName:    "Will",
   brokerFull:    "Will Noftsinger",

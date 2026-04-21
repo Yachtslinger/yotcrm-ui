@@ -3,6 +3,8 @@
 // Merges: (1) manually added pocket_listings rows, (2) brochures marked is_pocket_listing=1
 
 import { NextResponse } from "next/server";
+
+export const runtime = "nodejs";
 import Database from "better-sqlite3";
 
 const DB_PATH = process.env.DB_PATH || "/app/data/yotcrm.db";
@@ -11,36 +13,37 @@ const BASE = process.env.NEXT_PUBLIC_BASE_URL || "https://yotcrm-production.up.r
 export async function GET() {
   try {
     const db = new Database(DB_PATH);
+    let manualRows: any[] = [];
+    let brochureRows: any[] = [];
+    let existingSlugs: Set<string>;
 
-    // Ensure pocket_listings columns exist
-    const plCols = (db.prepare("PRAGMA table_info(pocket_listings)").all() as {name:string}[]).map(r=>r.name);
-    if (!plCols.includes("name"))           db.exec("ALTER TABLE pocket_listings ADD COLUMN name TEXT DEFAULT ''");
-    if (!plCols.includes("hero_image"))     db.exec("ALTER TABLE pocket_listings ADD COLUMN hero_image TEXT DEFAULT ''");
-    if (!plCols.includes("images"))         db.exec("ALTER TABLE pocket_listings ADD COLUMN images TEXT DEFAULT '[]'");
-    if (!plCols.includes("highlights"))     db.exec("ALTER TABLE pocket_listings ADD COLUMN highlights TEXT DEFAULT ''");
-    if (!plCols.includes("pdf_url"))        db.exec("ALTER TABLE pocket_listings ADD COLUMN pdf_url TEXT DEFAULT ''");
-    if (!plCols.includes("listing_type"))   db.exec("ALTER TABLE pocket_listings ADD COLUMN listing_type TEXT DEFAULT 'pocket'");
-    if (!plCols.includes("show_price"))     db.exec("ALTER TABLE pocket_listings ADD COLUMN show_price INTEGER DEFAULT 1");
-    if (!plCols.includes("listing_url"))    db.exec("ALTER TABLE pocket_listings ADD COLUMN listing_url TEXT DEFAULT ''");
-    if (!plCols.includes("brochure_slug"))  db.exec("ALTER TABLE pocket_listings ADD COLUMN brochure_slug TEXT DEFAULT ''");
+    try {
+      // Ensure pocket_listings columns exist
+      const plCols = (db.prepare("PRAGMA table_info(pocket_listings)").all() as {name:string}[]).map(r=>r.name);
+      if (!plCols.includes("name"))           db.exec("ALTER TABLE pocket_listings ADD COLUMN name TEXT DEFAULT ''");
+      if (!plCols.includes("hero_image"))     db.exec("ALTER TABLE pocket_listings ADD COLUMN hero_image TEXT DEFAULT ''");
+      if (!plCols.includes("images"))         db.exec("ALTER TABLE pocket_listings ADD COLUMN images TEXT DEFAULT '[]'");
+      if (!plCols.includes("highlights"))     db.exec("ALTER TABLE pocket_listings ADD COLUMN highlights TEXT DEFAULT ''");
+      if (!plCols.includes("pdf_url"))        db.exec("ALTER TABLE pocket_listings ADD COLUMN pdf_url TEXT DEFAULT ''");
+      if (!plCols.includes("listing_type"))   db.exec("ALTER TABLE pocket_listings ADD COLUMN listing_type TEXT DEFAULT 'pocket'");
+      if (!plCols.includes("show_price"))     db.exec("ALTER TABLE pocket_listings ADD COLUMN show_price INTEGER DEFAULT 1");
+      if (!plCols.includes("listing_url"))    db.exec("ALTER TABLE pocket_listings ADD COLUMN listing_url TEXT DEFAULT ''");
+      if (!plCols.includes("brochure_slug"))  db.exec("ALTER TABLE pocket_listings ADD COLUMN brochure_slug TEXT DEFAULT ''");
 
-    // 1. Manual pocket listings
-    const manualRows = db.prepare(`
-      SELECT id, name, make, model, year, length, price, location,
-             description, hero_image, images, highlights, pdf_url, listing_url,
-             brochure_slug, listing_type, show_price, status, created_at
-      FROM pocket_listings WHERE status = 'active' ORDER BY created_at DESC
-    `).all() as any[];
+      manualRows = db.prepare(`
+        SELECT id, name, make, model, year, length, price, location,
+               description, hero_image, images, highlights, pdf_url, listing_url,
+               brochure_slug, listing_type, show_price, status, created_at
+        FROM pocket_listings WHERE status = 'active' ORDER BY created_at DESC
+      `).all() as any[];
 
-    // 2. Brochures marked as pocket listings (not already in pocket_listings via brochure_slug)
-    const existingSlugs = new Set(manualRows.map(r => r.brochure_slug).filter(Boolean));
-    const brCols = (db.prepare("PRAGMA table_info(brochures)").all() as {name:string}[]).map(r=>r.name);
-    const brochureRows: any[] = brCols.includes("is_pocket_listing")
-      ? db.prepare(`SELECT id, slug, vessel_name, builder, year, vessel_data, created_at
-                    FROM brochures WHERE is_pocket_listing=1 ORDER BY created_at DESC`).all() as any[]
-      : [];
-
-    db.close();
+      existingSlugs = new Set(manualRows.map(r => r.brochure_slug).filter(Boolean));
+      const brCols = (db.prepare("PRAGMA table_info(brochures)").all() as {name:string}[]).map(r=>r.name);
+      brochureRows = brCols.includes("is_pocket_listing")
+        ? db.prepare(`SELECT id, slug, vessel_name, builder, year, vessel_data, created_at
+                      FROM brochures WHERE is_pocket_listing=1 ORDER BY created_at DESC`).all() as any[]
+        : [];
+    } finally { db.close(); }
 
     function parseImages(raw: string) {
       try { return JSON.parse(raw || "[]"); } catch { return []; }

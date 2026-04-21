@@ -10,9 +10,8 @@
  */
 
 import Database from "better-sqlite3";
-import path from "path";
 
-const DB_PATH = process.env.DB_PATH ?? path.join(process.cwd(), "yotcrm.db");
+const DB_PATH = process.env.DB_PATH || "/app/data/yotcrm.db";
 
 function getDb() {
   return new Database(DB_PATH);

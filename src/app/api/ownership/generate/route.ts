@@ -41,44 +41,7 @@ SCENARIO DEFINITIONS — follow these exactly:
 - HIGH = active/intensive ownership: heavy use (1,200-1,800 hrs/year), premium Med ports (Monaco, Antibes, Porto Cervo), full charter-ready crew and standards, aggressive capex.
 
 CALIBRATION RULES — apply every figure against these:
-
-CREW SALARIES — use the following annual ranges based on vessel LOA. Low scenario = low end, High = high end, Mid = midpoint. All figures USD annual.
-
-Captain:
-- 60–70 ft: $80,000–$100,000
-- 71–90 ft: $90,000–$120,000
-- 90 ft+: $1,200–$1,500 per foot of LOA (e.g. 100ft = $120k–$150k, 120ft = $144k–$180k, 150ft = $180k–$225k)
-Cross-reference: 70–100ft $84–120k | 100–130ft $120–156k | 130–160ft $156–192k | 160–190ft $192–228k | 190ft+ $228k+
-
-First Officer / Chief Mate:
-- 70–100ft: $54,000–$66,000 | 100–130ft: $66,000–$78,000 | 130–160ft: $78,000–$90,000 | 160–190ft: $90,000–$95,000 | 190ft+: $102,000+
-
-2nd Mate / Bosun:
-- 70–100ft: $48,000–$54,000 | 100–130ft: $54,000–$60,000 | 130–160ft: $60,000–$66,000 | 160–190ft: $66,000–$72,000 | 190ft+: $66,000+
-
-Deckhand:
-- 70–100ft: $42,000–$48,000 | 100–130ft: $48,000–$54,000 | 130–160ft: $54,000–$60,000 | 160–190ft: $60,000–$66,000 | 190ft+: $60,000+
-
-Chief Engineer / Solo Engineer:
-- 70–100ft: $72,000–$84,000 | 100–130ft: $84,000–$96,000 | 130–160ft: $96,000–$120,000 | 160–190ft: $120,000–$144,000 | 190ft+: $144,000+
-
-Assistant / Second Engineer:
-- 70–100ft: $48,000–$60,000 | 100–130ft: $60,000–$66,000 | 130–160ft: $66,000–$72,000 | 160–190ft: $72,000–$84,000 | 190ft+: $84,000+
-
-Culinary-Trained Chef:
-- 70–100ft: $60,000–$72,000 | 100–130ft: $72,000–$84,000 | 130–160ft: $84,000–$96,000 | 160–190ft: $96,000–$108,000 | 190ft+: $108,000+
-
-Chef / Cook:
-- 70–100ft: $54,000–$60,000 | 100–130ft: $60,000–$66,000 | 130–160ft: $66,000–$72,000 | 160–190ft: $72,000–$84,000 | 190ft+: $84,000+
-
-Chief Steward(ess) / Purser:
-- 70–100ft: $54,000–$60,000 | 100–130ft: $60,000–$66,000 | 130–160ft: $66,000–$72,000 | 160–190ft: $72,000–$84,000 | 190ft+: $84,000+
-
-Steward(ess) / Interior crew:
-- 70–100ft: $42,000–$48,000 | 100–130ft: $48,000–$54,000 | 130–160ft: $54,000–$60,000 | 160–190ft: $60,000–$66,000 | 190ft+: $66,000+
-
-Scale crew complement to vessel size: under 75ft typically 2–3 crew; 75–100ft = 3–5; 100–130ft = 4–7; 130–160ft = 6–10; 160ft+ = 10+. Only include roles that make sense for the vessel size.
-
+- Captain salary: scales with vessel size. Under 40m = $100-130k. 40-55m = $140-180k. 55m+ = $180-230k. Do not underestimate.
 - Fuel: displacement hulls burn LESS than planing hulls. Use realistic burn rates: under 30m = 40-80 L/hr; 30-45m = 80-150 L/hr; 45-60m = 120-220 L/hr; 60m+ = 200-350 L/hr. Mid scenario = moderate hours, not heavy use.
 - Dockage: Mid = home port contract + occasional cruising. NOT a full premium Med season. For a Florida/US home port mid = $80-150/ft/year. Med home port mid = €120-200/ft/year.
 - Insurance hull: base on replacement/insured value, NOT current asking price. Use approximately €1,500-€2,500/GT for replacement value on a quality build, then apply 1.0-1.25% mid / 1.5-1.75% high.
@@ -165,7 +128,6 @@ JSON structure (all numbers are annual USD amounts):
       body: JSON.stringify({
         model: "claude-opus-4-6",
         max_tokens: 8192,
-        temperature: 0,
         messages: [{ role: "user", content: prompt }],
       }),
     });

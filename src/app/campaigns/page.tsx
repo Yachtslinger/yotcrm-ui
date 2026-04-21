@@ -1658,8 +1658,10 @@ function GalleryImageInput({ value, set }: { value: string; set: (v: string) => 
         const merged = [...existing, ...newUrls].slice(0, 6);
         set(merged.join("\n"));
         toast(`${d.files.length} image${d.files.length > 1 ? "s" : ""} uploaded`);
+      } else {
+        throw new Error(d.error || `Upload returned no files — unsupported format?`);
       }
-    } catch { toast("Upload failed", "error"); }
+    } catch (err) { toast(err instanceof Error ? err.message : "Upload failed", "error"); }
     setUploading(false);
   }
 

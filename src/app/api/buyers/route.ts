@@ -14,152 +14,168 @@ function getDb() {
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
 
-  const yearMin = searchParams.get("yearMin");
-  const yearMax = searchParams.get("yearMax");
-  const priceMin = searchParams.get("priceMin");
-  const priceMax = searchParams.get("priceMax");
+  const yearMin   = searchParams.get("yearMin");
+  const yearMax   = searchParams.get("yearMax");
+  const priceMin  = searchParams.get("priceMin");
+  const priceMax  = searchParams.get("priceMax");
   const lengthMin = searchParams.get("lengthMin");
   const lengthMax = searchParams.get("lengthMax");
-  const make = searchParams.get("make");
-  const status = searchParams.get("status");
+  const make      = searchParams.get("make");
+  const status    = searchParams.get("status");
+  const page      = Math.max(1, parseInt(searchParams.get("page") || "1"));
+  const pageSize  = Math.min(200, Math.max(1, parseInt(searchParams.get("pageSize") || "100")));
 
   const db = getDb();
   try {
-    // Get all leads with their boats
-    const leads = db.prepare("SELECT * FROM leads ORDER BY updated_at DESC").all() as any[];
-    const allBoats = db.prepare("SELECT * FROM boats ORDER BY added_at DESC").all() as any[];
+    // ── 1. Build SQL WHERE clauses pushed all the way to the DB ──────────────
+    const boatConds: string[] = [];
+    const boatParams: (string | number)[] = [];
 
-    // Group boats by lead
-    const boatsByLead = new Map<number, any[]>();
-    for (const b of allBoats) {
-      if (!boatsByLead.has(b.lead_id)) boatsByLead.set(b.lead_id, []);
-      boatsByLead.get(b.lead_id)!.push(b);
+    if (yearMin)   { boatConds.push("CAST(b.year  AS INTEGER) >= ?"); boatParams.push(Number(yearMin)); }
+    if (yearMax)   { boatConds.push("CAST(b.year  AS INTEGER) <= ?"); boatParams.push(Number(yearMax)); }
+    if (lengthMin) { boatConds.push("CAST(REPLACE(REPLACE(b.length,'ft',''),\"'\",'') AS REAL) >= ?"); boatParams.push(Number(lengthMin)); }
+    if (lengthMax) { boatConds.push("CAST(REPLACE(REPLACE(b.length,'ft',''),\"'\",'') AS REAL) <= ?"); boatParams.push(Number(lengthMax)); }
+    if (priceMin)  { boatConds.push("CAST(REPLACE(REPLACE(REPLACE(b.price,'$',''),',',''),'USD','') AS REAL) >= ?"); boatParams.push(Number(priceMin)); }
+    if (priceMax)  { boatConds.push("CAST(REPLACE(REPLACE(REPLACE(b.price,'$',''),',',''),'USD','') AS REAL) <= ?"); boatParams.push(Number(priceMax)); }
+    if (make)      { boatConds.push("LOWER(b.make) LIKE ?"); boatParams.push(`%${make.toLowerCase()}%`); }
+
+    const leadConds: string[] = [];
+    const leadParams: (string | number)[] = [];
+    if (status && status !== "all") {
+      leadConds.push("LOWER(l.status) = ?");
+      leadParams.push(status.toLowerCase());
     }
 
-    // Helper: parse numeric from messy strings like "$1,500,000" or "72'" or "2020"
-    const parseNum = (val: string | null | undefined): number | null => {
-      if (!val) return null;
-      const cleaned = val.replace(/[^0-9.]/g, "");
-      const n = parseFloat(cleaned);
-      return isNaN(n) ? null : n;
-    };
+    const hasBoatFilters = boatConds.length > 0;
 
-    const results: any[] = [];
+    // ── 2. Paginated buyer list — JOIN only filters into SQL ─────────────────
+    const joinType  = hasBoatFilters ? "INNER" : "LEFT";
+    const boatWhere = boatConds.length ? `AND ${boatConds.join(" AND ")}` : "";
+    const leadWhere = leadConds.length ? `WHERE ${leadConds.join(" AND ")}` : "";
+    const offset    = (page - 1) * pageSize;
 
-    for (const lead of leads) {
-      // Filter by status
-      if (status && status !== "all") {
-        if ((lead.status || "other").toLowerCase() !== status.toLowerCase()) continue;
-      }
+    // Count total for pagination
+    const countSql = `
+      SELECT COUNT(DISTINCT l.id) as c
+      FROM leads l
+      ${joinType} JOIN boats b ON b.lead_id = l.id ${boatWhere}
+      ${leadWhere}
+    `;
+    const total = (db.prepare(countSql).get(
+      ...boatParams, ...leadParams
+    ) as any).c;
 
-      const boats = boatsByLead.get(lead.id) || [];
-      // Check if any boat matches the criteria
-      const matchingBoats = boats.filter((b: any) => {
-        const bYear = parseNum(b.year);
-        const bPrice = parseNum(b.price);
-        const bLength = parseNum(b.length);
-        const bMake = (b.make || "").toLowerCase();
+    // Fetch page of leads with their first matching boat inline
+    const listSql = `
+      SELECT
+        l.id, l.first_name, l.last_name, l.email, l.phone,
+        l.status, l.source, l.notes, l.updated_at,
+        b.make AS boat_make, b.model AS boat_model,
+        b.year AS boat_year, b.length AS boat_length,
+        b.price AS boat_price, b.location AS boat_location,
+        b.listing_url
+      FROM leads l
+      ${joinType} JOIN boats b ON b.lead_id = l.id
+        AND b.id = (
+          SELECT id FROM boats b2
+          WHERE b2.lead_id = l.id ${boatWhere.replace(/b\./g, 'b2.')}
+          ORDER BY b2.added_at DESC LIMIT 1
+        )
+      ${leadWhere}
+      GROUP BY l.id
+      ORDER BY l.updated_at DESC
+      LIMIT ? OFFSET ?
+    `;
 
-        if (yearMin && bYear !== null && bYear < Number(yearMin)) return false;
-        if (yearMax && bYear !== null && bYear > Number(yearMax)) return false;
-        if (priceMin && bPrice !== null && bPrice < Number(priceMin)) return false;
-        if (priceMax && bPrice !== null && bPrice > Number(priceMax)) return false;
-        if (lengthMin && bLength !== null && bLength < Number(lengthMin)) return false;
-        if (lengthMax && bLength !== null && bLength > Number(lengthMax)) return false;
-        if (make && !bMake.includes(make.toLowerCase())) return false;
+    const rows = db.prepare(listSql).all(
+      ...boatParams, ...boatParams, ...leadParams, pageSize, offset
+    ) as any[];
 
-        // If filters are set but boat has no data for that field, exclude
-        if (yearMin && bYear === null) return false;
-        if (priceMin && bPrice === null) return false;
-        if (lengthMin && bLength === null) return false;
+    const buyers = rows.map(r => ({
+      id: r.id,
+      firstName: r.first_name,
+      lastName:  r.last_name,
+      email:     r.email,
+      phone:     r.phone,
+      status:    r.status || "other",
+      source:    r.source,
+      notes:     r.notes,
+      boat_make:     r.boat_make    || "",
+      boat_model:    r.boat_model   || "",
+      boat_year:     r.boat_year    || "",
+      boat_length:   r.boat_length  || "",
+      boat_price:    r.boat_price   || "",
+      boat_location: r.boat_location || "",
+      listing_url:   r.listing_url  || "",
+    }));
 
-        return true;
-      });
+    // ── 3. Segment counts — pure SQL aggregation, no JS loops ────────────────
+    const segQuery = (col: string, casts: string) =>
+      db.prepare(`SELECT ${casts} AS n, COUNT(*) AS c FROM boats WHERE ${col} != '' GROUP BY n`).all() as any[];
 
-      // If filters are active and no boats match, skip this lead
-      const hasFilters = yearMin || yearMax || priceMin || priceMax || lengthMin || lengthMax || make;
-      if (hasFilters && matchingBoats.length === 0) continue;
+    // Price buckets via SQL CASE
+    const priceSegs = db.prepare(`
+      SELECT
+        CASE
+          WHEN CAST(REPLACE(REPLACE(REPLACE(price,'$',''),',',''),'USD','') AS REAL) <  500000   THEN 'Under $500K'
+          WHEN CAST(REPLACE(REPLACE(REPLACE(price,'$',''),',',''),'USD','') AS REAL) < 1000000   THEN '$500K – $1M'
+          WHEN CAST(REPLACE(REPLACE(REPLACE(price,'$',''),',',''),'USD','') AS REAL) < 2000000   THEN '$1M – $2M'
+          WHEN CAST(REPLACE(REPLACE(REPLACE(price,'$',''),',',''),'USD','') AS REAL) < 3000000   THEN '$2M – $3M'
+          WHEN CAST(REPLACE(REPLACE(REPLACE(price,'$',''),',',''),'USD','') AS REAL) < 5000000   THEN '$3M – $5M'
+          WHEN CAST(REPLACE(REPLACE(REPLACE(price,'$',''),',',''),'USD','') AS REAL) < 10000000  THEN '$5M – $10M'
+          ELSE '$10M+'
+        END AS label,
+        COUNT(*) AS count
+      FROM boats WHERE price != '' AND price IS NOT NULL
+      GROUP BY label
+    `).all();
 
-      const displayBoats = hasFilters ? matchingBoats : boats;
-      const firstBoat = displayBoats[0] || boats[0];
+    const lengthSegs = db.prepare(`
+      SELECT
+        CASE
+          WHEN CAST(REPLACE(REPLACE(length,'ft',''),"'",'') AS REAL) <  40 THEN 'Under 40'''
+          WHEN CAST(REPLACE(REPLACE(length,'ft',''),"'",'') AS REAL) <  50 THEN '40'' – 50'''
+          WHEN CAST(REPLACE(REPLACE(length,'ft',''),"'",'') AS REAL) <  60 THEN '50'' – 60'''
+          WHEN CAST(REPLACE(REPLACE(length,'ft',''),"'",'') AS REAL) <  80 THEN '60'' – 80'''
+          WHEN CAST(REPLACE(REPLACE(length,'ft',''),"'",'') AS REAL) < 100 THEN '80'' – 100'''
+          WHEN CAST(REPLACE(REPLACE(length,'ft',''),"'",'') AS REAL) < 130 THEN '100'' – 130'''
+          ELSE '130''+'
+        END AS label,
+        COUNT(*) AS count
+      FROM boats WHERE length != '' AND length IS NOT NULL
+      GROUP BY label
+    `).all();
 
-      results.push({
-        id: lead.id,
-        firstName: lead.first_name,
-        lastName: lead.last_name,
-        email: lead.email,
-        phone: lead.phone,
-        status: lead.status || "other",
-        source: lead.source,
-        notes: lead.notes,
-        boat_make: firstBoat?.make || "",
-        boat_model: firstBoat?.model || "",
-        boat_year: firstBoat?.year || "",
-        boat_length: firstBoat?.length || "",
-        boat_price: firstBoat?.price || "",
-        boat_location: firstBoat?.location || "",
-        listing_url: firstBoat?.listing_url || "",
-        boats: displayBoats,
-        matchCount: matchingBoats.length,
-      });
-    }
+    const yearSegs = db.prepare(`
+      SELECT
+        CASE
+          WHEN CAST(year AS INTEGER) < 2000 THEN 'Pre-2000'
+          WHEN CAST(year AS INTEGER) < 2006 THEN '2000 – 2005'
+          WHEN CAST(year AS INTEGER) < 2011 THEN '2005 – 2010'
+          WHEN CAST(year AS INTEGER) < 2016 THEN '2010 – 2015'
+          WHEN CAST(year AS INTEGER) < 2021 THEN '2015 – 2020'
+          WHEN CAST(year AS INTEGER) < 2026 THEN '2020 – 2025'
+          ELSE '2025+'
+        END AS label,
+        COUNT(*) AS count
+      FROM boats WHERE year != '' AND year IS NOT NULL AND CAST(year AS INTEGER) > 1900
+      GROUP BY label
+    `).all();
 
-    // Compute segment counts from ALL leads (not filtered)
-    const allPrices: number[] = [];
-    const allLengths: number[] = [];
-    const allYears: number[] = [];
-    for (const b of allBoats) {
-      const p = parseNum(b.price); if (p !== null && p > 0) allPrices.push(p);
-      const l = parseNum(b.length); if (l !== null && l > 0) allLengths.push(l);
-      const y = parseNum(b.year); if (y !== null && y > 1900) allYears.push(y);
-    }
-
-    const priceSegments = [
-      { label: "Under $500K", min: 0, max: 500000 },
-      { label: "$500K – $1M", min: 500000, max: 1000000 },
-      { label: "$1M – $2M", min: 1000000, max: 2000000 },
-      { label: "$2M – $3M", min: 2000000, max: 3000000 },
-      { label: "$3M – $5M", min: 3000000, max: 5000000 },
-      { label: "$5M – $10M", min: 5000000, max: 10000000 },
-      { label: "$10M+", min: 10000000, max: Infinity },
-    ].map(s => ({ ...s, count: allPrices.filter(p => p >= s.min && p < s.max).length }));
-
-    const lengthSegments = [
-      { label: "Under 40'", min: 0, max: 40 },
-      { label: "40' – 50'", min: 40, max: 50 },
-      { label: "50' – 60'", min: 50, max: 60 },
-      { label: "60' – 80'", min: 60, max: 80 },
-      { label: "80' – 100'", min: 80, max: 100 },
-      { label: "100' – 130'", min: 100, max: 130 },
-      { label: "130'+", min: 130, max: Infinity },
-    ].map(s => ({ ...s, count: allLengths.filter(l => l >= s.min && l < s.max).length }));
-
-    const yearSegments = [
-      { label: "Pre-2000", min: 0, max: 2000 },
-      { label: "2000 – 2005", min: 2000, max: 2006 },
-      { label: "2005 – 2010", min: 2005, max: 2011 },
-      { label: "2010 – 2015", min: 2010, max: 2016 },
-      { label: "2015 – 2020", min: 2015, max: 2021 },
-      { label: "2020 – 2025", min: 2020, max: 2026 },
-      { label: "2025+", min: 2025, max: Infinity },
-    ].map(s => ({ ...s, count: allYears.filter(y => y >= s.min && y < s.max).length }));
-
-    // Top makes
-    const makeCounts = new Map<string, number>();
-    for (const b of allBoats) {
-      const m = (b.make || "").trim();
-      if (m) makeCounts.set(m, (makeCounts.get(m) || 0) + 1);
-    }
-    const topMakes = Array.from(makeCounts.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 20)
-      .map(([name, count]) => ({ name, count }));
+    const topMakes = db.prepare(`
+      SELECT make AS name, COUNT(*) AS count
+      FROM boats WHERE make != '' AND make IS NOT NULL
+      GROUP BY make ORDER BY count DESC LIMIT 20
+    `).all();
 
     return NextResponse.json({
       ok: true,
-      buyers: results,
-      total: results.length,
-      segments: { price: priceSegments, length: lengthSegments, year: yearSegments },
+      buyers,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+      segments: { price: priceSegs, length: lengthSegs, year: yearSegs },
       topMakes,
     });
   } catch (err) {

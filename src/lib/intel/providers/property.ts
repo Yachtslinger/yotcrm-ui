@@ -8,7 +8,7 @@
  * Also attempts to find property records via county assessor web searches.
  */
 
-import { addSource, logAuditEvent, getSourcesByProfile } from "../storage";
+import { addSources, logAuditEvent, getSourcesByProfile } from "../storage";
 import { ddgSearch } from "./ddg";
 
 export type PropertyResult = {
@@ -74,35 +74,23 @@ export async function searchProperty(
       result.property_type = zillowEstimate.type;
     }
 
-    // Store property intelligence
-    addSource({
-      profile_id: profileId, lead_id: leadId,
-      source_type: "property",
+    // Batch property sources — one DB write
+    const now = new Date().toISOString();
+    const sourceBatch: Parameters<typeof addSources>[0] = [];
+
+    sourceBatch.push({
+      profile_id: profileId, lead_id: leadId, source_type: "property",
       source_url: result.search_links.zillow,
       source_label: `Property: ${city}, ${state} ${zip}${result.estimated_value ? ` — Est. ${result.estimated_value}` : ""}`,
       layer: "capital", data_key: "property_search",
-      data_value: JSON.stringify({
-        address: result.address,
-        links: result.search_links,
-        estimated_value: result.estimated_value,
-        property_type: result.property_type,
-      }),
-      confidence: result.estimated_value ? 50 : 30,
-      fetched_at: new Date().toISOString(),
+      data_value: JSON.stringify({ address: result.address, links: result.search_links, estimated_value: result.estimated_value, property_type: result.property_type }),
+      confidence: result.estimated_value ? 50 : 30, fetched_at: now,
     });
 
-    if (result.estimated_value) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "property",
-        source_url: result.search_links.zillow,
-        source_label: `Estimated Home Value: ${result.estimated_value}`,
-        layer: "capital", data_key: "home_value",
-        data_value: result.estimated_value,
-        confidence: 40,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    if (result.estimated_value)
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "property", source_url: result.search_links.zillow, source_label: `Estimated Home Value: ${result.estimated_value}`, layer: "capital", data_key: "home_value", data_value: result.estimated_value, confidence: 40, fetched_at: now });
+
+    addSources(sourceBatch);
 
     logAuditEvent(leadId, "source_fetched", "system", {
       provider: "property",

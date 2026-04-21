@@ -8,6 +8,7 @@ import { initConnectTables } from '@/lib/connect/db';
 import { withGuard } from '@/lib/connect/guard';
 
 export const runtime = 'nodejs';
+export const maxDuration = 60;
 
 async function handleGET(req: NextRequest) {
   try {

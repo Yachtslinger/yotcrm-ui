@@ -259,6 +259,8 @@ export default function BrochuresPage() {
   const [isPocket, setIsPocket] = React.useState(false);
   const [writeupLoading, setWriteupLoading] = React.useState(false);
   const [writeupFields, setWriteupFields] = React.useState<Set<string>>(new Set());
+  const [createMode, setCreateMode] = React.useState<"url" | "pdf">("url");
+  const [pdfDragOver, setPdfDragOver] = React.useState(false);
   const pdfInputRef = React.useRef<HTMLInputElement>(null);
   const gaInputRef  = React.useRef<HTMLInputElement>(null);
 
@@ -1600,7 +1602,7 @@ export default function BrochuresPage() {
       {newSlug && (
         <div className="flex items-center gap-4 flex-wrap rounded-xl px-5 py-3.5 mb-5 text-sm" style={{ background: "#052e16", border: "1px solid #14532d" }}>
           <span style={{ color: "#86efac" }}>✓ Brochure published.</span>
-          <a href={`/brochures/${newSlug}`} target="_blank" rel="noopener noreferrer" className="font-medium" style={{ color: "var(--brass-400)" }}>View brochure →</a>
+          <a href={`/brochures/${newSlug}?internal=1`} target="_blank" rel="noopener noreferrer" className="font-medium" style={{ color: "var(--brass-400)" }}>View brochure →</a>
           <button className="rounded px-3 py-1 text-xs" style={{ background: "transparent", border: "1px solid #14532d", color: "#86efac" }} onClick={() => copyLink(newSlug)}>Copy link</button>
           <button className="ml-auto" style={{ background: "none", border: "none", color: "var(--navy-400)", cursor: "pointer" }} onClick={() => setNewSlug(null)}>✕</button>
         </div>
@@ -1638,48 +1640,119 @@ export default function BrochuresPage() {
 
       {/* Generate card */}
       <div className="rounded-xl p-5 mb-6" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-        <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: "var(--brass-400)" }}>Generate New Brochure</p>
-        <p className="text-xs mb-4" style={{ color: "var(--navy-400)" }}>Paste a listing URL — scraper extracts all available specs and images.</p>
+        <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "var(--brass-400)" }}>Generate New Brochure</p>
+
+        {/* Mode toggle */}
+        <div className="flex gap-1 mb-4 p-1 rounded-lg" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--border)" }}>
+          <button
+            onClick={() => setCreateMode("url")}
+            className="flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-xs font-semibold transition-all"
+            style={{ background: createMode === "url" ? "var(--brass-400)" : "transparent", color: createMode === "url" ? "#fff" : "var(--navy-400)" }}>
+            🔗 Scrape URL
+          </button>
+          <button
+            onClick={() => setCreateMode("pdf")}
+            className="flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-xs font-semibold transition-all"
+            style={{ background: createMode === "pdf" ? "var(--brass-400)" : "transparent", color: createMode === "pdf" ? "#fff" : "var(--navy-400)" }}>
+            📄 Upload PDF
+          </button>
+        </div>
 
         <form onSubmit={handleBuild} className="flex flex-col gap-2 mb-3">
-          {/* URL inputs — dynamic list */}
-          <div className="flex flex-col gap-2 mb-2">
-            {urls.map((u, i) => (
-              <div key={i} className="flex gap-2 items-center">
-                <div className="text-[10px] font-bold uppercase tracking-widest shrink-0 w-10" style={{ color: i === 0 ? "var(--brass-400)" : "var(--navy-400)" }}>URL {i + 1}</div>
-                <input type="url" className="flex-1 rounded-lg text-sm px-3 py-2.5"
-                  style={{ background: "var(--input,#1e293b)", border: "1px solid var(--border)", color: "var(--foreground)", opacity: i === 0 ? 1 : 0.8 }}
-                  placeholder={i === 0 ? "Primary listing URL — Denison, YachtWorld, BoatTrader…" : "Additional URL — cross-reference for more specs & images (optional)"}
-                  value={u} onChange={e => setUrls(prev => prev.map((v, j) => j === i ? e.target.value : v))} />
-                {urls.length > 2 && (
-                  <button onClick={() => setUrls(prev => prev.filter((_, j) => j !== i))}
-                    className="w-7 h-7 flex items-center justify-center rounded-lg text-xs flex-shrink-0"
-                    style={{ background: "rgba(180,0,0,.15)", color: "#f87171" }}>✕</button>
+
+          {/* ── URL mode ── */}
+          {createMode === "url" && (
+            <>
+              <p className="text-xs mb-2" style={{ color: "var(--navy-400)" }}>Paste a listing URL — scraper extracts all available specs and images.</p>
+              <div className="flex flex-col gap-2 mb-2">
+                {urls.map((u, i) => (
+                  <div key={i} className="flex gap-2 items-center">
+                    <div className="text-[10px] font-bold uppercase tracking-widest shrink-0 w-10" style={{ color: i === 0 ? "var(--brass-400)" : "var(--navy-400)" }}>URL {i + 1}</div>
+                    <input type="url" className="flex-1 rounded-lg text-sm px-3 py-2.5"
+                      style={{ background: "var(--input,#1e293b)", border: "1px solid var(--border)", color: "var(--foreground)", opacity: i === 0 ? 1 : 0.8 }}
+                      placeholder={i === 0 ? "Primary listing URL — Denison, YachtWorld, BoatTrader…" : "Additional URL — cross-reference for more specs & images (optional)"}
+                      value={u} onChange={e => setUrls(prev => prev.map((v, j) => j === i ? e.target.value : v))} />
+                    {urls.length > 2 && (
+                      <button type="button" onClick={() => setUrls(prev => prev.filter((_, j) => j !== i))}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg text-xs flex-shrink-0"
+                        style={{ background: "rgba(180,0,0,.15)", color: "#f87171" }}>✕</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <button type="button" onClick={() => setUrls(prev => [...prev, ""])}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg mb-1 transition-all"
+                style={{ background: "rgba(184,147,58,.08)", border: "1px solid rgba(184,147,58,.25)", color: "var(--brass-400)" }}>
+                <Plus className="w-3 h-3" /> Add another URL
+              </button>
+              <p className="text-xs mt-1" style={{ color: "var(--navy-500)" }}>
+                All sources are merged — URL 1 wins for text fields, others fill gaps.
+              </p>
+            </>
+          )}
+
+          {/* ── PDF mode ── */}
+          {createMode === "pdf" && (
+            <>
+              <p className="text-xs mb-3" style={{ color: "var(--navy-400)" }}>Upload a broker brochure or spec sheet PDF — specs and images are extracted automatically.</p>
+              <div
+                onClick={() => pdfInputRef.current?.click()}
+                onDragOver={e => { e.preventDefault(); setPdfDragOver(true); }}
+                onDragLeave={() => setPdfDragOver(false)}
+                onDrop={e => {
+                  e.preventDefault(); setPdfDragOver(false);
+                  const file = e.dataTransfer.files?.[0];
+                  if (file && file.type === "application/pdf") { setPendingPdf(file); handlePdfSelect(file); }
+                  else showToast("Please drop a PDF file", "error");
+                }}
+                className="flex flex-col items-center justify-center gap-3 rounded-xl cursor-pointer transition-all"
+                style={{
+                  border: `2px dashed ${pdfDragOver ? "var(--brass-400)" : pendingPdf ? "#22c55e" : "var(--border)"}`,
+                  background: pdfDragOver ? "rgba(184,147,58,0.08)" : pendingPdf ? "rgba(34,197,94,0.06)" : "rgba(255,255,255,0.02)",
+                  padding: "32px 20px",
+                  minHeight: 140,
+                }}>
+                {pendingPdf ? (
+                  <>
+                    <div style={{ fontSize: 32 }}>✅</div>
+                    <div className="text-sm font-semibold" style={{ color: "#22c55e" }}>{pdfFileName}</div>
+                    <button type="button"
+                      onClick={e => { e.stopPropagation(); setPendingPdf(null); setPdfFileName(""); }}
+                      className="text-xs px-3 py-1 rounded-lg mt-1"
+                      style={{ background: "rgba(180,0,0,.15)", color: "#f87171", border: "1px solid rgba(180,0,0,.2)" }}>
+                      Remove PDF
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 36 }}>📄</div>
+                    <div className="text-sm font-semibold" style={{ color: "var(--foreground)" }}>Drop PDF here or click to browse</div>
+                    <div className="text-xs" style={{ color: "var(--navy-400)" }}>Builder brochures, spec sheets, listing PDFs</div>
+                  </>
                 )}
               </div>
-            ))}
-          </div>
-          <button onClick={() => setUrls(prev => [...prev, ""])}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg mb-3 transition-all"
-            style={{ background: "rgba(184,147,58,.08)", border: "1px solid rgba(184,147,58,.25)", color: "var(--brass-400)" }}>
-            <Plus className="w-3 h-3" /> Add another URL
-          </button>
-
+              <input ref={pdfInputRef} type="file" accept=".pdf,application/pdf" className="hidden"
+                onChange={e => {
+                  const file = e.target.files?.[0];
+                  if (file) { setPendingPdf(file); handlePdfSelect(file); }
+                  e.target.value = "";
+                }} />
+            </>
+          )}
 
           <button type="submit"
-            className="flex items-center justify-center gap-2 w-full py-3 rounded-xl text-sm font-bold mt-1 transition-all"
-            style={{ background: hasAnySources ? "var(--brass-400)" : "var(--border)", color: hasAnySources ? "#fff" : "var(--navy-400)",
-              cursor: hasAnySources ? "pointer" : "not-allowed" }}
+            className="flex items-center justify-center gap-2 w-full py-3 rounded-xl text-sm font-bold mt-2 transition-all"
+            style={{
+              background: hasAnySources ? "var(--brass-400)" : "var(--border)",
+              color: hasAnySources ? "#fff" : "var(--navy-400)",
+              cursor: hasAnySources ? "pointer" : "not-allowed"
+            }}
             disabled={!hasAnySources || step === "scraping"}>
             {step === "scraping"
               ? <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />{buildStatus || "Building…"}</>
               : <><Plus className="w-4 h-4" />Build Brochure</>}
           </button>
         </form>
-
-        <p className="text-xs" style={{ color: "var(--navy-400)" }}>
-          All sources are merged — URL 1 wins for text fields, others fill any gaps. More sources = more complete brochure.
-        </p>
       </div>
 
       {/* ── Paste import for Cloudflare-blocked sites (e.g. YachtWorld) ── */}
@@ -1771,7 +1844,7 @@ export default function BrochuresPage() {
                     </div>
                   </div>
                   <div className="flex gap-2 mt-4 pt-4 flex-wrap" style={{ borderTop: "1px solid var(--border)" }}>
-                    <a href={isDb ? `/brochures/${b.slug}` : `/api/brochures/${b.slug}`} target="_blank" rel="noopener noreferrer"
+                    <a href={isDb ? `/brochures/${b.slug}?internal=1` : `/api/brochures/${b.slug}`} target="_blank" rel="noopener noreferrer"
                       className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "var(--brass-400)", color: "#fff" }}>
                       <ExternalLink className="w-4 h-4" /> View
                     </a>

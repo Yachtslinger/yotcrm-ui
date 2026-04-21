@@ -12,7 +12,7 @@
  * 4. Wikipedia with content validation
  */
 
-import { addSource, logAuditEvent } from "../storage";
+import { addSources, logAuditEvent } from "../storage";
 import { type IdentityAnchors, validateAgainstAnchors } from "../validation";
 import { ddgSearch } from "./ddg";
 
@@ -69,80 +69,44 @@ export async function discoverSocial(
       searchNews(fullName, anchors),
     ]);
 
-    // Collect found profiles
-    const probes = [
-      { result: linkedin },
-      { result: facebook },
-    ];
+    // Batch all social sources — one DB write
+    const now = new Date().toISOString();
+    const sourceBatch: Parameters<typeof addSources>[0] = [];
 
     for (const probe of probes) {
       if (probe.result.status === "fulfilled" && probe.result.value) {
         const p = probe.result.value;
         result.profiles.push(p);
         if (p.found) {
-          // Confidence based on whether anchors matched
           const conf = p.bio?.includes("✓anchor") ? 65 : 30;
-          addSource({
-            profile_id: profileId, lead_id: leadId,
-            source_type: "social", source_url: p.url,
-            source_label: `${p.platform}: ${p.display_name || "Profile found"}`,
-            layer: "identity",
-            data_key: `social_${p.platform.toLowerCase().replace(/[^a-z]/g, "")}`,
-            data_value: JSON.stringify({ url: p.url, display_name: p.display_name }),
-            confidence: conf,
-            fetched_at: new Date().toISOString(),
-          });
+          sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "social", source_url: p.url, source_label: `${p.platform}: ${p.display_name || "Profile found"}`, layer: "identity", data_key: `social_${p.platform.toLowerCase().replace(/[^a-z]/g, "")}`, data_value: JSON.stringify({ url: p.url, display_name: p.display_name }), confidence: conf, fetched_at: now });
         }
       }
     }
 
-    // Wikipedia
     if (wiki.status === "fulfilled" && wiki.value) {
       result.wikipedia_summary = wiki.value;
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "social",
-        source_url: `https://en.wikipedia.org/wiki/${encodeURIComponent(fullName.replace(/ /g, "_"))}`,
-        source_label: `Wikipedia: Notable person`,
-        layer: "identity", data_key: "wikipedia",
-        data_value: wiki.value.substring(0, 500),
-        confidence: 60, fetched_at: new Date().toISOString(),
-      });
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "social", source_url: `https://en.wikipedia.org/wiki/${encodeURIComponent(fullName.replace(/ /g, "_"))}`, source_label: `Wikipedia: Notable person`, layer: "identity", data_key: "wikipedia", data_value: wiki.value.substring(0, 500), confidence: 60, fetched_at: now });
     }
 
-    // News mentions — validated against anchors
     if (news.status === "fulfilled" && news.value && news.value.length > 0) {
       result.news_mentions = news.value;
-      // Company core word for fuzzy match (e.g. "abel" from "abel construction")
       const newsCompanyCore = (anchors?.employer || anchors?.company || "").toLowerCase().split(/\s+/)[0] || "";
       const newsEmailDom = (anchors?.emailDomain || "").toLowerCase();
-      
       for (const n of news.value.slice(0, 5)) {
-        // Validate news result against anchors
-        let conf = 15; // low default — news often matches wrong person
+        let conf = 15;
         const newsText = `${n.title} ${n.snippet} ${n.source}`.toLowerCase();
-        
-        // Accept if mentions company name or domain (Abel Motorsports IS Bill's company)
-        if (newsCompanyCore.length > 3 && newsText.includes(newsCompanyCore)) {
-          conf = 55;
-        } else if (newsEmailDom && newsText.includes(newsEmailDom)) {
-          conf = 55;
-        } else if (anchors) {
+        if (newsCompanyCore.length > 3 && newsText.includes(newsCompanyCore)) conf = 55;
+        else if (newsEmailDom && newsText.includes(newsEmailDom)) conf = 55;
+        else if (anchors) {
           const v = validateAgainstAnchors(`${n.title} ${n.snippet} ${n.source}`, anchors);
-          if (v.accepted) conf = 55;
-          else if (v.flagged) conf = 15;
-          else conf = 5; // no anchor match → probably wrong person
+          conf = v.accepted ? 55 : v.flagged ? 15 : 5;
         }
-        addSource({
-          profile_id: profileId, lead_id: leadId,
-          source_type: "social", source_url: n.url,
-          source_label: `News: ${n.title.substring(0, 100)}`,
-          layer: "identity", data_key: "news_mention",
-          data_value: JSON.stringify({ title: n.title, source: n.source, snippet: n.snippet }),
-          confidence: conf, fetched_at: new Date().toISOString(),
-        });
+        sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "social", source_url: n.url, source_label: `News: ${n.title.substring(0, 100)}`, layer: "identity", data_key: "news_mention", data_value: JSON.stringify({ title: n.title, source: n.source, snippet: n.snippet }), confidence: conf, fetched_at: now });
       }
     }
+
+    addSources(sourceBatch);
 
     logAuditEvent(leadId, "source_fetched", "system", {
       provider: "social",

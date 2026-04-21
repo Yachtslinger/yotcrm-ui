@@ -5,7 +5,7 @@
  * API docs: https://efts.sec.gov/LATEST/search-index?q=...
  */
 
-import { addSource, logAuditEvent } from "../storage";
+import { addSources, logAuditEvent } from "../storage";
 
 const EDGAR_SEARCH_URL = "https://efts.sec.gov/LATEST/search-index";
 const EDGAR_COMPANY_URL = "https://efts.sec.gov/LATEST/search-index";
@@ -59,37 +59,17 @@ export async function searchEDGAR(
       }
     }
 
-    // Store enrichment sources
-    for (const role of result.roles_detected) {
-      addSource({
-        profile_id: profileId,
-        lead_id: leadId,
-        source_type: "sec_edgar",
-        source_url: role.source_url,
-        source_label: `SEC: ${role.role} at ${role.company}`,
-        layer: "identity",
-        data_key: "corporate_role",
-        data_value: `${role.role} — ${role.company}`,
-        confidence: 85,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    // Batch all EDGAR sources — one DB write
+    const now = new Date().toISOString();
+    const sourceBatch: Parameters<typeof addSources>[0] = [];
 
-    // If company filings found, that's a business ownership signal
-    if (companyName && result.filings.some(f => f.company.toLowerCase().includes(companyName.toLowerCase().slice(0, 10)))) {
-      addSource({
-        profile_id: profileId,
-        lead_id: leadId,
-        source_type: "sec_edgar",
-        source_url: `https://www.sec.gov/cgi-bin/browse-edgar?company=${encodeURIComponent(companyName)}&CIK=&type=&dateb=&owner=include&count=10&search_text=&action=getcompany`,
-        source_label: `SEC: ${companyName} has SEC filings`,
-        layer: "identity",
-        data_key: "business_ownership",
-        data_value: JSON.stringify({ company: companyName, sec_registered: true }),
-        confidence: 90,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    for (const role of result.roles_detected)
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "sec_edgar", source_url: role.source_url, source_label: `SEC: ${role.role} at ${role.company}`, layer: "identity", data_key: "corporate_role", data_value: `${role.role} — ${role.company}`, confidence: 85, fetched_at: now });
+
+    if (companyName && result.filings.some(f => f.company.toLowerCase().includes(companyName.toLowerCase().slice(0, 10))))
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "sec_edgar", source_url: `https://www.sec.gov/cgi-bin/browse-edgar?company=${encodeURIComponent(companyName)}&CIK=&type=&dateb=&owner=include&count=10&search_text=&action=getcompany`, source_label: `SEC: ${companyName} has SEC filings`, layer: "identity", data_key: "business_ownership", data_value: JSON.stringify({ company: companyName, sec_registered: true }), confidence: 90, fetched_at: now });
+
+    addSources(sourceBatch);
 
     logAuditEvent(leadId, "source_fetched", "system", {
       provider: "sec_edgar",

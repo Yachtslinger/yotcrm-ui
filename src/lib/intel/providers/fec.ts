@@ -9,7 +9,7 @@
  * We use the bulk data endpoint that doesn't require a key.
  */
 
-import { addSource, logAuditEvent } from "../storage";
+import { addSources, logAuditEvent } from "../storage";
 import { type IdentityAnchors, validateFECRecord } from "../validation";
 
 // Free FEC API key (demo key works, rate-limited)
@@ -86,59 +86,27 @@ export async function searchFEC(
       processResults(data, result, anchors);
     }
 
-    // Store discovered data as enrichment sources
-    if (result.employer) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "fec", source_url: `https://www.fec.gov/data/receipts/individual-contributions/?contributor_name=${encodeURIComponent(fullName)}`,
-        source_label: `FEC: Employer — ${result.employer}`,
-        layer: "identity", data_key: "employer",
-        data_value: result.employer, confidence: 85,
-        fetched_at: new Date().toISOString(),
-      });
-    }
-    if (result.occupation) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "fec", source_url: `https://www.fec.gov/data/receipts/individual-contributions/?contributor_name=${encodeURIComponent(fullName)}`,
-        source_label: `FEC: Occupation — ${result.occupation}`,
-        layer: "identity", data_key: "occupation",
-        data_value: result.occupation, confidence: 85,
-        fetched_at: new Date().toISOString(),
-      });
-    }
-    if (result.address_city) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "fec", source_url: `https://www.fec.gov/data/receipts/individual-contributions/?contributor_name=${encodeURIComponent(fullName)}`,
-        source_label: `FEC: Location — ${result.address_city}, ${result.address_state} ${result.address_zip}`,
-        layer: "identity", data_key: "location",
-        data_value: JSON.stringify({ city: result.address_city, state: result.address_state, zip: result.address_zip }),
-        confidence: 85, fetched_at: new Date().toISOString(),
-      });
-    }
-    if (result.total_donated > 0) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "fec", source_url: `https://www.fec.gov/data/receipts/individual-contributions/?contributor_name=${encodeURIComponent(fullName)}`,
-        source_label: `FEC: $${result.total_donated.toLocaleString()} total political donations`,
-        layer: "capital", data_key: "political_donations",
-        data_value: JSON.stringify({ total: result.total_donated, count: result.donations.length }),
-        confidence: 95, fetched_at: new Date().toISOString(),
-      });
-    }
+    // Batch all FEC sources in one DB write
+    const now = new Date().toISOString();
+    const fecUrl = `https://www.fec.gov/data/receipts/individual-contributions/?contributor_name=${encodeURIComponent(fullName)}`;
+    const sourceBatch: Parameters<typeof addSources>[0] = [];
 
-    // Store individual top donations for detail
-    for (const d of result.donations.slice(0, 5)) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "fec", source_url: d.source_url,
-        source_label: `FEC: $${d.contribution_amount.toLocaleString()} to ${d.committee_name} (${d.contribution_date})`,
-        layer: "capital", data_key: "donation_detail",
-        data_value: JSON.stringify(d), confidence: 95,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    if (result.employer)
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "fec", source_url: fecUrl, source_label: `FEC: Employer — ${result.employer}`, layer: "identity", data_key: "employer", data_value: result.employer, confidence: 85, fetched_at: now });
+
+    if (result.occupation)
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "fec", source_url: fecUrl, source_label: `FEC: Occupation — ${result.occupation}`, layer: "identity", data_key: "occupation", data_value: result.occupation, confidence: 85, fetched_at: now });
+
+    if (result.address_city)
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "fec", source_url: fecUrl, source_label: `FEC: Location — ${result.address_city}, ${result.address_state} ${result.address_zip}`, layer: "identity", data_key: "location", data_value: JSON.stringify({ city: result.address_city, state: result.address_state, zip: result.address_zip }), confidence: 85, fetched_at: now });
+
+    if (result.total_donated > 0)
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "fec", source_url: fecUrl, source_label: `FEC: $${result.total_donated.toLocaleString()} total political donations`, layer: "capital", data_key: "political_donations", data_value: JSON.stringify({ total: result.total_donated, count: result.donations.length }), confidence: 95, fetched_at: now });
+
+    for (const d of result.donations.slice(0, 5))
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "fec", source_url: d.source_url, source_label: `FEC: $${d.contribution_amount.toLocaleString()} to ${d.committee_name} (${d.contribution_date})`, layer: "capital", data_key: "donation_detail", data_value: JSON.stringify(d), confidence: 95, fetched_at: now });
+
+    addSources(sourceBatch);
 
     logAuditEvent(leadId, "source_fetched", "system", {
       provider: "fec",

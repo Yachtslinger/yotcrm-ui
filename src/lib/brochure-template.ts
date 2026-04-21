@@ -126,13 +126,13 @@ nav{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:cen
 @keyframes heroZoom{from{transform:scale(1.08);}to{transform:scale(1);}}
 .hero-overlay{position:absolute;inset:0;background:linear-gradient(105deg,rgba(5,13,26,.75) 0%,rgba(5,13,26,.42) 50%,rgba(5,13,26,.65) 100%);}
 .hero-content{position:relative;z-index:2;display:flex;flex-direction:column;justify-content:flex-end;padding:0 0 80px 80px;flex:1;}
-.hero-eyebrow{font-family:'Cinzel',serif;font-size:10px;letter-spacing:.28em;color:var(--gold-warm);text-transform:uppercase;margin-bottom:18px;animation:fadeUp .9s .3s both;}
+.hero-eyebrow{font-family:'Cinzel',serif;font-size:14px;letter-spacing:.22em;color:var(--gold-warm);text-transform:uppercase;margin-bottom:18px;animation:fadeUp .9s .3s both;}
 .hero-title{font-family:'Cormorant Garamond',serif;font-size:clamp(56px,8vw,106px);font-weight:300;line-height:.92;color:var(--white);animation:fadeUp .9s .5s both;}
 .hero-title em{font-style:italic;color:var(--gold-pale);}
-.hero-subtitle{margin-top:24px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:.22em;color:var(--cream-dim);text-transform:uppercase;animation:fadeUp .9s .7s both;}
+.hero-subtitle{margin-top:24px;font-family:'Cinzel',serif;font-size:15px;letter-spacing:.18em;color:var(--cream-dim);text-transform:uppercase;animation:fadeUp .9s .7s both;}
 .hero-scroll{margin-top:48px;display:flex;align-items:center;gap:14px;animation:fadeUp .9s .9s both;}
 .scroll-line{width:48px;height:1px;background:var(--gold-warm);}
-.scroll-label{font-family:'Cinzel',serif;font-size:9px;letter-spacing:.22em;color:var(--gold-warm);text-transform:uppercase;}
+.scroll-label{font-family:'Cinzel',serif;font-size:13px;letter-spacing:.18em;color:var(--gold-warm);text-transform:uppercase;}
 .hero-stats{position:relative;z-index:2;width:255px;background:rgba(9,22,40,.85);backdrop-filter:blur(10px);border-left:1px solid var(--divider);display:flex;flex-direction:column;justify-content:center;padding:48px 34px;animation:fadeIn 1.1s .4s both;}
 .stat-item{padding:18px 0;border-bottom:1px solid var(--divider);}
 .stat-item:last-child{border-bottom:none;}
@@ -220,7 +220,6 @@ section{padding:100px 0;}
 footer{background:var(--navy-deep);border-top:1px solid var(--divider);padding:32px 60px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;}
 .footer-brand{font-family:'Cinzel',serif;font-size:12px;letter-spacing:.22em;color:var(--gold-warm);text-transform:uppercase;}
 .footer-note{font-size:12px;font-weight:300;color:var(--muted);}
-.footer-denison{font-family:'Cinzel',serif;font-size:10px;letter-spacing:.15em;color:var(--muted);}
 .reveal{opacity:0;transform:translateY(30px);transition:opacity .7s ease,transform .7s ease;}
 .reveal.visible{opacity:1;transform:translateY(0);}
 .custom-intro{background:var(--navy-deep);border-bottom:1px solid var(--divider);}
@@ -443,7 +442,6 @@ ${perfItems.length >= 2 ? `
 <footer>
   <span class="footer-brand">${esc(vessel.name)} · ${esc(vessel.builder || "")}</span>
   <span class="footer-note">${[vessel.loa, vessel.hullMaterial, vessel.year ? `${vessel.year} Delivery` : ""].filter(Boolean).join(" · ")}</span>
-  <span class="footer-denison">Denison Yachting · denisonyachtsales.com</span>
 </footer>
 <script>
 const _gd=${JSON.stringify(galleryData)};

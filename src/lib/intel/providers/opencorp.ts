@@ -5,7 +5,7 @@
  * API docs: https://api.opencorporates.com/documentation
  */
 
-import { addSource, logAuditEvent } from "../storage";
+import { addSources, logAuditEvent } from "../storage";
 
 const OC_BASE = "https://api.opencorporates.com/v0.4";
 
@@ -48,68 +48,28 @@ export async function searchOpenCorporates(
       result.companies.push(...companies);
     }
 
-    // Store officer role matches
-    for (const officer of result.officer_matches) {
-      addSource({
-        profile_id: profileId,
-        lead_id: leadId,
-        source_type: "opencorporates",
-        source_url: officer.url,
-        source_label: `OpenCorp: ${officer.role} at ${officer.company_name}`,
-        layer: "identity",
-        data_key: "corporate_role",
-        data_value: `${officer.role} — ${officer.company_name}`,
-        confidence: 70,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    // Batch all OpenCorporates sources — one DB write
+    const now = new Date().toISOString();
+    const sourceBatch: Parameters<typeof addSources>[0] = [];
 
-    // Store company ownership signals
-    for (const company of result.companies) {
-      addSource({
-        profile_id: profileId,
-        lead_id: leadId,
-        source_type: "opencorporates",
-        source_url: company.url,
-        source_label: `OpenCorp: ${company.name} (${company.jurisdiction})`,
-        layer: "identity",
-        data_key: "business_ownership",
-        data_value: JSON.stringify({
-          company: company.name,
-          jurisdiction: company.jurisdiction,
-          status: company.status,
-          incorporated: company.incorporation_date,
-        }),
-        confidence: 75,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    for (const officer of result.officer_matches)
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "opencorporates", source_url: officer.url, source_label: `OpenCorp: ${officer.role} at ${officer.company_name}`, layer: "identity", data_key: "corporate_role", data_value: `${officer.role} — ${officer.company_name}`, confidence: 70, fetched_at: now });
 
-    // Calculate years active from oldest incorporation
+    for (const company of result.companies)
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "opencorporates", source_url: company.url, source_label: `OpenCorp: ${company.name} (${company.jurisdiction})`, layer: "identity", data_key: "business_ownership", data_value: JSON.stringify({ company: company.name, jurisdiction: company.jurisdiction, status: company.status, incorporated: company.incorporation_date }), confidence: 75, fetched_at: now });
+
     if (result.companies.length > 0) {
       const oldest = result.companies
         .filter(c => c.incorporation_date)
         .sort((a, b) => a.incorporation_date.localeCompare(b.incorporation_date))[0];
       if (oldest) {
-        const years = Math.floor(
-          (Date.now() - new Date(oldest.incorporation_date).getTime()) / (365.25 * 24 * 60 * 60 * 1000)
-        );
-        if (years > 0) {
-          addSource({
-            profile_id: profileId,
-            lead_id: leadId,
-            source_type: "opencorporates",
-            source_url: oldest.url,
-            source_label: `Business history: ${years}+ years`,
-            layer: "identity",
-            data_key: "years_active",
-            data_value: String(years),
-            confidence: 70,
-            fetched_at: new Date().toISOString(),
-          });
-        }
+        const years = Math.floor((Date.now() - new Date(oldest.incorporation_date).getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+        if (years > 0)
+          sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "opencorporates", source_url: oldest.url, source_label: `Business history: ${years}+ years`, layer: "identity", data_key: "years_active", data_value: String(years), confidence: 70, fetched_at: now });
       }
     }
+
+    addSources(sourceBatch);
 
     logAuditEvent(leadId, "source_fetched", "system", {
       provider: "opencorporates",

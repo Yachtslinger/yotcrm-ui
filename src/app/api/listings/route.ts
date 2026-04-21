@@ -4,6 +4,8 @@ import {
 } from "@/lib/listings/storage";
 import { resolveScrapeProvider } from "@/lib/campaign/providers";
 
+export const runtime = "nodejs";
+
 /**
  * Auto-scrape: if listing has URLs but no hero image, scrape the first
  * URL and backfill hero_image + any missing specs.

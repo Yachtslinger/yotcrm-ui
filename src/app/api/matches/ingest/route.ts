@@ -3,6 +3,9 @@ import { createBatch, insertListing, runMatchesForBatch, generateMatchTodos, upd
 import { parseBoatWizardEmail } from "@/lib/matches/parser";
 import { parseBoatsGroupEmail } from "@/lib/matches/boatsgroup-parser";
 
+export const runtime = "nodejs";
+export const maxDuration = 120;
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();

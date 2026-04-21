@@ -14,7 +14,7 @@
  * - Charity/community involvement
  */
 
-import { addSource, logAuditEvent } from "../storage";
+import { addSources, logAuditEvent } from "../storage";
 import { type IdentityAnchors, validateAgainstAnchors } from "../validation";
 
 export type CompanySiteResult = {
@@ -358,73 +358,27 @@ export async function scrapeCompanySite(
       if (titleMatch) result.company_info.name = titleMatch[1].trim().substring(0, 100);
     }
 
-    // ── Store enrichment sources ──
+    // Batch all company site sources — one DB open instead of N
+    const now = new Date().toISOString();
+    const siteUrl = `https://${domain}`;
+    const sourceBatch: Parameters<typeof addSources>[0] = [];
 
-    // Leadership (high confidence — from the company's own website)
-    for (const leader of result.leadership) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "company_website", source_url: `https://${domain}`,
-        source_label: `✓ ${leader.title}: ${leader.name}${leader.relation ? ` (${leader.relation})` : ""}`,
-        layer: "identity", data_key: "web_title",
-        data_value: JSON.stringify(leader),
-        confidence: leader.name.toLowerCase().includes(lastName.toLowerCase()) ? 80 : 60,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    for (const leader of result.leadership)
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "company_website", source_url: siteUrl, source_label: `✓ ${leader.title}: ${leader.name}${leader.relation ? ` (${leader.relation})` : ""}`, layer: "identity", data_key: "web_title", data_value: JSON.stringify(leader), confidence: leader.name.toLowerCase().includes(lastName.toLowerCase()) ? 80 : 60, fetched_at: now });
 
-    // Family members
-    for (const fam of result.family_members) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "company_website", source_url: `https://${domain}`,
-        source_label: `✓ Family: ${fam}`,
-        layer: "identity", data_key: "relative",
-        data_value: fam,
-        confidence: 75, // company's own site = high trust
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    for (const fam of result.family_members)
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "company_website", source_url: siteUrl, source_label: `✓ Family: ${fam}`, layer: "identity", data_key: "relative", data_value: fam, confidence: 75, fetched_at: now });
 
-    // Company info
-    if (result.company_info.founded) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "company_website", source_url: `https://${domain}`,
-        source_label: `✓ Founded: ${result.company_info.founded}`,
-        layer: "identity", data_key: "years_active",
-        data_value: JSON.stringify({ founded: result.company_info.founded,
-          years: new Date().getFullYear() - parseInt(result.company_info.founded) }),
-        confidence: 85,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    if (result.company_info.founded)
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "company_website", source_url: siteUrl, source_label: `✓ Founded: ${result.company_info.founded}`, layer: "identity", data_key: "years_active", data_value: JSON.stringify({ founded: result.company_info.founded, years: new Date().getFullYear() - parseInt(result.company_info.founded) }), confidence: 85, fetched_at: now });
 
-    // Office locations
-    for (const office of result.company_info.offices) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "company_website", source_url: `https://${domain}`,
-        source_label: `✓ Office: ${office}`,
-        layer: "identity", data_key: "secondary_address",
-        data_value: office,
-        confidence: 70,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    for (const office of result.company_info.offices)
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "company_website", source_url: siteUrl, source_label: `✓ Office: ${office}`, layer: "identity", data_key: "secondary_address", data_value: office, confidence: 70, fetched_at: now });
 
-    // Community involvement
-    for (const item of result.community) {
-      addSource({
-        profile_id: profileId, lead_id: leadId,
-        source_type: "company_website", source_url: `https://${domain}`,
-        source_label: `✓ Community: ${item}`,
-        layer: "capital", data_key: "charity_board",
-        data_value: item,
-        confidence: 65,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    for (const item of result.community)
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "company_website", source_url: siteUrl, source_label: `✓ Community: ${item}`, layer: "capital", data_key: "charity_board", data_value: item, confidence: 65, fetched_at: now });
+
+    addSources(sourceBatch);
 
     logAuditEvent(leadId, "source_fetched", "system", {
       provider: "company_website", domain,

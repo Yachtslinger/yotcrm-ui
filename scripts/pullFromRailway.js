@@ -66,7 +66,10 @@ function upsertRows(db, table, rows) {
         db.prepare(`INSERT OR IGNORE INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})`).run(...values);
         inserted++;
       } catch (e) {
-        console.warn(`[PULL] Skipped ${table} row id=${row.id}: ${e.message}`);
+        // Log non-UNIQUE errors, silently skip UNIQUE violations
+        if (!e.message?.includes('UNIQUE constraint')) {
+          console.warn(`[PULL] Skipped ${table} row id=${row.id}: ${e.message}`);
+        }
       }
     }
   }

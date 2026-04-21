@@ -1,16 +1,10 @@
-/**
- * Background Report PDF Generator
- * Generates a professional PDF dossier for any enriched lead.
- * GET /api/intel/report?lead_id=5&format=html|json
- */
 import { NextRequest, NextResponse } from "next/server";
 import Database from "better-sqlite3";
-import path from "path";
 import { getSourcesByProfile, getProfileByLeadId } from "@/lib/intel/storage";
 
-const DB_PATH = process.env.NODE_ENV === "production"
-  ? "/tmp/yotcrm.db"
-  : path.join(process.cwd(), "data", "yotcrm.db");
+export const runtime = "nodejs";
+
+const DB_PATH = process.env.DB_PATH || "/app/data/yotcrm.db";
 
 export async function GET(req: NextRequest) {
   try {

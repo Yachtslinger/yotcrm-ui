@@ -4,7 +4,7 @@
  * Uses the free OFAC search API from sanctionssearch.ofac.treas.gov
  */
 
-import { addSource, logAuditEvent } from "../storage";
+import { addSources, logAuditEvent } from "../storage";
 
 const OFAC_SEARCH_URL = "https://search.ofac-api.com/v3";
 
@@ -41,37 +41,18 @@ export async function checkOFAC(
 
     result.matched = result.matches.length > 0;
 
-    // Store results as enrichment sources
+    // Batch OFAC sources — one DB write
+    const now = new Date().toISOString();
+    const sourceBatch: Parameters<typeof addSources>[0] = [];
+
     if (result.matched) {
-      for (const match of result.matches) {
-        addSource({
-          profile_id: profileId,
-          lead_id: leadId,
-          source_type: "ofac",
-          source_url: match.source_url,
-          source_label: `OFAC SDN: ${match.name} (${match.program})`,
-          layer: "risk",
-          data_key: "sanctions_flag",
-          data_value: "true",
-          confidence: match.score,
-          fetched_at: new Date().toISOString(),
-        });
-      }
+      for (const match of result.matches)
+        sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "ofac", source_url: match.source_url, source_label: `OFAC SDN: ${match.name} (${match.program})`, layer: "risk", data_key: "sanctions_flag", data_value: "true", confidence: match.score, fetched_at: now });
     } else {
-      // Log a clean result too — absence of sanctions is valuable
-      addSource({
-        profile_id: profileId,
-        lead_id: leadId,
-        source_type: "ofac",
-        source_url: "https://sanctionssearch.ofac.treas.gov/",
-        source_label: "OFAC SDN: No matches",
-        layer: "risk",
-        data_key: "sanctions_flag",
-        data_value: "false",
-        confidence: 90,
-        fetched_at: new Date().toISOString(),
-      });
+      sourceBatch.push({ profile_id: profileId, lead_id: leadId, source_type: "ofac", source_url: "https://sanctionssearch.ofac.treas.gov/", source_label: "OFAC SDN: No matches", layer: "risk", data_key: "sanctions_flag", data_value: "false", confidence: 90, fetched_at: now });
     }
+
+    addSources(sourceBatch);
 
     logAuditEvent(leadId, "source_fetched", "system", {
       provider: "ofac",

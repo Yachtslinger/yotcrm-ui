@@ -4,20 +4,35 @@ import Database from "better-sqlite3";
 export const runtime = "nodejs";
 const DB_PATH = process.env.DB_PATH || "/app/data/yotcrm.db";
 
+// One-time migration guard — safe columns for bot queue
+let _botColumnsReady = false;
+function ensureBotColumns(db: Database.Database) {
+  if (_botColumnsReady) return;
+  try { db.exec("ALTER TABLE todos ADD COLUMN bot_status TEXT DEFAULT 'pending'"); } catch {}
+  try { db.exec("ALTER TABLE todos ADD COLUMN sent_at TEXT"); } catch {}
+  try { db.exec("ALTER TABLE todos ADD COLUMN send_error TEXT"); } catch {}
+  _botColumnsReady = true;
+}
+
+const VALID_STATUSES = new Set(["pending", "approved", "sent", "error", "all"]);
+
 // ── GET: fetch bot queue with optional status filter ──────────────────────────
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const status = searchParams.get("status") || "pending"; // pending | approved | sent | all
-    const db = new Database(DB_PATH);
-    try {
-      // Safe migrations
-      try { db.exec("ALTER TABLE todos ADD COLUMN bot_status TEXT DEFAULT 'pending'"); } catch {}
-      try { db.exec("ALTER TABLE todos ADD COLUMN sent_at TEXT"); } catch {}
-      try { db.exec("ALTER TABLE todos ADD COLUMN send_error TEXT"); } catch {}
+    const rawStatus = searchParams.get("status") || "pending";
+    // Whitelist to prevent SQL injection
+    const status = VALID_STATUSES.has(rawStatus) ? rawStatus : "pending";
 
-      let where = "t.queue = 'bot' AND t.completed = 0";
-      if (status !== "all") where += ` AND (t.bot_status = '${status}' OR t.bot_status IS NULL)`;
+    const db = new Database(DB_PATH, { readonly: false });
+    try {
+      ensureBotColumns(db);
+
+      // Use parameterized query — status is whitelisted above but be explicit
+      const statusClause = status === "all"
+        ? ""
+        : " AND (t.bot_status = ? OR t.bot_status IS NULL)";
+      const params: any[] = status === "all" ? [] : [status];
 
       const todos = db.prepare(`
         SELECT t.*,
@@ -26,14 +41,14 @@ export async function GET(req: NextRequest) {
           CASE WHEN t.lead_id IS NOT NULL THEN l.phone ELSE NULL END as lead_phone
         FROM todos t
         LEFT JOIN leads l ON t.lead_id = l.id
-        WHERE ${where}
+        WHERE t.queue = 'bot' AND t.completed = 0${statusClause}
         ORDER BY t.priority = 'high' DESC, t.created_at DESC
         LIMIT 200
-      `).all() as any[];
+      `).all(...params) as any[];
 
-      const counts = db.prepare(`
-        SELECT bot_status, COUNT(*) as cnt FROM todos WHERE queue='bot' AND completed=0 GROUP BY bot_status
-      `).all() as any[];
+      const counts = db.prepare(
+        "SELECT bot_status, COUNT(*) as cnt FROM todos WHERE queue='bot' AND completed=0 GROUP BY bot_status"
+      ).all() as any[];
 
       return NextResponse.json({ ok: true, todos, counts });
     } finally { db.close(); }
@@ -49,9 +64,7 @@ export async function POST(req: NextRequest) {
     const { action, ids, id } = body;
     const db = new Database(DB_PATH);
     try {
-      try { db.exec("ALTER TABLE todos ADD COLUMN bot_status TEXT DEFAULT 'pending'"); } catch {}
-      try { db.exec("ALTER TABLE todos ADD COLUMN sent_at TEXT"); } catch {}
-      try { db.exec("ALTER TABLE todos ADD COLUMN send_error TEXT"); } catch {}
+      ensureBotColumns(db);
 
       // Approve one or many
       if (action === "approve") {

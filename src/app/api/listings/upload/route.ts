@@ -36,9 +36,9 @@ export async function POST(req: NextRequest) {
     for (const file of files) {
       if (!file.name || file.size === 0) continue;
 
-      // Only allow PDFs and common doc types
+      // Only allow PDFs, common doc types, and common image formats
       const ext = path.extname(file.name).toLowerCase();
-      if (![".pdf", ".doc", ".docx", ".xls", ".xlsx", ".jpg", ".jpeg", ".png"].includes(ext)) {
+      if (![".pdf", ".doc", ".docx", ".xls", ".xlsx", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".heic", ".heif", ".tiff", ".tif", ".bmp"].includes(ext)) {
         continue;
       }
 

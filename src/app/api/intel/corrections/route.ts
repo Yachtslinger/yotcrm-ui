@@ -1,14 +1,9 @@
-/**
- * Manual Corrections API
- * Allows broker to correct any intel field and track what was manually overridden
- */
 import { NextRequest, NextResponse } from "next/server";
 import Database from "better-sqlite3";
-import path from "path";
 
-const DB_PATH = process.env.NODE_ENV === "production"
-  ? "/tmp/yotcrm.db"
-  : path.join(process.cwd(), "data", "yotcrm.db");
+export const runtime = "nodejs";
+
+const DB_PATH = process.env.DB_PATH || "/app/data/yotcrm.db";
 
 export async function POST(req: NextRequest) {
   try {
