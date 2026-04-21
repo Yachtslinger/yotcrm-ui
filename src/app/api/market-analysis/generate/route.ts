@@ -51,12 +51,14 @@ export async function POST(req: NextRequest) {
       subjectVessel, subjectYear, subjectMake, subjectModel,
       subjectLength, subjectAskingPrice, notes,
       soldComps, activeComps, broadSold, broadActive,
+      supplementalText,
     } = body as {
       subjectVessel: string; subjectYear: string; subjectMake: string;
       subjectModel: string; subjectLength: string; subjectAskingPrice: string;
       notes: string;
       soldComps: CompRecord[]; activeComps: CompRecord[];
       broadSold: CompRecord[]; broadActive: CompRecord[];
+      supplementalText?: string;
     };
 
     // Pre-compute key metrics to feed Claude
@@ -114,6 +116,7 @@ SUBJECT VESSEL:
 ${subjectYear} ${subjectMake} ${subjectModel} "${subjectVessel}"
 Length: ${subjectLength} | Proposed Asking Price: ${subjectAskingPrice}
 Broker Notes: ${notes || "None"}
+${supplementalText ? `\nSUPPLEMENTAL MARKET ANALYSIS (from uploaded report — use this data to enrich your analysis):\n${supplementalText.slice(0, 4000)}\n` : ""}
 
 DIRECT SOLD COMPARABLES (${soldComps.length} vessels):
 ${soldCompsTable || "None provided"}
