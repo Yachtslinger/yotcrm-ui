@@ -41,6 +41,7 @@ const NAV_ITEMS = [
 
 const EXTERNAL_LINKS = [
   { href: "https://yotcrm-production.up.railway.app/home", label: "Website", Icon: Globe },
+  { href: "https://www.denisonyachtsales.com/yachts-for-sale/", label: "Denison MLS", Icon: Search },
 ];
 
 /* Mobile bottom dock — 4 primary + "Apps" grid button */
