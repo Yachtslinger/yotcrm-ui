@@ -329,6 +329,10 @@ export default function MarketAnalysisPage() {
                       style={{ background:"var(--brass-400)",color:"#fff",padding:"7px 14px",borderRadius:8,fontSize:12,fontWeight:600,textDecoration:"none",display:"flex",alignItems:"center",gap:6 }}>
                       <ExternalLink className="w-3 h-3" /> View Report
                     </a>
+                    <a href={`/api/market-analysis/pdf?id=${a.id}`} target="_blank" rel="noopener noreferrer"
+                      style={{ background:"rgba(184,147,58,.12)",border:"1px solid rgba(184,147,58,.3)",color:"var(--brass-400)",padding:"7px 14px",borderRadius:8,fontSize:12,fontWeight:600,textDecoration:"none",display:"flex",alignItems:"center",gap:6 }}>
+                      ⬇ PDF
+                    </a>
                     <button onClick={() => deleteAnalysis(a.id)} style={{ background:"rgba(180,0,0,.12)",border:"none",color:"#f87171",padding:"7px 10px",borderRadius:8,cursor:"pointer" }}>
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -625,7 +629,11 @@ export default function MarketAnalysisPage() {
           <div style={{ display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap" }}>
             <a href={`/api/market-analysis/report?id=${savedId}`} target="_blank" rel="noopener noreferrer"
               style={{ background:"var(--brass-400)",color:"#fff",padding:"12px 28px",borderRadius:10,fontWeight:700,fontSize:14,textDecoration:"none",display:"flex",alignItems:"center",gap:8 }}>
-              <ExternalLink className="w-4 h-4"/> Open Report
+              <ExternalLink className="w-4 h-4"/> View Report
+            </a>
+            <a href={`/api/market-analysis/pdf?id=${savedId}`} target="_blank" rel="noopener noreferrer"
+              style={{ background:"rgba(184,147,58,.12)",border:"1px solid rgba(184,147,58,.3)",color:"var(--brass-400)",padding:"12px 24px",borderRadius:10,fontWeight:700,fontSize:14,textDecoration:"none",display:"flex",alignItems:"center",gap:8 }}>
+              ⬇ Download PDF
             </a>
             <button onClick={resetForm} style={{ background:"var(--card)",border:"1px solid var(--border)",color:"var(--foreground)",padding:"12px 24px",borderRadius:10,fontWeight:600,fontSize:14,cursor:"pointer" }}>
               Back to List

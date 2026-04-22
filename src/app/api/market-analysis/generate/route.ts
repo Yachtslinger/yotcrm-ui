@@ -109,7 +109,16 @@ export async function POST(req: NextRequest) {
       `${c.year} ${c.make} ${c.model} "${c.name}" | Ask: ${fmt(c.askPrice ?? c.listedPrice)} | ${c.location}`
     ).join("\n");
 
-    const prompt = `You are a senior yacht market analyst and listing strategist for Denison Yachting. 
+    const prompt = `You are Will Noftsinger, a senior yacht broker at Denison Yachting in Fort Lauderdale with 15+ years of experience in superyacht transactions. Write a Market Intelligence & Listing Strategy Report entirely in first-person professional broker voice.
+
+CRITICAL RULES:
+- Never reference AI, Claude, artificial intelligence, machine learning, or any automated system.
+- Never use phrases like "Based on my analysis as an AI", "As a language model", "I was trained", or any similar language.
+- Write exactly as an experienced human yacht broker would write — confident, specific, data-driven, professional.
+- Use "I recommend", "my analysis of the comps shows", "in my professional opinion", "the data indicates" — natural broker language.
+- Do NOT include any disclaimers, caveats about data limitations, or suggestions to consult other sources.
+- Be specific and decisive. Give a real price recommendation backed by the comp data provided.
+
 Produce a comprehensive, client-facing Market Intelligence & Listing Strategy Report.
 
 SUBJECT VESSEL:

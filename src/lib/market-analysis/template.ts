@@ -8,7 +8,7 @@ function avg(nums: number[]) {
   return nums.length ? Math.round(nums.reduce((a,b)=>a+b,0)/nums.length) : 0;
 }
 
-export function generateMarketReport(ma: MarketAnalysis): string {
+export function generateMarketReport(ma: MarketAnalysis, pdfMode = false): string {
   const a = ma.analysis_json as Record<string, unknown>;
   const pricing = (a.pricingAnalysis as Record<string,unknown>) || {};
   const dom = (a.daysOnMarketForecast as Record<string,unknown>) || {};
@@ -70,7 +70,9 @@ ul.dl li::before{content:'→';position:absolute;left:0;color:#b8933a;}
 .tlw{font-family:'Cinzel',serif;font-size:8.5px;letter-spacing:.1em;color:#b8933a;text-transform:uppercase;padding:12px 14px 12px 0;border-right:2px solid #b8933a;text-align:right;}
 .tla{padding:12px 0 12px 18px;font-size:13px;color:#444;border-bottom:1px solid #f0ede8;}
 .footer{text-align:center;padding:28px;color:#aaa;font-size:12px;border-top:1px solid #e8e4df;margin-top:24px;}
-@media print{body{background:#fff;}.wrap{padding:20px;}}
+.pdf-btn{position:fixed;bottom:24px;right:24px;background:#b8933a;color:#fff;border:none;padding:11px 22px;border-radius:8px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.2);text-decoration:none;display:flex;align-items:center;gap:8px;z-index:999;}
+.pdf-btn:hover{background:#9a7a30;}
+@media print{body{background:#fff;}.wrap{padding:20px;}.pdf-btn{display:none!important;}}
 </style></head><body><div class="wrap">
 
 <div class="cover">
@@ -157,5 +159,10 @@ ${a.brokerNotes?`<div class="sec" style="border-left:4px solid #b8933a"><div cla
 <div class="footer"><strong>Will Noftsinger III · Yacht Broker · Denison Yachting</strong><br>
 WN@DenisonYachting.com · +1 (850) 461-3342 · Fort Lauderdale, FL<br>
 <span style="color:#ddd">Confidential — Prepared for listing presentation purposes</span></div>
+
+${!pdfMode ? `<a class="pdf-btn" href="/api/market-analysis/pdf?id=${ma.id}" target="_blank">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+  Save as PDF
+</a>` : ""}
 </div></body></html>`;
 }
