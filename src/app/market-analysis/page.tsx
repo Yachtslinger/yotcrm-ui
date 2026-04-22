@@ -11,10 +11,7 @@ type CompRecord = {
 };
 
 type CompUrl = {
-  url: string;
-  type: "sold" | "active";
-  soldPrice: string;
-  daysOnMarket: string;
+  url: string; type: "sold" | "active"; soldPrice: string; daysOnMarket: string;
   status: "idle" | "scraping" | "done" | "error";
   result: CompRecord | null;
   preview: { name: string; price: string; location: string; image: string } | null;
@@ -27,7 +24,7 @@ type SavedAnalysis = {
   created_at: string; updated_at: string;
 };
 
-type Step = "list" | "setup" | "comps" | "review" | "generating" | "done";
+type Step = "list" | "setup" | "comps" | "generating" | "done";
 
 export default function MarketAnalysisPage() {
   const [step, setStep] = React.useState<Step>("list");
@@ -39,6 +36,9 @@ export default function MarketAnalysisPage() {
   const [subjectUrl, setSubjectUrl] = React.useState("");
   const [subjectScraping, setSubjectScraping] = React.useState(false);
   const [subjectPreview, setSubjectPreview] = React.useState<{ name: string; price: string; location: string; image: string } | null>(null);
+  const [subjectPdfFile, setSubjectPdfFile] = React.useState("");
+  const [subjectPdfText, setSubjectPdfText] = React.useState("");
+  const [uploadingSubjectPdf, setUploadingSubjectPdf] = React.useState(false);
   const [subjectVessel, setSubjectVessel] = React.useState("");
   const [subjectYear, setSubjectYear] = React.useState("");
   const [subjectMake, setSubjectMake] = React.useState("");
@@ -47,37 +47,33 @@ export default function MarketAnalysisPage() {
   const [subjectAskingPrice, setSubjectAskingPrice] = React.useState("");
   const [notes, setNotes] = React.useState("");
 
-  // Supplemental analysis PDF
-  const [supplementalText, setSupplementalText] = React.useState("");
-  const [supplementalFile, setSupplementalFile] = React.useState("");
-  const [uploadingSupp, setUploadingSupp] = React.useState(false);
-  const suppPdfRef = React.useRef<HTMLInputElement>(null);
-
-  // Comp PDFs — extracted records
+  // Comp PDFs
   const [soldPdfComps, setSoldPdfComps] = React.useState<CompRecord[]>([]);
   const [activePdfComps, setActivePdfComps] = React.useState<CompRecord[]>([]);
   const [uploadingSold, setUploadingSold] = React.useState(false);
   const [uploadingActive, setUploadingActive] = React.useState(false);
 
-  // Comp URLs — up to 10
+  // Supplemental PDF + comp URLs + manual
+  const [supplementalText, setSupplementalText] = React.useState("");
+  const [supplementalFile, setSupplementalFile] = React.useState("");
+  const [uploadingSupp, setUploadingSupp] = React.useState(false);
   const [compUrls, setCompUrls] = React.useState<CompUrl[]>([
     { url: "", type: "sold", soldPrice: "", daysOnMarket: "", status: "idle", result: null, preview: null, error: "" }
   ]);
-
-  // Manual comp entries
   const [manualComps, setManualComps] = React.useState<CompRecord[]>([]);
+  const [showManualForm, setShowManualForm] = React.useState(false);
   const [manualForm, setManualForm] = React.useState({
     type: "sold" as "sold" | "active",
     name: "", make: "", model: "", year: "", length: "", location: "",
     askPrice: "", soldPrice: "", daysOnMarket: "", listedDate: "", soldDate: "",
   });
-  const [showManualForm, setShowManualForm] = React.useState(false);
-
   const [genStatus, setGenStatus] = React.useState("");
   const [savedId, setSavedId] = React.useState<number | null>(null);
 
   const soldPdfRef = React.useRef<HTMLInputElement>(null);
   const activePdfRef = React.useRef<HTMLInputElement>(null);
+  const suppPdfRef = React.useRef<HTMLInputElement>(null);
+  const subjectPdfRef = React.useRef<HTMLInputElement>(null);
 
   function showToast(msg: string, type: "success" | "error" = "success") {
     setToast({ msg, type });
@@ -94,7 +90,6 @@ export default function MarketAnalysisPage() {
   }
   React.useEffect(() => { loadAnalyses(); }, []);
 
-  // Scrape subject vessel URL
   async function scrapeSubjectUrl() {
     if (!subjectUrl.trim()) return;
     setSubjectScraping(true);
@@ -117,22 +112,31 @@ export default function MarketAnalysisPage() {
     finally { setSubjectScraping(false); }
   }
 
-  async function uploadSupplementalPdf(file: File) {
-    setUploadingSupp(true);
+  async function uploadSubjectPdf(file: File) {
+    setUploadingSubjectPdf(true);
     try {
       const form = new FormData();
       form.append("file", file);
       const r = await fetch("/api/market-analysis/extract-text", { method: "POST", body: form });
       const d = await r.json();
       if (!d.ok) { showToast(`Extract failed: ${d.error}`, "error"); return; }
-      setSupplementalText(d.text);
-      setSupplementalFile(d.fileName);
-      showToast(`✓ Loaded analysis: ${d.pages} pages extracted`, "success");
+      setSubjectPdfText(d.text);
+      setSubjectPdfFile(d.fileName);
+      // Try to auto-fill fields from extracted text
+      const txt = d.text as string;
+      if (!subjectVessel) {
+        const nm = txt.match(/(?:vessel name|boat name|yacht name)[:\s]+([^\n]+)/i);
+        if (nm) setSubjectVessel(nm[1].trim().slice(0, 80));
+      }
+      if (!subjectYear) {
+        const yr = txt.match(/\b(19|20)\d{2}\b/);
+        if (yr) setSubjectYear(yr[0]);
+      }
+      showToast(`✓ Loaded vessel PDF: ${d.pages} pages`, "success");
     } catch (err) { showToast(`Upload error: ${err}`, "error"); }
-    finally { setUploadingSupp(false); }
+    finally { setUploadingSubjectPdf(false); }
   }
 
-  // Upload PDF comps
   async function uploadPdf(type: "sold" | "active", files: FileList) {
     if (type === "sold") setUploadingSold(true); else setUploadingActive(true);
     try {
@@ -149,42 +153,32 @@ export default function MarketAnalysisPage() {
     finally { if (type === "sold") setUploadingSold(false); else setUploadingActive(false); }
   }
 
-  // Add comp URL row
+  async function uploadSupplementalPdf(file: File) {
+    setUploadingSupp(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const r = await fetch("/api/market-analysis/extract-text", { method: "POST", body: form });
+      const d = await r.json();
+      if (!d.ok) { showToast(`Extract failed: ${d.error}`, "error"); return; }
+      setSupplementalText(d.text);
+      setSupplementalFile(d.fileName);
+      showToast(`✓ Loaded: ${d.pages} pages extracted`, "success");
+    } catch (err) { showToast(`Upload error: ${err}`, "error"); }
+    finally { setUploadingSupp(false); }
+  }
+
   function addCompUrl() {
     if (compUrls.length >= 10) return;
     setCompUrls(p => [...p, { url: "", type: "active", soldPrice: "", daysOnMarket: "", status: "idle", result: null, preview: null, error: "" }]);
   }
-
   function updateCompUrl(idx: number, patch: Partial<CompUrl>) {
     setCompUrls(p => p.map((c, i) => i === idx ? { ...c, ...patch } : c));
   }
+  function removeCompUrl(idx: number) { setCompUrls(p => p.filter((_, i) => i !== idx)); }
+  function removeManualComp(idx: number) { setManualComps(p => p.filter((_, i) => i !== idx)); }
 
-  function removeCompUrl(idx: number) {
-    setCompUrls(p => p.filter((_, i) => i !== idx));
-  }
-
-  function addManualComp() {
-    const f = manualForm;
-    if (!f.name && !f.make) return;
-    const parseAmt = (s: string) => { const n = parseInt(s.replace(/[$,]/g, "")); return isNaN(n) ? null : n; };
-    const comp: CompRecord = {
-      name: f.name || `${f.year} ${f.make} ${f.model}`.trim(),
-      make: f.make, model: f.model, year: f.year, length: f.length, location: f.location,
-      listedPrice: parseAmt(f.askPrice),
-      soldPrice: f.type === "sold" ? parseAmt(f.soldPrice) : null,
-      askPrice: f.type === "active" ? parseAmt(f.askPrice) : null,
-      listedDate: f.listedDate, soldDate: f.soldDate,
-      daysOnMarket: f.daysOnMarket ? parseInt(f.daysOnMarket) : null,
-      source: f.type === "sold" ? "sold_comps" : "active_comps",
-    };
-    setManualComps(p => [...p, comp]);
-    setManualForm({ type: f.type, name: "", make: "", model: "", year: "", length: "", location: "", askPrice: "", soldPrice: "", daysOnMarket: "", listedDate: "", soldDate: "" });
-    showToast(`✓ Added: ${comp.name}`, "success");
-  }
-
-  function removeManualComp(idx: number) {
-    setManualComps(p => p.filter((_, i) => i !== idx));
-  }
+  async function scrapeCompUrl(idx: number) {
     const cu = compUrls[idx];
     if (!cu.url.trim()) return;
     updateCompUrl(idx, { status: "scraping", error: "", result: null, preview: null });
@@ -202,28 +196,38 @@ export default function MarketAnalysisPage() {
       const d = await r.json();
       if (!d.ok) { updateCompUrl(idx, { status: "error", error: d.error }); return; }
       updateCompUrl(idx, { status: "done", result: d.comp, preview: d.preview });
-    } catch (err) {
-      updateCompUrl(idx, { status: "error", error: String(err) });
-    }
+    } catch (err) { updateCompUrl(idx, { status: "error", error: String(err) }); }
   }
 
-  // Scrape all pending comp URLs
   async function scrapeAllUrls() {
     const pending = compUrls.map((c, i) => ({ c, i })).filter(({ c }) => c.url.trim() && c.status !== "done");
     for (const { i } of pending) await scrapeCompUrl(i);
   }
 
-  // Build final comp arrays and generate
+  function addManualComp() {
+    const f = manualForm;
+    if (!f.name && !f.make) return;
+    const pa = (s: string) => { const n = parseInt(s.replace(/[$,]/g, "")); return isNaN(n) ? null : n; };
+    const comp: CompRecord = {
+      name: f.name || `${f.year} ${f.make} ${f.model}`.trim(),
+      make: f.make, model: f.model, year: f.year, length: f.length, location: f.location,
+      listedPrice: pa(f.askPrice),
+      soldPrice: f.type === "sold" ? pa(f.soldPrice) : null,
+      askPrice: f.type === "active" ? pa(f.askPrice) : null,
+      listedDate: f.listedDate, soldDate: f.soldDate,
+      daysOnMarket: f.daysOnMarket ? parseInt(f.daysOnMarket) : null,
+      source: f.type === "sold" ? "sold_comps" : "active_comps",
+    };
+    setManualComps(p => [...p, comp]);
+    setManualForm(prev => ({ ...prev, name: "", make: "", model: "", year: "", length: "", location: "", askPrice: "", soldPrice: "", daysOnMarket: "", listedDate: "", soldDate: "" }));
+    showToast(`✓ Added: ${comp.name}`, "success");
+  }
+
   async function generateAnalysis() {
     setStep("generating"); setGenStatus("Compiling comp data…");
-    // Merge PDF comps + URL comps
-    const urlSoldComps = compUrls.filter(c => c.type === "sold" && c.result).map(c => c.result!);
-    const urlActiveComps = compUrls.filter(c => c.type === "active" && c.result).map(c => c.result!);
-    const manualSold = manualComps.filter(c => c.source === "sold_comps");
-    const manualActive = manualComps.filter(c => c.source === "active_comps");
-    const allSold = [...soldPdfComps, ...urlSoldComps, ...manualSold];
-    const allActive = [...activePdfComps, ...urlActiveComps, ...manualActive];
-
+    const allSold = [...soldPdfComps, ...compUrls.filter(c => c.type === "sold" && c.result).map(c => c.result!), ...manualComps.filter(c => c.source === "sold_comps")];
+    const allActive = [...activePdfComps, ...compUrls.filter(c => c.type === "active" && c.result).map(c => c.result!), ...manualComps.filter(c => c.source === "active_comps")];
+    const combinedSupplemental = [subjectPdfText, supplementalText].filter(Boolean).join("\n\n---\n\n");
     setGenStatus("Analyzing with AI…");
     try {
       const genRes = await fetch("/api/market-analysis/generate", {
@@ -232,12 +236,11 @@ export default function MarketAnalysisPage() {
           subjectVessel, subjectYear, subjectMake, subjectModel,
           subjectLength, subjectAskingPrice, notes,
           soldComps: allSold, activeComps: allActive, broadSold: [], broadActive: [],
-          supplementalText: supplementalText || undefined,
+          supplementalText: combinedSupplemental || undefined,
         }),
       });
       const genData = await genRes.json();
-      if (!genData.ok) { showToast(`Analysis failed: ${genData.error}`, "error"); setStep("review"); return; }
-
+      if (!genData.ok) { showToast(`Analysis failed: ${genData.error}`, "error"); setStep("comps"); return; }
       setGenStatus("Saving report…");
       const saveRes = await fetch("/api/market-analysis", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -252,7 +255,7 @@ export default function MarketAnalysisPage() {
       });
       const saveData = await saveRes.json();
       setSavedId(saveData.id); setStep("done"); loadAnalyses();
-    } catch (err) { showToast(`Error: ${err}`, "error"); setStep("review"); }
+    } catch (err) { showToast(`Error: ${err}`, "error"); setStep("comps"); }
   }
 
   async function deleteAnalysis(id: number) {
@@ -263,11 +266,12 @@ export default function MarketAnalysisPage() {
 
   function resetForm() {
     setStep("list"); setSubjectUrl(""); setSubjectPreview(null);
+    setSubjectPdfFile(""); setSubjectPdfText("");
     setSubjectVessel(""); setSubjectYear(""); setSubjectMake("");
     setSubjectModel(""); setSubjectLength(""); setSubjectAskingPrice(""); setNotes("");
     setSoldPdfComps([]); setActivePdfComps([]);
-    setManualComps([]); setShowManualForm(false);
     setSupplementalText(""); setSupplementalFile("");
+    setManualComps([]); setShowManualForm(false);
     setManualForm({ type: "sold", name: "", make: "", model: "", year: "", length: "", location: "", askPrice: "", soldPrice: "", daysOnMarket: "", listedDate: "", soldDate: "" });
     setCompUrls([{ url: "", type: "sold", soldPrice: "", daysOnMarket: "", status: "idle", result: null, preview: null, error: "" }]);
     setSavedId(null);
@@ -275,11 +279,8 @@ export default function MarketAnalysisPage() {
 
   const iStyle: React.CSSProperties = {
     background: "var(--input,#1e293b)", border: "1px solid var(--border)",
-    color: "var(--foreground)", borderRadius: 8, padding: "10px 12px",
-    fontSize: 13, width: "100%",
+    color: "var(--foreground)", borderRadius: 8, padding: "10px 12px", fontSize: 13, width: "100%",
   };
-
-  const urlCompsScraped = compUrls.filter(c => c.status === "done").length;
   const urlCompsPending = compUrls.filter(c => c.url.trim() && c.status !== "done").length;
   const totalSold = soldPdfComps.length + compUrls.filter(c => c.type === "sold" && c.result).length + manualComps.filter(c => c.source === "sold_comps").length;
   const totalActive = activePdfComps.length + compUrls.filter(c => c.type === "active" && c.result).length + manualComps.filter(c => c.source === "active_comps").length;
@@ -294,7 +295,7 @@ export default function MarketAnalysisPage() {
         </div>
       )}
 
-      {/* ── LIST ── */}
+      {/* LIST */}
       {step === "list" && (
         <div style={{ maxWidth:900,margin:"0 auto" }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:24 }}>
@@ -311,7 +312,7 @@ export default function MarketAnalysisPage() {
             <div style={{ textAlign:"center",padding:"64px 32px",background:"var(--card)",border:"1px solid var(--border)",borderRadius:12 }}>
               <BarChart2 style={{ width:40,height:40,color:"var(--brass-400)",margin:"0 auto 16px" }} />
               <p style={{ fontFamily:"serif",fontSize:20,marginBottom:8 }}>No analyses yet</p>
-              <p style={{ fontSize:13,color:"var(--navy-400)",marginBottom:24 }}>Build your first market intelligence report with comp PDFs and listing URLs</p>
+              <p style={{ fontSize:13,color:"var(--navy-400)",marginBottom:24 }}>Build your first market intelligence report</p>
               <button onClick={() => setStep("setup")} style={{ background:"var(--brass-400)",color:"#fff",border:"none",borderRadius:10,padding:"10px 24px",fontWeight:700,cursor:"pointer" }}>Get Started</button>
             </div>
           ) : (
@@ -339,28 +340,49 @@ export default function MarketAnalysisPage() {
         </div>
       )}
 
-      {/* ── SETUP: Subject Vessel ── */}
+      {/* SETUP */}
       {step === "setup" && (
         <div style={{ maxWidth:720,margin:"0 auto" }}>
           <button onClick={resetForm} style={{ background:"none",border:"none",color:"var(--navy-400)",cursor:"pointer",fontSize:13,marginBottom:20 }}>← Back</button>
           <div style={{ background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:28 }}>
             <p style={{ fontFamily:"serif",fontSize:22,marginBottom:4 }}>Subject Vessel</p>
-            <p style={{ fontSize:12,color:"var(--navy-400)",marginBottom:20 }}>Paste the listing URL to auto-fill, or enter details manually</p>
+            <p style={{ fontSize:12,color:"var(--navy-400)",marginBottom:16 }}>Paste a listing URL to auto-fill, upload a vessel PDF brochure/spec sheet, or enter details manually</p>
 
             {/* URL auto-fill */}
-            <div style={{ display:"flex",gap:8,marginBottom:20 }}>
-              <input style={{ ...iStyle,flex:1 }} placeholder="https://www.denisonyachtsales.com/yacht-for-sale/... or boatinternational.com or superyachttimes.com"
+            <div style={{ display:"flex",gap:8,marginBottom:12 }}>
+              <input style={{ ...iStyle,flex:1 }}
+                placeholder="https://www.denisonyachtsales.com/yacht-for-sale/... or boatinternational.com"
                 value={subjectUrl} onChange={e=>setSubjectUrl(e.target.value)}
                 onKeyDown={e=>e.key==="Enter"&&scrapeSubjectUrl()} />
               <button onClick={scrapeSubjectUrl} disabled={!subjectUrl.trim()||subjectScraping}
                 style={{ background:subjectUrl.trim()?"var(--brass-400)":"var(--border)",color:subjectUrl.trim()?"#fff":"var(--navy-400)",border:"none",borderRadius:8,padding:"10px 18px",fontWeight:700,fontSize:13,cursor:subjectUrl.trim()?"pointer":"not-allowed",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6 }}>
-                {subjectScraping ? <><div className="spin" style={{ width:14,height:14,border:"2px solid rgba(255,255,255,.3)",borderTopColor:"#fff",borderRadius:"50%" }} /> Loading…</> : <><Link className="w-3 h-3" /> Auto-Fill</>}
+                {subjectScraping ? <><div className="spin" style={{ width:14,height:14,border:"2px solid rgba(255,255,255,.3)",borderTopColor:"#fff",borderRadius:"50%" }} />Loading…</> : <><Link className="w-3 h-3" />Auto-Fill</>}
               </button>
             </div>
 
+            {/* PDF upload */}
+            <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:16,padding:"10px 14px",background:"rgba(184,147,58,.04)",border:"1px dashed rgba(184,147,58,.3)",borderRadius:8 }}>
+              <Upload style={{ width:16,height:16,color:"var(--brass-400)",flexShrink:0 }} />
+              <span style={{ fontSize:12,color:"var(--navy-400)",flex:1 }}>Or upload a vessel PDF — brochure, spec sheet, listing print-out</span>
+              {uploadingSubjectPdf && <div className="spin" style={{ width:14,height:14,border:"2px solid rgba(255,255,255,.2)",borderTopColor:"var(--brass-400)",borderRadius:"50%" }} />}
+              <button onClick={() => subjectPdfRef.current?.click()} disabled={uploadingSubjectPdf}
+                style={{ background:"var(--brass-400)",color:"#fff",border:"none",borderRadius:7,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap" }}>
+                {subjectPdfFile ? "Replace PDF" : "Upload PDF"}
+              </button>
+              <input ref={subjectPdfRef} type="file" accept=".pdf" className="hidden" onChange={e=>{if(e.target.files?.[0]){uploadSubjectPdf(e.target.files[0]);e.target.value="";}}} />
+            </div>
+            {subjectPdfFile && (
+              <div style={{ marginBottom:14,display:"flex",alignItems:"center",gap:10,background:"rgba(184,147,58,.06)",border:"1px solid rgba(184,147,58,.2)",borderRadius:8,padding:"8px 14px" }}>
+                <span style={{ fontSize:18 }}>📄</span>
+                <span style={{ fontSize:13,color:"var(--foreground)",fontWeight:500 }}>{subjectPdfFile}</span>
+                <span style={{ fontSize:11,color:"var(--navy-400)" }}>{Math.round(subjectPdfText.length/1000)}k chars — will be sent to Claude for context</span>
+                <button onClick={()=>{setSubjectPdfFile("");setSubjectPdfText("");}} style={{ marginLeft:"auto",background:"none",border:"none",color:"#f87171",cursor:"pointer",fontSize:16 }}>×</button>
+              </div>
+            )}
+
             {subjectPreview && (
               <div style={{ background:"rgba(34,197,94,.06)",border:"1px solid rgba(34,197,94,.2)",borderRadius:8,padding:"10px 14px",marginBottom:16,display:"flex",alignItems:"center",gap:12 }}>
-                {subjectPreview.image && <img src={subjectPreview.image} style={{ width:56,height:42,objectFit:"cover",borderRadius:6,flexShrink:0 }} />}
+                {subjectPreview.image && <img src={subjectPreview.image} style={{ width:56,height:42,objectFit:"cover",borderRadius:6,flexShrink:0 }} alt="" />}
                 <div>
                   <div style={{ fontWeight:600,fontSize:13 }}>{subjectPreview.name}</div>
                   <div style={{ fontSize:12,color:"var(--navy-400)" }}>{subjectPreview.price} · {subjectPreview.location}</div>
@@ -370,14 +392,7 @@ export default function MarketAnalysisPage() {
             )}
 
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:14 }}>
-              {([
-                ["Vessel Name","e.g. KEMOSABE",subjectVessel,setSubjectVessel],
-                ["Year","e.g. 2012",subjectYear,setSubjectYear],
-                ["Make","e.g. Westport",subjectMake,setSubjectMake],
-                ["Model","e.g. 112",subjectModel,setSubjectModel],
-                ["Length","e.g. 112 ft",subjectLength,setSubjectLength],
-                ["Proposed Asking Price","e.g. $6,500,000",subjectAskingPrice,setSubjectAskingPrice],
-              ] as [string,string,string,(v:string)=>void][]).map(([label,ph,val,setter]) => (
+              {([["Vessel Name","e.g. KEMOSABE",subjectVessel,setSubjectVessel],["Year","e.g. 2012",subjectYear,setSubjectYear],["Make","e.g. Westport",subjectMake,setSubjectMake],["Model","e.g. 112",subjectModel,setSubjectModel],["Length","e.g. 112 ft",subjectLength,setSubjectLength],["Proposed Asking Price","e.g. $6,500,000",subjectAskingPrice,setSubjectAskingPrice]] as [string,string,string,(v:string)=>void][]).map(([label,ph,val,setter]) => (
                 <div key={label}>
                   <label style={{ fontSize:10,letterSpacing:"0.12em",textTransform:"uppercase",color:"var(--brass-400)",marginBottom:5,display:"block" }}>{label}</label>
                   <input style={iStyle} placeholder={ph} value={val} onChange={e=>setter(e.target.value)} />
@@ -388,267 +403,164 @@ export default function MarketAnalysisPage() {
               <label style={{ fontSize:10,letterSpacing:"0.12em",textTransform:"uppercase",color:"var(--brass-400)",marginBottom:5,display:"block" }}>Broker Notes</label>
               <textarea style={{ ...iStyle,minHeight:72,resize:"vertical",fontFamily:"inherit" }} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Condition, refit history, key features, motivation to sell…" />
             </div>
-            <button onClick={() => setStep("comps")} disabled={!subjectMake&&!subjectVessel}
-              style={{ marginTop:20,width:"100%",background:subjectMake||subjectVessel?"var(--brass-400)":"var(--border)",color:subjectMake||subjectVessel?"#fff":"var(--navy-400)",border:"none",borderRadius:10,padding:"12px 0",fontWeight:700,fontSize:14,cursor:subjectMake||subjectVessel?"pointer":"not-allowed" }}>
+            <button onClick={() => setStep("comps")} disabled={!subjectMake&&!subjectVessel&&!subjectPdfFile}
+              style={{ marginTop:20,width:"100%",background:subjectMake||subjectVessel||subjectPdfFile?"var(--brass-400)":"var(--border)",color:subjectMake||subjectVessel||subjectPdfFile?"#fff":"var(--navy-400)",border:"none",borderRadius:10,padding:"12px 0",fontWeight:700,fontSize:14,cursor:subjectMake||subjectVessel||subjectPdfFile?"pointer":"not-allowed" }}>
               Continue → Add Comparable Data
             </button>
           </div>
         </div>
       )}
 
-      {/* ── COMPS ── */}
+      {/* COMPS */}
       {step === "comps" && (
         <div style={{ maxWidth:800,margin:"0 auto" }}>
           <button onClick={() => setStep("setup")} style={{ background:"none",border:"none",color:"var(--navy-400)",cursor:"pointer",fontSize:13,marginBottom:20 }}>← Back</button>
           <p style={{ fontFamily:"serif",fontSize:22,marginBottom:4 }}>Comparable Data</p>
-          <p style={{ fontSize:12,color:"var(--navy-400)",marginBottom:20 }}>
-            Upload Denison comp PDFs and/or paste up to 10 individual listing URLs. Mix sold and active comps freely.
-          </p>
+          <p style={{ fontSize:12,color:"var(--navy-400)",marginBottom:20 }}>Upload Denison comp PDFs and/or paste individual listing URLs. Mix sold and active freely.</p>
 
-          {/* PDF Upload Section */}
+          {/* Comp PDFs */}
           <div style={{ background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:"20px 24px",marginBottom:16 }}>
             <p style={{ fontSize:13,fontWeight:600,marginBottom:14 }}>Upload Comp PDFs <span style={{ fontSize:11,fontWeight:400,color:"var(--navy-400)" }}>— Denison comp sheets (multiple vessels per PDF)</span></p>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
-              {/* Sold PDF */}
               <div style={{ border:"1px solid var(--border)",borderRadius:8,padding:"14px 16px" }}>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
-                  <div>
-                    <div style={{ fontSize:13,fontWeight:600,color:"#22c55e" }}>● Sold Comps PDF</div>
-                    <div style={{ fontSize:11,color:"var(--navy-400)" }}>Recently sold vessels</div>
-                  </div>
+                  <div><div style={{ fontSize:13,fontWeight:600,color:"#22c55e" }}>● Sold Comps PDF</div><div style={{ fontSize:11,color:"var(--navy-400)" }}>Recently sold vessels</div></div>
                   <button onClick={() => soldPdfRef.current?.click()} disabled={uploadingSold}
                     style={{ background:"rgba(34,197,94,.1)",border:"1px solid rgba(34,197,94,.3)",color:"#22c55e",borderRadius:7,padding:"6px 12px",fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:5 }}>
-                    {uploadingSold ? <div className="spin" style={{ width:12,height:12,border:"2px solid rgba(34,197,94,.3)",borderTopColor:"#22c55e",borderRadius:"50%" }} /> : <Upload className="w-3 h-3" />}
-                    {soldPdfComps.length > 0 ? `${soldPdfComps.length} records — Add More` : "Upload PDF"}
+                    {uploadingSold?<div className="spin" style={{ width:12,height:12,border:"2px solid rgba(34,197,94,.3)",borderTopColor:"#22c55e",borderRadius:"50%" }}/>:<Upload className="w-3 h-3"/>}
+                    {soldPdfComps.length>0?`${soldPdfComps.length} records`:"Upload PDF"}
                   </button>
-                  <input ref={soldPdfRef} type="file" accept=".pdf" multiple className="hidden"
-                    onChange={e=>{if(e.target.files?.length){uploadPdf("sold",e.target.files);e.target.value="";}}} />
+                  <input ref={soldPdfRef} type="file" accept=".pdf" multiple className="hidden" onChange={e=>{if(e.target.files?.length){uploadPdf("sold",e.target.files);e.target.value="";}}}/>
                 </div>
-                {soldPdfComps.length > 0 && (
-                  <div style={{ maxHeight:100,overflowY:"auto",borderTop:"1px solid var(--border)",paddingTop:8 }}>
-                    {soldPdfComps.map((c,i) => (
-                      <div key={i} style={{ display:"flex",justifyContent:"space-between",fontSize:11,padding:"2px 0",color:"var(--navy-400)" }}>
-                        <span>{c.year} {c.make} {c.model} {c.name?`"${c.name}"`:""}
-                          {c.soldPrice?` · Sold $${c.soldPrice.toLocaleString()}`:""}</span>
-                        <button onClick={()=>setSoldPdfComps(p=>p.filter((_,j)=>j!==i))} style={{ background:"none",border:"none",color:"#f87171",cursor:"pointer",fontSize:13 }}>×</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {soldPdfComps.length>0&&<div style={{ maxHeight:100,overflowY:"auto",borderTop:"1px solid var(--border)",paddingTop:8 }}>
+                  {soldPdfComps.map((c,i)=><div key={i} style={{ display:"flex",justifyContent:"space-between",fontSize:11,padding:"2px 0",color:"var(--navy-400)" }}>
+                    <span>{c.year} {c.make} {c.name?`"${c.name}"`:""}  {c.soldPrice?`Sold $${c.soldPrice.toLocaleString()}`:""}</span>
+                    <button onClick={()=>setSoldPdfComps(p=>p.filter((_,j)=>j!==i))} style={{ background:"none",border:"none",color:"#f87171",cursor:"pointer" }}>×</button>
+                  </div>)}
+                </div>}
               </div>
-              {/* Active PDF */}
               <div style={{ border:"1px solid var(--border)",borderRadius:8,padding:"14px 16px" }}>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
-                  <div>
-                    <div style={{ fontSize:13,fontWeight:600,color:"#3b82f6" }}>● Active Listings PDF</div>
-                    <div style={{ fontSize:11,color:"var(--navy-400)" }}>Currently for sale</div>
-                  </div>
+                  <div><div style={{ fontSize:13,fontWeight:600,color:"#3b82f6" }}>● Active Listings PDF</div><div style={{ fontSize:11,color:"var(--navy-400)" }}>Currently for sale</div></div>
                   <button onClick={() => activePdfRef.current?.click()} disabled={uploadingActive}
                     style={{ background:"rgba(59,130,246,.1)",border:"1px solid rgba(59,130,246,.3)",color:"#3b82f6",borderRadius:7,padding:"6px 12px",fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:5 }}>
-                    {uploadingActive ? <div className="spin" style={{ width:12,height:12,border:"2px solid rgba(59,130,246,.3)",borderTopColor:"#3b82f6",borderRadius:"50%" }} /> : <Upload className="w-3 h-3" />}
-                    {activePdfComps.length > 0 ? `${activePdfComps.length} records — Add More` : "Upload PDF"}
+                    {uploadingActive?<div className="spin" style={{ width:12,height:12,border:"2px solid rgba(59,130,246,.3)",borderTopColor:"#3b82f6",borderRadius:"50%" }}/>:<Upload className="w-3 h-3"/>}
+                    {activePdfComps.length>0?`${activePdfComps.length} records`:"Upload PDF"}
                   </button>
-                  <input ref={activePdfRef} type="file" accept=".pdf" multiple className="hidden"
-                    onChange={e=>{if(e.target.files?.length){uploadPdf("active",e.target.files);e.target.value="";}}} />
+                  <input ref={activePdfRef} type="file" accept=".pdf" multiple className="hidden" onChange={e=>{if(e.target.files?.length){uploadPdf("active",e.target.files);e.target.value="";}}}/>
                 </div>
-                {activePdfComps.length > 0 && (
-                  <div style={{ maxHeight:100,overflowY:"auto",borderTop:"1px solid var(--border)",paddingTop:8 }}>
-                    {activePdfComps.map((c,i) => (
-                      <div key={i} style={{ display:"flex",justifyContent:"space-between",fontSize:11,padding:"2px 0",color:"var(--navy-400)" }}>
-                        <span>{c.year} {c.make} {c.model} {c.name?`"${c.name}"`:""}
-                          {c.askPrice?` · Ask $${c.askPrice.toLocaleString()}`:""}</span>
-                        <button onClick={()=>setActivePdfComps(p=>p.filter((_,j)=>j!==i))} style={{ background:"none",border:"none",color:"#f87171",cursor:"pointer",fontSize:13 }}>×</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {activePdfComps.length>0&&<div style={{ maxHeight:100,overflowY:"auto",borderTop:"1px solid var(--border)",paddingTop:8 }}>
+                  {activePdfComps.map((c,i)=><div key={i} style={{ display:"flex",justifyContent:"space-between",fontSize:11,padding:"2px 0",color:"var(--navy-400)" }}>
+                    <span>{c.year} {c.make} {c.name?`"${c.name}"`:""}  {c.askPrice?`Ask $${c.askPrice.toLocaleString()}`:""}</span>
+                    <button onClick={()=>setActivePdfComps(p=>p.filter((_,j)=>j!==i))} style={{ background:"none",border:"none",color:"#f87171",cursor:"pointer" }}>×</button>
+                  </div>)}
+                </div>}
               </div>
             </div>
           </div>
 
-          {/* Individual Comp URLs */}
+          {/* Comp URLs */}
           <div style={{ background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:"20px 24px",marginBottom:16 }}>
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4 }}>
               <p style={{ fontSize:13,fontWeight:600 }}>Individual Listing URLs <span style={{ fontSize:11,fontWeight:400,color:"var(--navy-400)" }}>— up to 10</span></p>
               <span style={{ fontSize:11,color:"var(--navy-400)" }}>{compUrls.length}/10</span>
             </div>
-            <p style={{ fontSize:12,color:"var(--navy-400)",marginBottom:14 }}>Works with: denisonyachtsales.com · denisonyachting.com · yachtworld.com · boatinternational.com · superyachttimes.com · fraseryachts.com · burgessyachts.com · and more</p>
-
+            <p style={{ fontSize:12,color:"var(--navy-400)",marginBottom:14 }}>denisonyachtsales.com · yachtworld.com · boatinternational.com · superyachttimes.com · fraseryachts.com · burgessyachts.com · and more</p>
             <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
-              {compUrls.map((cu, idx) => (
-                <div key={idx} style={{ border:`1px solid ${cu.status==="done"?"rgba(34,197,94,.3)":cu.status==="error"?"rgba(248,113,113,.3)":"var(--border)"}`,borderRadius:10,padding:"14px 16px",background:cu.status==="done"?"rgba(34,197,94,.03)":cu.status==="error"?"rgba(248,113,113,.03)":"transparent" }}>
+              {compUrls.map((cu,idx)=>(
+                <div key={idx} style={{ border:`1px solid ${cu.status==="done"?"rgba(34,197,94,.3)":cu.status==="error"?"rgba(248,113,113,.3)":"var(--border)"}`,borderRadius:10,padding:"14px 16px",background:cu.status==="done"?"rgba(34,197,94,.03)":"transparent" }}>
                   <div style={{ display:"flex",gap:8,alignItems:"flex-start" }}>
-                    {/* Type toggle */}
                     <div style={{ display:"flex",borderRadius:7,overflow:"hidden",border:"1px solid var(--border)",flexShrink:0,height:38 }}>
-                      <button onClick={()=>updateCompUrl(idx,{type:"sold"})}
-                        style={{ padding:"0 10px",background:cu.type==="sold"?"#22c55e":"transparent",color:cu.type==="sold"?"#fff":"var(--navy-400)",border:"none",cursor:"pointer",fontSize:11,fontWeight:700 }}>SOLD</button>
-                      <button onClick={()=>updateCompUrl(idx,{type:"active"})}
-                        style={{ padding:"0 10px",background:cu.type==="active"?"#3b82f6":"transparent",color:cu.type==="active"?"#fff":"var(--navy-400)",border:"none",cursor:"pointer",fontSize:11,fontWeight:700 }}>ACTIVE</button>
+                      <button onClick={()=>updateCompUrl(idx,{type:"sold"})} style={{ padding:"0 10px",background:cu.type==="sold"?"#22c55e":"transparent",color:cu.type==="sold"?"#fff":"var(--navy-400)",border:"none",cursor:"pointer",fontSize:11,fontWeight:700 }}>SOLD</button>
+                      <button onClick={()=>updateCompUrl(idx,{type:"active"})} style={{ padding:"0 10px",background:cu.type==="active"?"#3b82f6":"transparent",color:cu.type==="active"?"#fff":"var(--navy-400)",border:"none",cursor:"pointer",fontSize:11,fontWeight:700 }}>ACTIVE</button>
                     </div>
-                    {/* URL input */}
-                    <input style={{ ...iStyle,flex:1,height:38,padding:"0 12px" }}
-                      placeholder={`Comparable #${idx+1} listing URL`}
+                    <input style={{ ...iStyle,flex:1,height:38,padding:"0 12px" }} placeholder={`Comparable #${idx+1} URL`}
                       value={cu.url} onChange={e=>updateCompUrl(idx,{url:e.target.value,status:"idle",result:null,preview:null})}
                       onKeyDown={e=>e.key==="Enter"&&scrapeCompUrl(idx)} />
-                    {/* Scrape button */}
                     <button onClick={()=>scrapeCompUrl(idx)} disabled={!cu.url.trim()||cu.status==="scraping"}
                       style={{ background:cu.status==="done"?"#22c55e":cu.url.trim()?"var(--brass-400)":"var(--border)",color:"#fff",border:"none",borderRadius:8,padding:"0 14px",height:38,fontWeight:700,fontSize:12,cursor:cu.url.trim()?"pointer":"not-allowed",flexShrink:0,display:"flex",alignItems:"center",gap:5 }}>
-                      {cu.status==="scraping"?<><div className="spin" style={{ width:12,height:12,border:"2px solid rgba(255,255,255,.3)",borderTopColor:"#fff",borderRadius:"50%" }} />Scraping…</>
-                      :cu.status==="done"?"✓ Done":"Fetch"}
+                      {cu.status==="scraping"?<><div className="spin" style={{ width:12,height:12,border:"2px solid rgba(255,255,255,.3)",borderTopColor:"#fff",borderRadius:"50%" }}/>Scraping…</>:cu.status==="done"?"✓ Done":"Fetch"}
                     </button>
-                    {/* Remove */}
-                    {compUrls.length > 1 && (
-                      <button onClick={()=>removeCompUrl(idx)} style={{ background:"rgba(180,0,0,.12)",border:"none",color:"#f87171",borderRadius:8,width:38,height:38,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
-                        <X className="w-4 h-4" />
-                      </button>
-                    )}
+                    {compUrls.length>1&&<button onClick={()=>removeCompUrl(idx)} style={{ background:"rgba(180,0,0,.12)",border:"none",color:"#f87171",borderRadius:8,width:38,height:38,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}><X className="w-4 h-4"/></button>}
                   </div>
-
-                  {/* Sold price + DOM fields for sold comps */}
-                  {cu.type==="sold" && cu.status!=="done" && cu.url.trim() && (
+                  {cu.type==="sold"&&cu.status!=="done"&&cu.url.trim()&&(
                     <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8 }}>
-                      <div>
-                        <label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>Sold Price (if known)</label>
-                        <input style={{ ...iStyle,padding:"7px 10px" }} placeholder="$5,850,000" value={cu.soldPrice} onChange={e=>updateCompUrl(idx,{soldPrice:e.target.value})} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>Days on Market (if known)</label>
-                        <input style={{ ...iStyle,padding:"7px 10px" }} placeholder="147" value={cu.daysOnMarket} onChange={e=>updateCompUrl(idx,{daysOnMarket:e.target.value})} />
-                      </div>
+                      <div><label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>Sold Price (if known)</label><input style={{ ...iStyle,padding:"7px 10px" }} placeholder="$5,850,000" value={cu.soldPrice} onChange={e=>updateCompUrl(idx,{soldPrice:e.target.value})}/></div>
+                      <div><label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>Days on Market</label><input style={{ ...iStyle,padding:"7px 10px" }} placeholder="147" value={cu.daysOnMarket} onChange={e=>updateCompUrl(idx,{daysOnMarket:e.target.value})}/></div>
                     </div>
                   )}
-
-                  {/* Preview on success */}
-                  {cu.status==="done" && cu.preview && (
+                  {cu.status==="done"&&cu.preview&&(
                     <div style={{ marginTop:8,display:"flex",alignItems:"center",gap:10,fontSize:12,color:"var(--navy-400)" }}>
-                      {cu.preview.image && <img src={cu.preview.image} style={{ width:40,height:30,objectFit:"cover",borderRadius:4,flexShrink:0 }} />}
+                      {cu.preview.image&&<img src={cu.preview.image} style={{ width:40,height:30,objectFit:"cover",borderRadius:4,flexShrink:0 }} alt=""/>}
                       <span style={{ color:"var(--foreground)",fontWeight:500 }}>{cu.preview.name}</span>
-                      <span>{cu.preview.price}</span>
-                      <span>{cu.preview.location}</span>
+                      <span>{cu.preview.price}</span><span>{cu.preview.location}</span>
                       <span style={{ marginLeft:"auto",background:cu.type==="sold"?"rgba(34,197,94,.15)":"rgba(59,130,246,.15)",color:cu.type==="sold"?"#22c55e":"#3b82f6",borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700 }}>{cu.type.toUpperCase()}</span>
                     </div>
                   )}
-                  {cu.status==="error" && <div style={{ marginTop:6,fontSize:11,color:"#f87171" }}>⚠ {cu.error}</div>}
+                  {cu.status==="error"&&<div style={{ marginTop:6,fontSize:11,color:"#f87171" }}>⚠ {cu.error}</div>}
                 </div>
               ))}
             </div>
-
-            {/* Add URL / Scrape All */}
             <div style={{ display:"flex",gap:10,marginTop:12 }}>
-              {compUrls.length < 10 && (
-                <button onClick={addCompUrl} style={{ background:"rgba(184,147,58,.08)",border:"1px dashed rgba(184,147,58,.4)",color:"var(--brass-400)",borderRadius:8,padding:"8px 16px",fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6 }}>
-                  <Plus className="w-3 h-3" /> Add URL ({compUrls.length}/10)
-                </button>
-              )}
-              {urlCompsPending > 0 && (
-                <button onClick={scrapeAllUrls} style={{ background:"var(--brass-400)",color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontSize:12,fontWeight:700,cursor:"pointer" }}>
-                  Fetch All {urlCompsPending} Pending
-                </button>
-              )}
+              {compUrls.length<10&&<button onClick={addCompUrl} style={{ background:"rgba(184,147,58,.08)",border:"1px dashed rgba(184,147,58,.4)",color:"var(--brass-400)",borderRadius:8,padding:"8px 16px",fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6 }}><Plus className="w-3 h-3"/> Add URL ({compUrls.length}/10)</button>}
+              {urlCompsPending>0&&<button onClick={scrapeAllUrls} style={{ background:"var(--brass-400)",color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontSize:12,fontWeight:700,cursor:"pointer" }}>Fetch All {urlCompsPending} Pending</button>}
             </div>
           </div>
 
-          {/* Manual Entry Section */}
+          {/* Manual Entry */}
           <div style={{ background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:"20px 24px",marginBottom:16 }}>
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4 }}>
               <div>
                 <p style={{ fontSize:13,fontWeight:600 }}>Manual Entry <span style={{ fontSize:11,fontWeight:400,color:"var(--navy-400)" }}>— type in comp data directly</span></p>
-                <p style={{ fontSize:12,color:"var(--navy-400)",marginTop:2 }}>For off-market sales and private transactions where data isn't published</p>
+                <p style={{ fontSize:12,color:"var(--navy-400)",marginTop:2 }}>For off-market sales where data isn't published</p>
               </div>
-              {manualComps.length > 0 && <span style={{ background:"var(--brass-400)",color:"#fff",borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700 }}>{manualComps.length} entered</span>}
+              {manualComps.length>0&&<span style={{ background:"var(--brass-400)",color:"#fff",borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700 }}>{manualComps.length}</span>}
             </div>
-
-            {/* Existing manual comps */}
-            {manualComps.length > 0 && (
+            {manualComps.length>0&&(
               <div style={{ borderTop:"1px solid var(--border)",paddingTop:10,marginTop:10,marginBottom:12 }}>
-                {manualComps.map((c, i) => (
-                  <div key={i} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",fontSize:12,borderBottom:"1px solid rgba(255,255,255,.04)" }}>
-                    <span>
-                      <span style={{ color:c.source==="sold_comps"?"#22c55e":"#3b82f6",fontWeight:700,fontSize:10,textTransform:"uppercase",marginRight:6 }}>
-                        {c.source==="sold_comps"?"SOLD":"ACTIVE"}
-                      </span>
-                      {c.year} {c.make} {c.model} {c.name?`"${c.name}"`:""}
+                {manualComps.map((c,i)=>(
+                  <div key={i} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",fontSize:12,borderBottom:"1px solid rgba(255,255,255,.04)" }}>
+                    <span><span style={{ color:c.source==="sold_comps"?"#22c55e":"#3b82f6",fontWeight:700,fontSize:10,textTransform:"uppercase",marginRight:6 }}>{c.source==="sold_comps"?"SOLD":"ACTIVE"}</span>{c.year} {c.make} {c.model} {c.name?`"${c.name}"`:""}
                       {c.soldPrice?` · Sold $${c.soldPrice.toLocaleString()}`:c.askPrice?` · Ask $${c.askPrice.toLocaleString()}`:""}
-                      {c.daysOnMarket?` · ${c.daysOnMarket} DOM`:""}
-                      {c.location?` · ${c.location}`:""}
-                    </span>
+                      {c.daysOnMarket?` · ${c.daysOnMarket} DOM`:""}{c.location?` · ${c.location}`:""}</span>
                     <button onClick={()=>removeManualComp(i)} style={{ background:"none",border:"none",color:"#f87171",cursor:"pointer",fontSize:15,padding:"0 6px" }}>×</button>
                   </div>
                 ))}
               </div>
             )}
-
-            {/* Toggle form */}
-            {!showManualForm ? (
-              <button onClick={()=>setShowManualForm(true)}
-                style={{ background:"rgba(184,147,58,.08)",border:"1px dashed rgba(184,147,58,.4)",color:"var(--brass-400)",borderRadius:8,padding:"9px 18px",fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6,marginTop:manualComps.length>0?0:10 }}>
+            {!showManualForm?(
+              <button onClick={()=>setShowManualForm(true)} style={{ background:"rgba(184,147,58,.08)",border:"1px dashed rgba(184,147,58,.4)",color:"var(--brass-400)",borderRadius:8,padding:"9px 18px",fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6,marginTop:manualComps.length>0?0:10 }}>
                 <span style={{ fontSize:16,lineHeight:1 }}>+</span> Add Comp Manually
               </button>
-            ) : (
+            ):(
               <div style={{ borderTop:"1px solid var(--border)",paddingTop:14,marginTop:10 }}>
-                {/* Sold / Active toggle */}
                 <div style={{ display:"flex",gap:8,marginBottom:14,alignItems:"center" }}>
                   <span style={{ fontSize:11,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)" }}>Type:</span>
                   <div style={{ display:"flex",borderRadius:8,overflow:"hidden",border:"1px solid var(--border)" }}>
-                    <button onClick={()=>setManualForm(f=>({...f,type:"sold"}))}
-                      style={{ padding:"6px 16px",background:manualForm.type==="sold"?"#22c55e":"transparent",color:manualForm.type==="sold"?"#fff":"var(--navy-400)",border:"none",cursor:"pointer",fontSize:12,fontWeight:700 }}>
-                      SOLD
-                    </button>
-                    <button onClick={()=>setManualForm(f=>({...f,type:"active"}))}
-                      style={{ padding:"6px 16px",background:manualForm.type==="active"?"#3b82f6":"transparent",color:manualForm.type==="active"?"#fff":"var(--navy-400)",border:"none",cursor:"pointer",fontSize:12,fontWeight:700 }}>
-                      ACTIVE
-                    </button>
+                    <button onClick={()=>setManualForm(f=>({...f,type:"sold"}))} style={{ padding:"6px 16px",background:manualForm.type==="sold"?"#22c55e":"transparent",color:manualForm.type==="sold"?"#fff":"var(--navy-400)",border:"none",cursor:"pointer",fontSize:12,fontWeight:700 }}>SOLD</button>
+                    <button onClick={()=>setManualForm(f=>({...f,type:"active"}))} style={{ padding:"6px 16px",background:manualForm.type==="active"?"#3b82f6":"transparent",color:manualForm.type==="active"?"#fff":"var(--navy-400)",border:"none",cursor:"pointer",fontSize:12,fontWeight:700 }}>ACTIVE</button>
                   </div>
                 </div>
-
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10 }}>
-                  {([
-                    ["Vessel Name","e.g. KEMOSABE","name"],
-                    ["Make / Builder","e.g. Westport","make"],
-                    ["Model","e.g. 112","model"],
-                    ["Year","e.g. 2012","year"],
-                    ["Length","e.g. 112 ft","length"],
-                    ["Location","e.g. Fort Lauderdale, FL","location"],
-                  ] as [string,string,string][]).map(([label,ph,key]) => (
-                    <div key={key}>
-                      <label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>{label}</label>
-                      <input style={{ ...iStyle,padding:"8px 10px" }} placeholder={ph}
-                        value={(manualForm as Record<string,string>)[key]}
-                        onChange={e=>setManualForm(f=>({...f,[key]:e.target.value}))} />
-                    </div>
+                  {([["Vessel Name","e.g. KEMOSABE","name"],["Make","e.g. Westport","make"],["Model","e.g. 112","model"],["Year","e.g. 2012","year"],["Length","e.g. 112 ft","length"],["Location","e.g. Ft Lauderdale","location"]] as [string,string,string][]).map(([label,ph,key])=>(
+                    <div key={key}><label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>{label}</label>
+                    <input style={{ ...iStyle,padding:"8px 10px" }} placeholder={ph} value={(manualForm as Record<string,string>)[key]} onChange={e=>setManualForm(f=>({...f,[key]:e.target.value}))}/></div>
                   ))}
                 </div>
-
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10,marginBottom:14 }}>
-                  <div>
-                    <label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>Ask / List Price</label>
-                    <input style={{ ...iStyle,padding:"8px 10px" }} placeholder="$5,500,000" value={manualForm.askPrice} onChange={e=>setManualForm(f=>({...f,askPrice:e.target.value}))} />
-                  </div>
-                  {manualForm.type === "sold" && <>
-                    <div>
-                      <label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"#22c55e",marginBottom:4,display:"block" }}>Sold Price</label>
-                      <input style={{ ...iStyle,padding:"8px 10px" }} placeholder="$5,100,000" value={manualForm.soldPrice} onChange={e=>setManualForm(f=>({...f,soldPrice:e.target.value}))} />
-                    </div>
-                    <div>
-                      <label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>Days on Market</label>
-                      <input style={{ ...iStyle,padding:"8px 10px" }} placeholder="180" value={manualForm.daysOnMarket} onChange={e=>setManualForm(f=>({...f,daysOnMarket:e.target.value}))} />
-                    </div>
-                    <div>
-                      <label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>Sale Year</label>
-                      <input style={{ ...iStyle,padding:"8px 10px" }} placeholder="2024" value={manualForm.soldDate} onChange={e=>setManualForm(f=>({...f,soldDate:e.target.value}))} />
-                    </div>
+                  <div><label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>Ask Price</label><input style={{ ...iStyle,padding:"8px 10px" }} placeholder="$5,500,000" value={manualForm.askPrice} onChange={e=>setManualForm(f=>({...f,askPrice:e.target.value}))}/></div>
+                  {manualForm.type==="sold"&&<>
+                    <div><label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"#22c55e",marginBottom:4,display:"block" }}>Sold Price</label><input style={{ ...iStyle,padding:"8px 10px" }} placeholder="$5,100,000" value={manualForm.soldPrice} onChange={e=>setManualForm(f=>({...f,soldPrice:e.target.value}))}/></div>
+                    <div><label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>Days on Market</label><input style={{ ...iStyle,padding:"8px 10px" }} placeholder="180" value={manualForm.daysOnMarket} onChange={e=>setManualForm(f=>({...f,daysOnMarket:e.target.value}))}/></div>
+                    <div><label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>Sale Year</label><input style={{ ...iStyle,padding:"8px 10px" }} placeholder="2024" value={manualForm.soldDate} onChange={e=>setManualForm(f=>({...f,soldDate:e.target.value}))}/></div>
                   </>}
                 </div>
-
                 <div style={{ display:"flex",gap:10 }}>
                   <button onClick={addManualComp} disabled={!manualForm.name&&!manualForm.make}
                     style={{ background:manualForm.name||manualForm.make?"var(--brass-400)":"var(--border)",color:manualForm.name||manualForm.make?"#fff":"var(--navy-400)",border:"none",borderRadius:8,padding:"9px 20px",fontWeight:700,fontSize:13,cursor:manualForm.name||manualForm.make?"pointer":"not-allowed" }}>
                     + Add This Comp
                   </button>
-                  <button onClick={()=>setShowManualForm(false)}
-                    style={{ background:"transparent",border:"1px solid var(--border)",color:"var(--navy-400)",borderRadius:8,padding:"9px 16px",fontSize:13,cursor:"pointer" }}>
-                    Cancel
-                  </button>
+                  <button onClick={()=>setShowManualForm(false)} style={{ background:"transparent",border:"1px solid var(--border)",color:"var(--navy-400)",borderRadius:8,padding:"9px 16px",fontSize:13,cursor:"pointer" }}>Cancel</button>
                 </div>
               </div>
             )}
@@ -659,25 +571,23 @@ export default function MarketAnalysisPage() {
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
               <div>
                 <p style={{ fontSize:13,fontWeight:600 }}>Supplemental Analysis PDF <span style={{ fontSize:11,fontWeight:400,color:"var(--navy-400)" }}>— optional</span></p>
-                <p style={{ fontSize:12,color:"var(--navy-400)",marginTop:2 }}>Upload any existing market analysis, broker report, or pricing study — Claude will incorporate it into the output</p>
+                <p style={{ fontSize:12,color:"var(--navy-400)",marginTop:2 }}>Upload any existing market analysis, broker report, or pricing study — Claude will incorporate it</p>
               </div>
               <div style={{ display:"flex",gap:8,alignItems:"center",flexShrink:0 }}>
-                {uploadingSupp && <div className="spin" style={{ width:16,height:16,border:"2px solid rgba(255,255,255,.2)",borderTopColor:"var(--brass-400)",borderRadius:"50%" }} />}
-                <button onClick={() => suppPdfRef.current?.click()} disabled={uploadingSupp}
+                {uploadingSupp&&<div className="spin" style={{ width:16,height:16,border:"2px solid rgba(255,255,255,.2)",borderTopColor:"var(--brass-400)",borderRadius:"50%" }}/>}
+                <button onClick={()=>suppPdfRef.current?.click()} disabled={uploadingSupp}
                   style={{ background:"rgba(184,147,58,.08)",border:"1px solid rgba(184,147,58,.3)",color:"var(--brass-400)",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:5 }}>
-                  <Upload className="w-3 h-3" /> {supplementalFile ? "Replace PDF" : "Upload Analysis PDF"}
+                  <Upload className="w-3 h-3"/> {supplementalFile?"Replace PDF":"Upload Analysis PDF"}
                 </button>
-                <input ref={suppPdfRef} type="file" accept=".pdf" className="hidden"
-                  onChange={e=>{if(e.target.files?.[0]){uploadSupplementalPdf(e.target.files[0]);e.target.value="";}}} />
+                <input ref={suppPdfRef} type="file" accept=".pdf" className="hidden" onChange={e=>{if(e.target.files?.[0]){uploadSupplementalPdf(e.target.files[0]);e.target.value="";}}}/>
               </div>
             </div>
-            {supplementalFile && (
+            {supplementalFile&&(
               <div style={{ marginTop:10,display:"flex",alignItems:"center",gap:10,background:"rgba(184,147,58,.06)",border:"1px solid rgba(184,147,58,.2)",borderRadius:8,padding:"8px 14px" }}>
                 <span style={{ fontSize:20 }}>📄</span>
                 <span style={{ fontSize:13,color:"var(--foreground)",fontWeight:500 }}>{supplementalFile}</span>
-                <span style={{ fontSize:11,color:"var(--navy-400)" }}>{Math.round(supplementalText.length / 1000)}k chars extracted</span>
-                <button onClick={()=>{setSupplementalText("");setSupplementalFile("");}}
-                  style={{ marginLeft:"auto",background:"none",border:"none",color:"#f87171",cursor:"pointer",fontSize:16 }}>×</button>
+                <span style={{ fontSize:11,color:"var(--navy-400)" }}>{Math.round(supplementalText.length/1000)}k chars extracted</span>
+                <button onClick={()=>{setSupplementalText("");setSupplementalFile("");}} style={{ marginLeft:"auto",background:"none",border:"none",color:"#f87171",cursor:"pointer",fontSize:16 }}>×</button>
               </div>
             )}
           </div>
@@ -690,21 +600,21 @@ export default function MarketAnalysisPage() {
           </div>
           <button onClick={generateAnalysis} disabled={totalComps===0}
             style={{ width:"100%",background:totalComps>0?"var(--brass-400)":"var(--border)",color:totalComps>0?"#fff":"var(--navy-400)",border:"none",borderRadius:12,padding:"14px 0",fontWeight:700,fontSize:15,cursor:totalComps>0?"pointer":"not-allowed",display:"flex",alignItems:"center",justifyContent:"center",gap:10 }}>
-            <BarChart2 className="w-5 h-5" /> Generate Market Intelligence Report
+            <BarChart2 className="w-5 h-5"/> Generate Market Intelligence Report
           </button>
         </div>
       )}
 
-      {/* ── GENERATING ── */}
+      {/* GENERATING */}
       {step === "generating" && (
         <div style={{ maxWidth:500,margin:"80px auto",textAlign:"center" }}>
-          <div className="spin" style={{ width:52,height:52,border:"3px solid rgba(184,147,58,.3)",borderTopColor:"var(--brass-400)",borderRadius:"50%",margin:"0 auto 24px" }} />
+          <div className="spin" style={{ width:52,height:52,border:"3px solid rgba(184,147,58,.3)",borderTopColor:"var(--brass-400)",borderRadius:"50%",margin:"0 auto 24px" }}/>
           <p style={{ fontFamily:"serif",fontSize:24,marginBottom:8 }}>Analyzing Market Data</p>
           <p style={{ fontSize:13,color:"var(--navy-400)" }}>{genStatus||"Processing…"}</p>
         </div>
       )}
 
-      {/* ── DONE ── */}
+      {/* DONE */}
       {step === "done" && savedId && (
         <div style={{ maxWidth:600,margin:"0 auto",textAlign:"center",padding:"64px 32px" }}>
           <div style={{ fontSize:52,marginBottom:16 }}>✅</div>
@@ -715,14 +625,14 @@ export default function MarketAnalysisPage() {
           <div style={{ display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap" }}>
             <a href={`/api/market-analysis/report?id=${savedId}`} target="_blank" rel="noopener noreferrer"
               style={{ background:"var(--brass-400)",color:"#fff",padding:"12px 28px",borderRadius:10,fontWeight:700,fontSize:14,textDecoration:"none",display:"flex",alignItems:"center",gap:8 }}>
-              <ExternalLink className="w-4 h-4" /> Open Report
+              <ExternalLink className="w-4 h-4"/> Open Report
             </a>
             <button onClick={resetForm} style={{ background:"var(--card)",border:"1px solid var(--border)",color:"var(--foreground)",padding:"12px 24px",borderRadius:10,fontWeight:600,fontSize:14,cursor:"pointer" }}>
               Back to List
             </button>
             <button onClick={()=>{resetForm();setStep("setup");}}
               style={{ background:"var(--card)",border:"1px solid var(--border)",color:"var(--foreground)",padding:"12px 24px",borderRadius:10,fontWeight:600,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:6 }}>
-              <Plus className="w-4 h-4" /> New Analysis
+              <Plus className="w-4 h-4"/> New Analysis
             </button>
           </div>
         </div>
