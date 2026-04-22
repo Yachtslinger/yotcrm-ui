@@ -78,9 +78,9 @@ body{
   border:1px solid #e8e4df;
   padding:22px 24px;
   margin-bottom:14px;
-  /* NO page-break-inside here — causes Chromium element reordering */
 }
-.pb{page-break-before:always;}   /* explicit page break helper class */
+/* Explicit zero-height break element — more reliable than page-break-before on section */
+.pgbrk{display:block;height:0;margin:0;padding:0;border:none;page-break-before:always;break-before:page;}
 
 /* Prevent orphaned headings — keep label+title+rule together */
 .sec-head{page-break-after:avoid;break-after:avoid;}
@@ -188,8 +188,9 @@ td.hl{font-weight:600;color:#050d1a;}
   <p class="bt">${a.marketConditions||""}</p>
 </div>
 
-<!-- ══ PRICING STRATEGY (new page to prevent orphaned header) ═══ -->
-<div class="sec pb">
+<!-- ══ PRICING STRATEGY ══════════════════════════════════════════ -->
+<div class="pgbrk"></div>
+<div class="sec">
   <div class="sec-head">
     <div class="sl">Pricing Strategy</div>
     <div class="st">Recommended Listing Price</div>
@@ -202,7 +203,7 @@ td.hl{font-weight:600;color:#050d1a;}
 </div>
 
 <!-- ══ SOLD COMPS (force new page) ══════════════════════════════ -->
-${sc.length ? `<div class="sec pb">
+${sc.length ? `<div class="pgbrk"></div><div class="sec">
   <div class="sec-head">
     <div class="sl">Comparable Sales</div>
     <div class="st">Direct Sold Comparables</div>
@@ -250,7 +251,8 @@ ${ba.length ? `<div class="sec">
 </div>` : ""}
 
 <!-- ══ COMPETITIVE POSITIONING (new page) ═══════════════════════ -->
-<div class="sec pb">
+<div class="pgbrk"></div>
+<div class="sec">
   <div class="sec-head">
     <div class="sl">Positioning</div>
     <div class="st">Competitive Positioning</div>
@@ -274,27 +276,29 @@ ${ba.length ? `<div class="sec">
   <p class="bt">${dom.rationale||""}</p>
 </div>
 
-<!-- ══ GO-TO-MARKET (new page) ══════════════════════════════════ -->
-<div class="sec pb">
+<!-- ══ GO-TO-MARKET: headline + target buyer + differentiators ═══ -->
+<div class="pgbrk"></div>
+<div class="sec">
   <div class="sec-head">
     <div class="sl">Go-to-Market</div>
     <div class="st">${(mktg.headline as string)||"Marketing Strategy"}</div>
     <div class="gr"></div>
   </div>
   <p class="bt" style="margin-bottom:16px"><strong>Target Buyer:</strong> ${mktg.targetBuyerProfile||""}</p>
-
   ${diffs.length ? `
   <p class="sl" style="margin:18px 0 10px">Key Differentiators</p>
   <div class="diff-list">
     ${diffs.map(d=>`<div class="diff-item"><span class="diff-arrow">→</span>${d}</div>`).join("\n    ")}
   </div>` : ""}
+</div>
 
-  ${channels.length ? `
-  <p class="sl" style="margin:20px 0 10px">Recommended Channels</p>
+<!-- ══ GO-TO-MARKET: channels (separate section — prevents reorder) ══ -->
+${channels.length ? `<div class="sec">
+  <div class="sl" style="margin-bottom:10px">Recommended Channels</div>
   <div class="ctags">
     ${channels.map(c=>`<span class="ctag">${c}</span>`).join("\n    ")}
-  </div>` : ""}
-</div>
+  </div>
+</div>` : ""}
 
 <!-- ══ MARKETING TIMELINE ════════════════════════════════════════ -->
 ${timeline.length ? `<div class="sec">
@@ -311,7 +315,8 @@ ${timeline.length ? `<div class="sec">
 </div>` : ""}
 
 <!-- ══ PRICE REDUCTION STRATEGY (new page) ══════════════════════ -->
-<div class="sec pb">
+<div class="pgbrk"></div>
+<div class="sec">
   <div class="sec-head">
     <div class="sl">Contingency Planning</div>
     <div class="st">Price Reduction Strategy</div>
