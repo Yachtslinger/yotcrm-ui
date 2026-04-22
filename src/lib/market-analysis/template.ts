@@ -109,10 +109,10 @@ td.hl{font-weight:600;color:#050d1a;}
 .sbadge{display:inline-block;padding:3px 12px;border-radius:20px;font-family:'Cinzel',serif;font-size:7.5px;letter-spacing:.14em;text-transform:uppercase;color:#fff;margin-bottom:10px;}
 .rp{font-family:'Cormorant Garamond',serif;font-size:40px;font-weight:300;color:#050d1a;margin:4px 0 8px;}
 
-/* ── Differentiators ─────────────────────────────────────────── */
-ul.dl{list-style:none;padding:0;margin:0;}
-ul.dl li{padding:6px 0 6px 20px;border-bottom:1px solid #f0ede8;position:relative;font-size:12.5px;color:#444;}
-ul.dl li::before{content:'→';position:absolute;left:0;color:#b8933a;}
+/* ── Differentiators: simple divs, no ::before, no position:relative ─ */
+.diff-list{margin:0;padding:0;}
+.diff-item{padding:6px 0;border-bottom:1px solid #f0ede8;font-size:12.5px;color:#444;display:block;}
+.diff-arrow{color:#b8933a;margin-right:8px;font-weight:600;}
 
 /* ── Channel tags ────────────────────────────────────────────── */
 .ctags{display:block;margin-top:10px;}
@@ -188,8 +188,8 @@ ul.dl li::before{content:'→';position:absolute;left:0;color:#b8933a;}
   <p class="bt">${a.marketConditions||""}</p>
 </div>
 
-<!-- ══ PRICING STRATEGY ═════════════════════════════════════════ -->
-<div class="sec">
+<!-- ══ PRICING STRATEGY (new page to prevent orphaned header) ═══ -->
+<div class="sec pb">
   <div class="sec-head">
     <div class="sl">Pricing Strategy</div>
     <div class="st">Recommended Listing Price</div>
@@ -285,9 +285,9 @@ ${ba.length ? `<div class="sec">
 
   ${diffs.length ? `
   <p class="sl" style="margin:18px 0 10px">Key Differentiators</p>
-  <ul class="dl">
-    ${diffs.map(d=>`<li>${d}</li>`).join("\n    ")}
-  </ul>` : ""}
+  <div class="diff-list">
+    ${diffs.map(d=>`<div class="diff-item"><span class="diff-arrow">→</span>${d}</div>`).join("\n    ")}
+  </div>` : ""}
 
   ${channels.length ? `
   <p class="sl" style="margin:20px 0 10px">Recommended Channels</p>
