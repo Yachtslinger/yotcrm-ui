@@ -5,6 +5,8 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import type { CompRecord } from "@/lib/market-analysis/storage";
+import { calculateValuation, getBrandTier, DEFAULT_WEIGHTS } from "@/lib/market-analysis/valuation";
+import type { SubjectVesselAttrs, ValuationWeights } from "@/lib/market-analysis/valuation";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -52,6 +54,10 @@ export async function POST(req: NextRequest) {
       subjectLength, subjectAskingPrice, notes,
       soldComps, activeComps, broadSold, broadActive,
       supplementalText,
+      // Vessel attributes for weighting engine
+      grossTonnage, engineCount, engineBrand, engineHp,
+      lastRefitYear, refitScope,
+      valuationWeights,
     } = body as {
       subjectVessel: string; subjectYear: string; subjectMake: string;
       subjectModel: string; subjectLength: string; subjectAskingPrice: string;
@@ -59,6 +65,13 @@ export async function POST(req: NextRequest) {
       soldComps: CompRecord[]; activeComps: CompRecord[];
       broadSold: CompRecord[]; broadActive: CompRecord[];
       supplementalText?: string;
+      grossTonnage?: number | null;
+      engineCount?: number | null;
+      engineBrand?: string;
+      engineHp?: number | null;
+      lastRefitYear?: number | null;
+      refitScope?: "cosmetic" | "mechanical" | "full" | "none" | "";
+      valuationWeights?: Partial<ValuationWeights>;
     };
 
     // Pre-compute key metrics to feed Claude
@@ -93,6 +106,29 @@ export async function POST(req: NextRequest) {
     const pricePctVsAvg = metrics.avgSoldPrice
       ? Math.round(((subjectPrice - metrics.avgSoldPrice) / metrics.avgSoldPrice) * 100) : 0;
 
+    // ── Run structured valuation engine ──────────────────────────────────────
+    const parseLen = (s: string) => {
+      const m = s?.match(/([\d.]+)\s*m/i);
+      if (m) return Math.round(parseFloat(m[1]) * 3.28084);
+      const ft = s?.match(/([\d.]+)/);
+      return ft ? parseFloat(ft[1]) : 100;
+    };
+    const subjectAttrs: SubjectVesselAttrs = {
+      year:         parseInt(subjectYear) || new Date().getFullYear() - 10,
+      lengthFt:     parseLen(subjectLength),
+      make:         subjectMake,
+      grossTonnage: grossTonnage || null,
+      engineCount:  engineCount || null,
+      engineBrand:  engineBrand || "",
+      engineHp:     engineHp || null,
+      lastRefitYear: lastRefitYear || null,
+      refitScope:   refitScope || "",
+      askingPrice:  subjectPrice,
+    };
+    const valuation = calculateValuation(subjectAttrs, soldComps, broadSold, { ...DEFAULT_WEIGHTS, ...valuationWeights });
+    const brandTierLabel = ["Value", "Mainstream", "Upper-Mid", "Premium", "Ultra-Premium"][valuation.brandTierSubject - 1];
+    const fmtAdj = (pct: number) => (pct >= 0 ? "+" : "") + (pct * 100).toFixed(1) + "%";
+
     const soldCompsTable = soldComps.map(c =>
       `${c.year} ${c.make} ${c.model} "${c.name}" | Ask: ${fmt(c.listedPrice)} | Sold: ${fmt(c.soldPrice)} | DOM: ${c.daysOnMarket ?? "?"} days | ${c.location}`
     ).join("\n");
@@ -124,8 +160,25 @@ Produce a comprehensive, client-facing Market Intelligence & Listing Strategy Re
 SUBJECT VESSEL:
 ${subjectYear} ${subjectMake} ${subjectModel} "${subjectVessel}"
 Length: ${subjectLength} | Proposed Asking Price: ${subjectAskingPrice}
+Brand Tier: ${brandTierLabel} (${valuation.brandTierSubject}/5)
+${grossTonnage ? `Gross Tonnage: ${grossTonnage} GT` : ""}
+${engineCount ? `Engines: ${engineCount}x ${engineBrand || "unknown brand"}${engineHp ? ` (${engineHp} total HP)` : ""}` : ""}
+${lastRefitYear ? `Last Refit: ${lastRefitYear} (${refitScope || "scope unknown"})` : ""}
 Broker Notes: ${notes || "None"}
-${supplementalText ? `\nSUPPLEMENTAL MARKET ANALYSIS (from uploaded report — use this data to enrich your analysis):\n${supplementalText.slice(0, 4000)}\n` : ""}
+
+STRUCTURED VALUATION — COMPARABLE ADJUSTMENT MODEL:
+Calculated Market Value: ${valuation.calculatedValueFormatted}
+Confidence Score: ${valuation.confidenceScore}%
+Methodology: ${valuation.methodology}
+Price Range (±1 std dev): ${fmt(valuation.priceRange.low)} – ${fmt(valuation.priceRange.high)}
+Avg Unadjusted Sold: ${fmt(valuation.avgUnadjustedSold)} → Avg After Adjustments: ${fmt(valuation.avgAdjustedSold)}
+
+INDIVIDUAL COMP ADJUSTMENTS (how each comp was adjusted to subject vessel):
+${valuation.adjustments.map(adj =>
+  `  ${adj.name}
+   Sold: ${fmt(adj.soldPrice)} | Year ${fmtAdj(adj.yearAdj)} | Length ${fmtAdj(adj.lengthAdj)} | Brand ${fmtAdj(adj.brandAdj)}${adj.refitAdj ? ` | Refit ${fmtAdj(adj.refitAdj)}` : ""} | Total ${fmtAdj(adj.totalAdjPct)} → Adjusted: ${fmt(adj.adjustedPrice)} (weight: ${adj.weight.toFixed(2)})`
+).join("\n")}
+${supplementalText ? `\nSUPPLEMENTAL MARKET ANALYSIS (additional context from uploaded report):\n${supplementalText.slice(0, 3000)}\n` : ""}
 
 DIRECT SOLD COMPARABLES (${soldComps.length} vessels):
 ${soldCompsTable || "None provided"}
@@ -154,9 +207,9 @@ Produce a JSON response ONLY (no markdown, no backticks) with this exact structu
   "executiveSummary": "3-4 sentence overview of market conditions and subject vessel positioning",
   "marketConditions": "Paragraph analyzing current supply/demand, pricing trends, what the data shows",
   "pricingAnalysis": {
-    "recommendedListPrice": <number, your recommended list price in USD>,
+    "recommendedListPrice": <number — must be close to the calculated value of ${valuation.calculatedValue} unless broker notes strongly justify deviation>,
     "recommendedListPriceFormatted": "$X,XXX,XXX",
-    "rationale": "Why this price, referencing specific comps",
+    "rationale": "Reference the specific comp adjustments that drove this number",
     "priceStrategy": "aggressive|at-market|aspirational",
     "priceStrategyExplanation": "What the strategy means and why"
   },
@@ -186,11 +239,13 @@ Produce a JSON response ONLY (no markdown, no backticks) with this exact structu
     let analysis: Record<string, unknown> = {};
     try {
       analysis = JSON.parse(raw.replace(/```json|```/g, "").trim());
+      // Store valuation result inside analysis JSON for later retrieval
+      analysis._valuation = valuation;
     } catch {
       analysis = { error: "Could not parse analysis", raw };
     }
 
-    return NextResponse.json({ ok: true, analysis, metrics });
+    return NextResponse.json({ ok: true, analysis, metrics, valuation });
   } catch (err) {
     console.error("market-analysis/generate error:", err);
     return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });

@@ -1,4 +1,5 @@
 import type { CompRecord, MarketAnalysis } from "./storage";
+import type { ValuationResult } from "./valuation";
 
 function fmt(n: number | null | undefined): string {
   if (!n) return "—";
@@ -8,7 +9,7 @@ function avg(nums: number[]) {
   return nums.length ? Math.round(nums.reduce((a,b)=>a+b,0)/nums.length) : 0;
 }
 
-export function generateMarketReport(ma: MarketAnalysis, pdfMode = false): string {
+export function generateMarketReport(ma: MarketAnalysis, pdfMode = false, valuation?: ValuationResult): string {
   const a = ma.analysis_json as Record<string, unknown>;
   const pricing = (a.pricingAnalysis as Record<string,unknown>) || {};
   const dom = (a.daysOnMarketForecast as Record<string,unknown>) || {};
@@ -212,7 +213,37 @@ ${sc.length ? `<div class="pgbrk"></div><div class="sec">
     <thead><tr><th>Year</th><th>Make / Model</th><th>Vessel</th><th>Listed At</th><th>Sold At</th><th>DOM</th><th>Location</th></tr></thead>
     <tbody>${sc.map(c=>cr(c,true)).join("")}</tbody>
   </table>
-</div>` : ""}
+</div>
+
+<!-- ══ VALUATION METHODOLOGY ════════════════════════════════════ -->
+${valuation && valuation.compCount > 0 ? `<div class="sec">
+  <div class="sec-head">
+    <div class="sl">Valuation Methodology</div>
+    <div class="st">Comparable Adjustment Model</div>
+  </div>
+  <div class="mg"><div class="mg-row">
+    <div class="mb"><div class="mn">${valuation.calculatedValueFormatted}</div><div class="mk">Calculated Value</div><div class="ms">weighted comps</div></div>
+    <div class="mb"><div class="mn">${valuation.confidenceScore}%</div><div class="mk">Confidence</div><div class="ms">comp quality score</div></div>
+    <div class="mb"><div class="mn">${fmt(valuation.priceRange.low)}–${fmt(valuation.priceRange.high)}</div><div class="mk">Value Range</div><div class="ms">±1 std deviation</div></div>
+    <div class="mb"><div class="mn">${valuation.compCount}</div><div class="mk">Comps Used</div><div class="ms">in calculation</div></div>
+  </div></div>
+  <table style="margin-top:12px">
+    <thead><tr><th>Comparable</th><th>Sold</th><th>Year Adj</th><th>Length Adj</th><th>Brand Adj</th><th>Refit Adj</th><th>Total</th><th>Adj. Value</th></tr></thead>
+    <tbody>
+      ${valuation.adjustments.map(adj => `<tr>
+        <td>${adj.name}</td>
+        <td>${fmt(adj.soldPrice)}</td>
+        <td style="color:${adj.yearAdj>=0?"#22c55e":"#f87171"}">${adj.yearAdj>=0?"+":""}${(adj.yearAdj*100).toFixed(1)}%</td>
+        <td style="color:${adj.lengthAdj>=0?"#22c55e":"#f87171"}">${adj.lengthAdj>=0?"+":""}${(adj.lengthAdj*100).toFixed(1)}%</td>
+        <td style="color:${adj.brandAdj>=0?"#22c55e":"#f87171"}">${adj.brandAdj>=0?"+":""}${(adj.brandAdj*100).toFixed(1)}%</td>
+        <td style="color:${adj.refitAdj>=0?"#22c55e":"#f87171"}">${adj.refitAdj>=0?"+":""}${(adj.refitAdj*100).toFixed(1)}%</td>
+        <td style="color:${adj.totalAdjPct>=0?"#22c55e":"#f87171"};font-weight:600">${adj.totalAdjPct>=0?"+":""}${(adj.totalAdjPct*100).toFixed(1)}%</td>
+        <td class="hl">${fmt(adj.adjustedPrice)}</td>
+      </tr>`).join("")}
+    </tbody>
+  </table>
+  <p style="font-size:10.5px;color:#999;margin-top:10px;font-style:italic">${valuation.methodology}</p>
+</div>` : ""}` : ""}
 
 <!-- ══ ACTIVE COMPS ══════════════════════════════════════════════ -->
 ${ac.length ? `<div class="sec">

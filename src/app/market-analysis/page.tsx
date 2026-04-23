@@ -46,6 +46,29 @@ export default function MarketAnalysisPage() {
   const [subjectLength, setSubjectLength] = React.useState("");
   const [subjectAskingPrice, setSubjectAskingPrice] = React.useState("");
   const [notes, setNotes] = React.useState("");
+  // Vessel attributes for valuation weighting
+  const [grossTonnage, setGrossTonnage] = React.useState("");
+  const [engineCount, setEngineCount] = React.useState("");
+  const [engineBrand, setEngineBrand] = React.useState("");
+  const [engineHp, setEngineHp] = React.useState("");
+  const [lastRefitYear, setLastRefitYear] = React.useState("");
+  const [refitScope, setRefitScope] = React.useState<"cosmetic"|"mechanical"|"full"|"none"|"">("");
+  // Valuation weights — broker-adjustable, defaults match valuation engine defaults
+  const [weights, setWeights] = React.useState({
+    yearRatePerYear: 1.5,
+    yearCap: 20,
+    lengthCap: 25,
+    brandPerTier: 5,
+    brandCap: 20,
+    gtCap: 3,
+    engineCap: 5,
+    refitFull: 8,
+    refitMechanical: 5,
+    refitCosmetic: 3,
+    refitFadeYears: 8,
+    manualOverride: 0,
+  });
+  const [showWeights, setShowWeights] = React.useState(false);
 
   // Comp PDFs
   const [soldPdfComps, setSoldPdfComps] = React.useState<CompRecord[]>([]);
@@ -237,6 +260,13 @@ export default function MarketAnalysisPage() {
           subjectLength, subjectAskingPrice, notes,
           soldComps: allSold, activeComps: allActive, broadSold: [], broadActive: [],
           supplementalText: combinedSupplemental || undefined,
+          grossTonnage: grossTonnage ? parseInt(grossTonnage) : null,
+          engineCount:  engineCount  ? parseInt(engineCount)  : null,
+          engineBrand:  engineBrand  || undefined,
+          engineHp:     engineHp     ? parseInt(engineHp)     : null,
+          lastRefitYear: lastRefitYear ? parseInt(lastRefitYear) : null,
+          refitScope:   refitScope   || undefined,
+          valuationWeights: weights,
         }),
       });
       const genData = await genRes.json();
@@ -269,6 +299,10 @@ export default function MarketAnalysisPage() {
     setSubjectPdfFile(""); setSubjectPdfText("");
     setSubjectVessel(""); setSubjectYear(""); setSubjectMake("");
     setSubjectModel(""); setSubjectLength(""); setSubjectAskingPrice(""); setNotes("");
+    setGrossTonnage(""); setEngineCount(""); setEngineBrand(""); setEngineHp("");
+    setLastRefitYear(""); setRefitScope("");
+    setWeights({ yearRatePerYear:1.5, yearCap:20, lengthCap:25, brandPerTier:5, brandCap:20, gtCap:3, engineCap:5, refitFull:8, refitMechanical:5, refitCosmetic:3, refitFadeYears:8, manualOverride:0 });
+    setShowWeights(false);
     setSoldPdfComps([]); setActivePdfComps([]);
     setSupplementalText(""); setSupplementalFile("");
     setManualComps([]); setShowManualForm(false);
@@ -407,6 +441,95 @@ export default function MarketAnalysisPage() {
               <label style={{ fontSize:10,letterSpacing:"0.12em",textTransform:"uppercase",color:"var(--brass-400)",marginBottom:5,display:"block" }}>Broker Notes</label>
               <textarea style={{ ...iStyle,minHeight:72,resize:"vertical",fontFamily:"inherit" }} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Condition, refit history, key features, motivation to sell…" />
             </div>
+
+            {/* ── Valuation weighting attributes ── */}
+            <div style={{ marginTop:20,padding:"16px 18px",background:"rgba(184,147,58,.04)",border:"1px solid rgba(184,147,58,.2)",borderRadius:8 }}>
+              <p style={{ fontSize:11,fontWeight:600,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--brass-400)",marginBottom:12 }}>Valuation Weighting Attributes</p>
+              <p style={{ fontSize:11,color:"var(--navy-400)",marginBottom:14 }}>These fields drive the comparable adjustment model — year, length, brand tier, gross tonnage, engines, and refit are used to mathematically adjust each comp's sold price before averaging.</p>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12 }}>
+                <div>
+                  <label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>Gross Tonnage (GT)</label>
+                  <input style={iStyle} placeholder="e.g. 247" value={grossTonnage} onChange={e=>setGrossTonnage(e.target.value)} />
+                </div>
+                <div>
+                  <label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>Engine Count</label>
+                  <input style={iStyle} placeholder="e.g. 2" value={engineCount} onChange={e=>setEngineCount(e.target.value)} />
+                </div>
+                <div>
+                  <label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>Engine Brand</label>
+                  <input style={iStyle} placeholder="e.g. CAT, MTU, Cummins" value={engineBrand} onChange={e=>setEngineBrand(e.target.value)} />
+                </div>
+                <div>
+                  <label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>Total Engine HP</label>
+                  <input style={iStyle} placeholder="e.g. 2600" value={engineHp} onChange={e=>setEngineHp(e.target.value)} />
+                </div>
+                <div>
+                  <label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>Last Refit Year</label>
+                  <input style={iStyle} placeholder="e.g. 2024" value={lastRefitYear} onChange={e=>setLastRefitYear(e.target.value)} />
+                </div>
+                <div>
+                  <label style={{ fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:"var(--navy-400)",marginBottom:4,display:"block" }}>Refit Scope</label>
+                  <select style={{ ...iStyle }} value={refitScope} onChange={e=>setRefitScope(e.target.value as typeof refitScope)}>
+                    <option value="">Not specified</option>
+                    <option value="none">No refit</option>
+                    <option value="cosmetic">Cosmetic only</option>
+                    <option value="mechanical">Mechanical / systems</option>
+                    <option value="full">Full refit (cosmetic + mechanical)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Adjustment weights ── */}
+            <div style={{ marginTop:14 }}>
+              <button onClick={()=>setShowWeights(p=>!p)}
+                style={{ background:"none",border:"1px solid rgba(184,147,58,.3)",color:"var(--brass-400)",borderRadius:7,padding:"7px 14px",fontSize:11,fontWeight:600,cursor:"pointer",letterSpacing:"0.08em",textTransform:"uppercase",display:"flex",alignItems:"center",gap:8,width:"100%" }}>
+                <span>{showWeights?"▲":"▼"} Adjustment Weights</span>
+                <span style={{ fontSize:10,fontWeight:400,color:"var(--navy-400)",textTransform:"none",letterSpacing:0 }}>set the % applied to each valuation factor</span>
+              </button>
+              {showWeights && (
+                <div style={{ marginTop:10,padding:"16px 18px",background:"rgba(184,147,58,.03)",border:"1px solid rgba(184,147,58,.15)",borderRadius:8 }}>
+                  <p style={{ fontSize:11,color:"var(--navy-400)",marginBottom:16 }}>Each slider controls how much a given factor moves the adjusted value per comparable. Slide or type a number. Defaults reflect standard appraisal methodology.</p>
+                  {([
+                    ["Year rate / yr",     "% adjustment per year of age diff",     "yearRatePerYear",  0, 5,   0.5],
+                    ["Year cap ±",         "Max total year adjustment",             "yearCap",          0, 50,  1  ],
+                    ["Length cap ±",       "Max total length adjustment",           "lengthCap",        0, 50,  1  ],
+                    ["Brand / tier step",  "% per brand tier difference",           "brandPerTier",     0, 20,  1  ],
+                    ["Brand cap ±",        "Max total brand adjustment",            "brandCap",         0, 50,  1  ],
+                    ["GT cap ±",           "Max gross tonnage adjustment",          "gtCap",            0, 20,  1  ],
+                    ["Engine cap ±",       "Max engine quality adjustment",         "engineCap",        0, 20,  1  ],
+                    ["Full refit",         "Premium for full cosmetic+mech refit",  "refitFull",        0, 50,  1  ],
+                    ["Mech refit",         "Premium for mechanical/systems refit",  "refitMechanical",  0, 50,  1  ],
+                    ["Cosmetic refit",     "Premium for cosmetic-only refit",       "refitCosmetic",    0, 30,  1  ],
+                    ["Refit fade (yrs)",   "Years until refit premium fades to 0",  "refitFadeYears",   1, 20,  1  ],
+                    ["Broker override ±",  "Manual overall adjustment on top",      "manualOverride", -50, 50,  1  ],
+                  ] as [string,string,string,number,number,number][]).map(([label,desc,key,min,max,step])=>(
+                    <div key={key} style={{ display:"grid",gridTemplateColumns:"150px 1fr 72px",gap:10,alignItems:"center",marginBottom:10 }}>
+                      <div>
+                        <div style={{ fontSize:11,fontWeight:600,color:"var(--foreground)" }}>{label}</div>
+                        <div style={{ fontSize:10,color:"var(--navy-400)" }}>{desc}</div>
+                      </div>
+                      <input type="range" min={min} max={max} step={step}
+                        value={(weights as Record<string,number>)[key]}
+                        onChange={e=>setWeights(p=>({...p,[key]:parseFloat(e.target.value)}))}
+                        style={{ width:"100%",accentColor:"var(--brass-400)" }} />
+                      <div style={{ display:"flex",alignItems:"center",gap:3 }}>
+                        <input type="number" min={min} max={max} step={step}
+                          value={(weights as Record<string,number>)[key]}
+                          onChange={e=>setWeights(p=>({...p,[key]:parseFloat(e.target.value)||0}))}
+                          style={{ background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)",borderRadius:6,padding:"4px 6px",fontSize:12,textAlign:"right",width:52 }} />
+                        <span style={{ fontSize:11,color:"var(--navy-400)",flexShrink:0 }}>%</span>
+                      </div>
+                    </div>
+                  ))}
+                  <button onClick={()=>setWeights({yearRatePerYear:1.5,yearCap:20,lengthCap:25,brandPerTier:5,brandCap:20,gtCap:3,engineCap:5,refitFull:8,refitMechanical:5,refitCosmetic:3,refitFadeYears:8,manualOverride:0})}
+                    style={{ background:"none",border:"1px solid var(--border)",color:"var(--navy-400)",borderRadius:7,padding:"5px 12px",fontSize:11,cursor:"pointer",marginTop:6 }}>
+                    Reset to Defaults
+                  </button>
+                </div>
+              )}
+            </div>
+
             <button onClick={() => setStep("comps")} disabled={!subjectMake&&!subjectVessel&&!subjectPdfFile}
               style={{ marginTop:20,width:"100%",background:subjectMake||subjectVessel||subjectPdfFile?"var(--brass-400)":"var(--border)",color:subjectMake||subjectVessel||subjectPdfFile?"#fff":"var(--navy-400)",border:"none",borderRadius:10,padding:"12px 0",fontWeight:700,fontSize:14,cursor:subjectMake||subjectVessel||subjectPdfFile?"pointer":"not-allowed" }}>
               Continue → Add Comparable Data
