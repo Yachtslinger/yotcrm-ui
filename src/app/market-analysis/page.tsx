@@ -113,9 +113,11 @@ export default function MarketAnalysisPage() {
     setLoading(true);
     try {
       const r = await fetch("/api/market-analysis");
+      if (!r.ok) { setLoading(false); return; }
       const d = await r.json();
       if (d.ok) setAnalyses(d.analyses);
-    } finally { setLoading(false); }
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
   }
   function loadIntoDraft(a: Record<string,unknown>) {
     const pricing = (a.pricingAnalysis as Record<string,unknown>) || {};
@@ -164,14 +166,12 @@ export default function MarketAnalysisPage() {
     };
   }
 
-  // Text area refs for the review step
-  const reviewRefs = {
-    executive:   React.useRef<HTMLTextAreaElement>(null),
-    conditions:  React.useRef<HTMLTextAreaElement>(null),
-    positioning: React.useRef<HTMLTextAreaElement>(null),
-    reduction:   React.useRef<HTMLTextAreaElement>(null),
-    broker:      React.useRef<HTMLTextAreaElement>(null),
-  };
+  // Text area refs for the review step — must be top-level hook calls
+  const refExecutive   = React.useRef<HTMLTextAreaElement>(null);
+  const refConditions  = React.useRef<HTMLTextAreaElement>(null);
+  const refPositioning = React.useRef<HTMLTextAreaElement>(null);
+  const refReduction   = React.useRef<HTMLTextAreaElement>(null);
+  const refBroker      = React.useRef<HTMLTextAreaElement>(null);
 
   function loadAnalysisForEdit(a: SavedAnalysis & { sold_comps?: CompRecord[]; active_comps?: CompRecord[]; notes?: string }) {
     setEditingId(a.id);
@@ -372,11 +372,11 @@ export default function MarketAnalysisPage() {
 
   async function saveReport() {
     const textOverrides = {
-      executive:   reviewRefs.executive.current?.value   || "",
-      conditions:  reviewRefs.conditions.current?.value  || "",
-      positioning: reviewRefs.positioning.current?.value || "",
-      reduction:   reviewRefs.reduction.current?.value   || "",
-      broker:      reviewRefs.broker.current?.value      || "",
+      executive:   refExecutive.current?.value   || "",
+      conditions:  refConditions.current?.value  || "",
+      positioning: refPositioning.current?.value || "",
+      reduction:   refReduction.current?.value   || "",
+      broker:      refBroker.current?.value      || "",
     };
     const finalAnalysis = buildFinalAnalysis(textOverrides);
     const pd = pendingGenData as Record<string,unknown> | null;
@@ -886,15 +886,15 @@ export default function MarketAnalysisPage() {
 
           {/* Helper for section cards */}
           {([
-            ["Executive Summary",        "executiveSummary",         "executive",   draft.executiveSummary],
-            ["Market Conditions",         "marketConditions",         "conditions",  draft.marketConditions],
-            ["Competitive Positioning",   "competitivePositioning",   "positioning", draft.competitivePositioning],
-            ["Price Reduction Strategy",  "priceReductionStrategy",   "reduction",   draft.priceReductionStrategy],
-            ["Broker Notes & Flags",      "brokerNotes",              "broker",      draft.brokerNotes],
-          ] as [string,string,string,unknown][]).map(([title,,refKey,value]) => (
+            ["Executive Summary",        "executive",   refExecutive,   draft.executiveSummary],
+            ["Market Conditions",         "conditions",  refConditions,  draft.marketConditions],
+            ["Competitive Positioning",   "positioning", refPositioning, draft.competitivePositioning],
+            ["Price Reduction Strategy",  "reduction",   refReduction,   draft.priceReductionStrategy],
+            ["Broker Notes & Flags",      "broker",      refBroker,      draft.brokerNotes],
+          ] as [string,string,React.RefObject<HTMLTextAreaElement>,unknown][]).map(([title,refKey,ref,value]) => (
             <div key={refKey} style={{ background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:"18px 22px",marginBottom:14 }}>
               <label style={{ fontSize:10,letterSpacing:"0.14em",textTransform:"uppercase",color:"var(--brass-400)",marginBottom:8,display:"block" }}>{title}</label>
-              <textarea ref={reviewRefs[refKey as keyof typeof reviewRefs]}
+              <textarea ref={ref}
                 defaultValue={String(value||"")}
                 style={{ width:"100%",background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)",borderRadius:8,padding:"10px 12px",fontSize:13,lineHeight:1.75,resize:"vertical",minHeight:100,fontFamily:"inherit" }}
               />
