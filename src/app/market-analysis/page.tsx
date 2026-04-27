@@ -24,7 +24,7 @@ type SavedAnalysis = {
   created_at: string; updated_at: string;
 };
 
-type Step = "list" | "setup" | "comps" | "generating" | "done";
+type Step = "list" | "setup" | "comps" | "generating" | "review" | "done";
 
 export default function MarketAnalysisPage() {
   const [step, setStep] = React.useState<Step>("list");
@@ -91,7 +91,13 @@ export default function MarketAnalysisPage() {
   });
   const [genStatus, setGenStatus] = React.useState("");
   const [savedId, setSavedId] = React.useState<number | null>(null);
-  const [editingId, setEditingId] = React.useState<number | null>(null); // null = new, number = editing existing
+  const [editingId, setEditingId] = React.useState<number | null>(null);
+  // Draft analysis — editable before saving
+  const [draft, setDraft] = React.useState<Record<string,unknown>>({});
+  const [draftPricing, setDraftPricing] = React.useState({ recommendedListPrice: 0, recommendedListPriceFormatted: "", priceStrategy: "", priceStrategyExplanation: "", rationale: "" });
+  const [draftDom, setDraftDom] = React.useState({ lowEstimate: "", highEstimate: "", rationale: "" });
+  const [draftMktg, setDraftMktg] = React.useState({ headline: "", targetBuyerProfile: "", keyDifferentiators: [] as string[], channels: [] as string[], timeline: [] as {week:string;action:string}[] });
+  const [pendingGenData, setPendingGenData] = React.useState<Record<string,unknown> | null>(null); // null = new, number = editing existing
 
   const soldPdfRef = React.useRef<HTMLInputElement>(null);
   const activePdfRef = React.useRef<HTMLInputElement>(null);
@@ -111,7 +117,61 @@ export default function MarketAnalysisPage() {
       if (d.ok) setAnalyses(d.analyses);
     } finally { setLoading(false); }
   }
-  React.useEffect(() => { loadAnalyses(); }, []);
+  function loadIntoDraft(a: Record<string,unknown>) {
+    const pricing = (a.pricingAnalysis as Record<string,unknown>) || {};
+    const dom = (a.daysOnMarketForecast as Record<string,unknown>) || {};
+    const mktg = (a.marketingStrategy as Record<string,unknown>) || {};
+    setDraft(a);
+    setDraftPricing({
+      recommendedListPrice: (pricing.recommendedListPrice as number) || 0,
+      recommendedListPriceFormatted: (pricing.recommendedListPriceFormatted as string) || "",
+      priceStrategy: (pricing.priceStrategy as string) || "at-market",
+      priceStrategyExplanation: (pricing.priceStrategyExplanation as string) || "",
+      rationale: (pricing.rationale as string) || "",
+    });
+    setDraftDom({
+      lowEstimate: String((dom.lowEstimate as number) || ""),
+      highEstimate: String((dom.highEstimate as number) || ""),
+      rationale: (dom.rationale as string) || "",
+    });
+    setDraftMktg({
+      headline: (mktg.headline as string) || "",
+      targetBuyerProfile: (mktg.targetBuyerProfile as string) || "",
+      keyDifferentiators: (mktg.keyDifferentiators as string[]) || [],
+      channels: (mktg.channels as string[]) || [],
+      timeline: (mktg.timeline as {week:string;action:string}[]) || [],
+    });
+  }
+
+  function buildFinalAnalysis(textOverrides: Record<string,string>): Record<string,unknown> {
+    return {
+      ...draft,
+      executiveSummary: textOverrides.executive ?? draft.executiveSummary,
+      marketConditions: textOverrides.conditions ?? draft.marketConditions,
+      competitivePositioning: textOverrides.positioning ?? draft.competitivePositioning,
+      priceReductionStrategy: textOverrides.reduction ?? draft.priceReductionStrategy,
+      brokerNotes: textOverrides.broker ?? draft.brokerNotes,
+      pricingAnalysis: {
+        ...draftPricing,
+        recommendedListPriceFormatted: draftPricing.recommendedListPriceFormatted || `$${Number(draftPricing.recommendedListPrice).toLocaleString()}`,
+      },
+      daysOnMarketForecast: {
+        ...draftDom,
+        lowEstimate: parseInt(draftDom.lowEstimate) || 90,
+        highEstimate: parseInt(draftDom.highEstimate) || 240,
+      },
+      marketingStrategy: { ...draftMktg },
+    };
+  }
+
+  // Text area refs for the review step
+  const reviewRefs = {
+    executive:   React.useRef<HTMLTextAreaElement>(null),
+    conditions:  React.useRef<HTMLTextAreaElement>(null),
+    positioning: React.useRef<HTMLTextAreaElement>(null),
+    reduction:   React.useRef<HTMLTextAreaElement>(null),
+    broker:      React.useRef<HTMLTextAreaElement>(null),
+  };
 
   function loadAnalysisForEdit(a: SavedAnalysis & { sold_comps?: CompRecord[]; active_comps?: CompRecord[]; notes?: string }) {
     setEditingId(a.id);
@@ -303,34 +363,51 @@ export default function MarketAnalysisPage() {
       });
       const genData = await genRes.json();
       if (!genData.ok) { showToast(`Analysis failed: ${genData.error}`, "error"); setStep("comps"); return; }
-      setGenStatus("Saving report…");
-      const savePayload = {
-        title: `${subjectYear} ${subjectMake} ${subjectModel}${subjectVessel ? ` — ${subjectVessel}` : ""}`,
-        subject_vessel: subjectVessel, subject_year: subjectYear, subject_make: subjectMake,
-        subject_model: subjectModel, subject_length: subjectLength,
-        subject_asking_price: subjectAskingPrice, notes,
-        sold_comps: allSold, active_comps: allActive, broad_sold: [], broad_active: [],
-        analysis_json: genData.analysis, report_html: "",
-      };
+      // Store comps for later save
+      setPendingGenData({ genData, allSold, allActive });
+      loadIntoDraft(genData.analysis);
+      setStep("review");
+    } catch (err) { showToast(`Error: ${err}`, "error"); setStep("comps"); }
+  }
+
+  async function saveReport() {
+    const textOverrides = {
+      executive:   reviewRefs.executive.current?.value   || "",
+      conditions:  reviewRefs.conditions.current?.value  || "",
+      positioning: reviewRefs.positioning.current?.value || "",
+      reduction:   reviewRefs.reduction.current?.value   || "",
+      broker:      reviewRefs.broker.current?.value      || "",
+    };
+    const finalAnalysis = buildFinalAnalysis(textOverrides);
+    const pd = pendingGenData as Record<string,unknown> | null;
+    const allSold   = (pd?.allSold  as CompRecord[]) || [];
+    const allActive = (pd?.allActive as CompRecord[]) || [];
+    const savePayload = {
+      title: `${subjectYear} ${subjectMake} ${subjectModel}${subjectVessel ? ` — ${subjectVessel}` : ""}`,
+      subject_vessel: subjectVessel, subject_year: subjectYear, subject_make: subjectMake,
+      subject_model: subjectModel, subject_length: subjectLength,
+      subject_asking_price: subjectAskingPrice, notes,
+      sold_comps: allSold, active_comps: allActive, broad_sold: [], broad_active: [],
+      analysis_json: finalAnalysis, report_html: "",
+    };
+    try {
       let saveId: number;
       if (editingId) {
-        // Update existing
         await fetch("/api/market-analysis", {
           method: "PATCH", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id: editingId, ...savePayload }),
         });
         saveId = editingId;
       } else {
-        // Create new
-        const saveRes = await fetch("/api/market-analysis", {
+        const res = await fetch("/api/market-analysis", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify(savePayload),
         });
-        const saveData = await saveRes.json();
-        saveId = saveData.id;
+        const d = await res.json();
+        saveId = d.id;
       }
       setSavedId(saveId); setStep("done"); loadAnalyses();
-    } catch (err) { showToast(`Error: ${err}`, "error"); setStep("comps"); }
+    } catch (err) { showToast(`Save failed: ${err}`, "error"); }
   }
 
   async function deleteAnalysis(id: number) {
@@ -788,6 +865,119 @@ export default function MarketAnalysisPage() {
           <button onClick={generateAnalysis} disabled={totalComps===0}
             style={{ width:"100%",background:totalComps>0?"var(--brass-400)":"var(--border)",color:totalComps>0?"#fff":"var(--navy-400)",border:"none",borderRadius:12,padding:"14px 0",fontWeight:700,fontSize:15,cursor:totalComps>0?"pointer":"not-allowed",display:"flex",alignItems:"center",justifyContent:"center",gap:10 }}>
             <BarChart2 className="w-5 h-5"/> {editingId ? "Regenerate Report" : "Generate Market Intelligence Report"}
+          </button>
+        </div>
+      )}
+
+      {/* REVIEW & EDIT */}
+      {step === "review" && (
+        <div style={{ maxWidth:820,margin:"0 auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+            <div>
+              <button onClick={()=>setStep("comps")} style={{ background:"none",border:"none",color:"var(--navy-400)",cursor:"pointer",fontSize:13,marginBottom:6,display:"block" }}>← Back to Comps</button>
+              <p style={{ fontFamily:"serif",fontSize:22 }}>Review & Edit Report</p>
+              <p style={{ fontSize:12,color:"var(--navy-400)",marginTop:2 }}>Edit any section before saving. All changes are reflected in the final report and PDF.</p>
+            </div>
+            <button onClick={saveReport}
+              style={{ background:"var(--brass-400)",color:"#fff",border:"none",borderRadius:10,padding:"12px 28px",fontWeight:700,fontSize:14,cursor:"pointer",flexShrink:0 }}>
+              ✓ Save Report
+            </button>
+          </div>
+
+          {/* Helper for section cards */}
+          {([
+            ["Executive Summary",        "executiveSummary",         "executive",   draft.executiveSummary],
+            ["Market Conditions",         "marketConditions",         "conditions",  draft.marketConditions],
+            ["Competitive Positioning",   "competitivePositioning",   "positioning", draft.competitivePositioning],
+            ["Price Reduction Strategy",  "priceReductionStrategy",   "reduction",   draft.priceReductionStrategy],
+            ["Broker Notes & Flags",      "brokerNotes",              "broker",      draft.brokerNotes],
+          ] as [string,string,string,unknown][]).map(([title,,refKey,value]) => (
+            <div key={refKey} style={{ background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:"18px 22px",marginBottom:14 }}>
+              <label style={{ fontSize:10,letterSpacing:"0.14em",textTransform:"uppercase",color:"var(--brass-400)",marginBottom:8,display:"block" }}>{title}</label>
+              <textarea ref={reviewRefs[refKey as keyof typeof reviewRefs]}
+                defaultValue={String(value||"")}
+                style={{ width:"100%",background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)",borderRadius:8,padding:"10px 12px",fontSize:13,lineHeight:1.75,resize:"vertical",minHeight:100,fontFamily:"inherit" }}
+              />
+            </div>
+          ))}
+
+          {/* Pricing */}
+          <div style={{ background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:"18px 22px",marginBottom:14 }}>
+            <label style={{ fontSize:10,letterSpacing:"0.14em",textTransform:"uppercase",color:"var(--brass-400)",marginBottom:12,display:"block" }}>Pricing Strategy</label>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:12 }}>
+              <div>
+                <label style={{ fontSize:10,color:"var(--navy-400)",marginBottom:4,display:"block",textTransform:"uppercase",letterSpacing:"0.1em" }}>Recommended Price</label>
+                <input style={{ ...iStyle }} value={draftPricing.recommendedListPriceFormatted}
+                  onChange={e=>setDraftPricing(p=>({...p,recommendedListPriceFormatted:e.target.value}))} placeholder="$3,195,000" />
+              </div>
+              <div>
+                <label style={{ fontSize:10,color:"var(--navy-400)",marginBottom:4,display:"block",textTransform:"uppercase",letterSpacing:"0.1em" }}>Strategy</label>
+                <select style={{ ...iStyle }} value={draftPricing.priceStrategy} onChange={e=>setDraftPricing(p=>({...p,priceStrategy:e.target.value}))}>
+                  <option value="aggressive">Aggressive</option>
+                  <option value="at-market">At-Market</option>
+                  <option value="aspirational">Aspirational</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize:10,color:"var(--navy-400)",marginBottom:4,display:"block",textTransform:"uppercase",letterSpacing:"0.1em" }}>Strategy Tagline</label>
+                <input style={{ ...iStyle }} value={draftPricing.priceStrategyExplanation}
+                  onChange={e=>setDraftPricing(p=>({...p,priceStrategyExplanation:e.target.value}))} />
+              </div>
+            </div>
+            <label style={{ fontSize:10,color:"var(--navy-400)",marginBottom:4,display:"block",textTransform:"uppercase",letterSpacing:"0.1em" }}>Pricing Rationale</label>
+            <textarea style={{ width:"100%",background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)",borderRadius:8,padding:"10px 12px",fontSize:13,lineHeight:1.75,resize:"vertical",minHeight:80,fontFamily:"inherit" }}
+              value={draftPricing.rationale} onChange={e=>setDraftPricing(p=>({...p,rationale:e.target.value}))} />
+          </div>
+
+          {/* DOM Forecast */}
+          <div style={{ background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:"18px 22px",marginBottom:14 }}>
+            <label style={{ fontSize:10,letterSpacing:"0.14em",textTransform:"uppercase",color:"var(--brass-400)",marginBottom:12,display:"block" }}>Days on Market Forecast</label>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12 }}>
+              <div>
+                <label style={{ fontSize:10,color:"var(--navy-400)",marginBottom:4,display:"block",textTransform:"uppercase",letterSpacing:"0.1em" }}>Best Case (days)</label>
+                <input style={{ ...iStyle }} value={draftDom.lowEstimate} onChange={e=>setDraftDom(p=>({...p,lowEstimate:e.target.value}))} placeholder="90" />
+              </div>
+              <div>
+                <label style={{ fontSize:10,color:"var(--navy-400)",marginBottom:4,display:"block",textTransform:"uppercase",letterSpacing:"0.1em" }}>Expected (days)</label>
+                <input style={{ ...iStyle }} value={draftDom.highEstimate} onChange={e=>setDraftDom(p=>({...p,highEstimate:e.target.value}))} placeholder="240" />
+              </div>
+            </div>
+            <label style={{ fontSize:10,color:"var(--navy-400)",marginBottom:4,display:"block",textTransform:"uppercase",letterSpacing:"0.1em" }}>DOM Rationale</label>
+            <textarea style={{ width:"100%",background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)",borderRadius:8,padding:"10px 12px",fontSize:13,lineHeight:1.75,resize:"vertical",minHeight:72,fontFamily:"inherit" }}
+              value={draftDom.rationale} onChange={e=>setDraftDom(p=>({...p,rationale:e.target.value}))} />
+          </div>
+
+          {/* Marketing */}
+          <div style={{ background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:"18px 22px",marginBottom:14 }}>
+            <label style={{ fontSize:10,letterSpacing:"0.14em",textTransform:"uppercase",color:"var(--brass-400)",marginBottom:12,display:"block" }}>Marketing Strategy</label>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12 }}>
+              <div>
+                <label style={{ fontSize:10,color:"var(--navy-400)",marginBottom:4,display:"block",textTransform:"uppercase",letterSpacing:"0.1em" }}>Headline</label>
+                <input style={{ ...iStyle }} value={draftMktg.headline} onChange={e=>setDraftMktg(p=>({...p,headline:e.target.value}))} />
+              </div>
+              <div>
+                <label style={{ fontSize:10,color:"var(--navy-400)",marginBottom:4,display:"block",textTransform:"uppercase",letterSpacing:"0.1em" }}>Target Buyer Profile</label>
+                <input style={{ ...iStyle }} value={draftMktg.targetBuyerProfile} onChange={e=>setDraftMktg(p=>({...p,targetBuyerProfile:e.target.value}))} />
+              </div>
+            </div>
+            <label style={{ fontSize:10,color:"var(--navy-400)",marginBottom:6,display:"block",textTransform:"uppercase",letterSpacing:"0.1em" }}>Key Differentiators</label>
+            <div style={{ display:"flex",flexDirection:"column",gap:6,marginBottom:8 }}>
+              {draftMktg.keyDifferentiators.map((d,i)=>(
+                <div key={i} style={{ display:"flex",gap:6 }}>
+                  <input style={{ ...iStyle,flex:1 }} value={d} onChange={e=>setDraftMktg(p=>({...p,keyDifferentiators:p.keyDifferentiators.map((x,j)=>j===i?e.target.value:x)}))} />
+                  <button onClick={()=>setDraftMktg(p=>({...p,keyDifferentiators:p.keyDifferentiators.filter((_,j)=>j!==i)}))} style={{ background:"rgba(180,0,0,.12)",border:"none",color:"#f87171",borderRadius:8,padding:"0 10px",cursor:"pointer",flexShrink:0 }}>×</button>
+                </div>
+              ))}
+              <button onClick={()=>setDraftMktg(p=>({...p,keyDifferentiators:[...p.keyDifferentiators,""]}))}
+                style={{ background:"rgba(184,147,58,.08)",border:"1px dashed rgba(184,147,58,.3)",color:"var(--brass-400)",borderRadius:7,padding:"6px 14px",fontSize:12,cursor:"pointer",alignSelf:"flex-start" }}>
+                + Add Differentiator
+              </button>
+            </div>
+          </div>
+
+          <button onClick={saveReport}
+            style={{ width:"100%",background:"var(--brass-400)",color:"#fff",border:"none",borderRadius:12,padding:"14px 0",fontWeight:700,fontSize:15,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:10,marginTop:8 }}>
+            ✓ Save & Finalize Report
           </button>
         </div>
       )}
