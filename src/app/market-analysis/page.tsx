@@ -91,6 +91,7 @@ export default function MarketAnalysisPage() {
   });
   const [genStatus, setGenStatus] = React.useState("");
   const [savedId, setSavedId] = React.useState<number | null>(null);
+  const [editingId, setEditingId] = React.useState<number | null>(null); // null = new, number = editing existing
 
   const soldPdfRef = React.useRef<HTMLInputElement>(null);
   const activePdfRef = React.useRef<HTMLInputElement>(null);
@@ -111,6 +112,38 @@ export default function MarketAnalysisPage() {
     } finally { setLoading(false); }
   }
   React.useEffect(() => { loadAnalyses(); }, []);
+
+  function loadAnalysisForEdit(a: SavedAnalysis & { sold_comps?: CompRecord[]; active_comps?: CompRecord[]; notes?: string }) {
+    setEditingId(a.id);
+    setSubjectVessel(a.subject_vessel || "");
+    setSubjectYear(a.subject_year || "");
+    setSubjectMake(a.subject_make || "");
+    setSubjectModel(a.subject_model || "");
+    setSubjectLength((a as any).subject_length || "");
+    setSubjectAskingPrice(a.subject_asking_price || "");
+    setNotes((a as any).notes || "");
+    // Load stored comps back as manual comps so they're editable
+    const sc: CompRecord[] = (a as any).sold_comps || [];
+    const ac: CompRecord[] = (a as any).active_comps || [];
+    setManualComps([...sc, ...ac]);
+    setShowManualForm(false);
+    setSoldPdfComps([]);
+    setActivePdfComps([]);
+    setSuppDocs([]);
+    setCompUrls([{ url: "", type: "sold", soldPrice: "", daysOnMarket: "", status: "idle", result: null, preview: null, error: "" }]);
+    setSubjectUrl(""); setSubjectPreview(null); setSubjectPdfFile(""); setSubjectPdfText("");
+    setStep("setup");
+    showToast("Analysis loaded for editing", "success");
+  }
+
+  async function fetchAndEditAnalysis(id: number) {
+    try {
+      const r = await fetch(`/api/market-analysis?id=${id}`);
+      const d = await r.json();
+      if (d.ok && d.analysis) loadAnalysisForEdit(d.analysis);
+      else showToast("Could not load analysis", "error");
+    } catch { showToast("Could not load analysis", "error"); }
+  }
 
   async function scrapeSubjectUrl() {
     if (!subjectUrl.trim()) return;
@@ -271,19 +304,32 @@ export default function MarketAnalysisPage() {
       const genData = await genRes.json();
       if (!genData.ok) { showToast(`Analysis failed: ${genData.error}`, "error"); setStep("comps"); return; }
       setGenStatus("Saving report…");
-      const saveRes = await fetch("/api/market-analysis", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: `${subjectYear} ${subjectMake} ${subjectModel}${subjectVessel ? ` — ${subjectVessel}` : ""}`,
-          subject_vessel: subjectVessel, subject_year: subjectYear, subject_make: subjectMake,
-          subject_model: subjectModel, subject_length: subjectLength,
-          subject_asking_price: subjectAskingPrice, notes,
-          sold_comps: allSold, active_comps: allActive, broad_sold: [], broad_active: [],
-          analysis_json: genData.analysis, report_html: "",
-        }),
-      });
-      const saveData = await saveRes.json();
-      setSavedId(saveData.id); setStep("done"); loadAnalyses();
+      const savePayload = {
+        title: `${subjectYear} ${subjectMake} ${subjectModel}${subjectVessel ? ` — ${subjectVessel}` : ""}`,
+        subject_vessel: subjectVessel, subject_year: subjectYear, subject_make: subjectMake,
+        subject_model: subjectModel, subject_length: subjectLength,
+        subject_asking_price: subjectAskingPrice, notes,
+        sold_comps: allSold, active_comps: allActive, broad_sold: [], broad_active: [],
+        analysis_json: genData.analysis, report_html: "",
+      };
+      let saveId: number;
+      if (editingId) {
+        // Update existing
+        await fetch("/api/market-analysis", {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: editingId, ...savePayload }),
+        });
+        saveId = editingId;
+      } else {
+        // Create new
+        const saveRes = await fetch("/api/market-analysis", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(savePayload),
+        });
+        const saveData = await saveRes.json();
+        saveId = saveData.id;
+      }
+      setSavedId(saveId); setStep("done"); loadAnalyses();
     } catch (err) { showToast(`Error: ${err}`, "error"); setStep("comps"); }
   }
 
@@ -294,7 +340,7 @@ export default function MarketAnalysisPage() {
   }
 
   function resetForm() {
-    setStep("list"); setSubjectUrl(""); setSubjectPreview(null);
+    setStep("list"); setEditingId(null); setSubjectUrl(""); setSubjectPreview(null);
     setSubjectPdfFile(""); setSubjectPdfText("");
     setSubjectVessel(""); setSubjectYear(""); setSubjectMake("");
     setSubjectModel(""); setSubjectLength(""); setSubjectAskingPrice(""); setNotes("");
@@ -360,12 +406,16 @@ export default function MarketAnalysisPage() {
                   <div style={{ display:"flex",gap:8 }}>
                     <a href={`/api/market-analysis/report?id=${a.id}`} target="_blank" rel="noopener noreferrer"
                       style={{ background:"var(--brass-400)",color:"#fff",padding:"7px 14px",borderRadius:8,fontSize:12,fontWeight:600,textDecoration:"none",display:"flex",alignItems:"center",gap:6 }}>
-                      <ExternalLink className="w-3 h-3" /> View Report
+                      <ExternalLink className="w-3 h-3" /> View
                     </a>
                     <a href={`/api/market-analysis/pdf?id=${a.id}`} target="_blank" rel="noopener noreferrer"
                       style={{ background:"rgba(184,147,58,.12)",border:"1px solid rgba(184,147,58,.3)",color:"var(--brass-400)",padding:"7px 14px",borderRadius:8,fontSize:12,fontWeight:600,textDecoration:"none",display:"flex",alignItems:"center",gap:6 }}>
                       ⬇ PDF
                     </a>
+                    <button onClick={() => fetchAndEditAnalysis(a.id)}
+                      style={{ background:"rgba(255,255,255,.06)",border:"1px solid var(--border)",color:"var(--foreground)",padding:"7px 12px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer" }}>
+                      ✎ Edit
+                    </button>
                     <button onClick={() => deleteAnalysis(a.id)} style={{ background:"rgba(180,0,0,.12)",border:"none",color:"#f87171",padding:"7px 10px",borderRadius:8,cursor:"pointer" }}>
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -382,8 +432,10 @@ export default function MarketAnalysisPage() {
         <div style={{ maxWidth:720,margin:"0 auto" }}>
           <button onClick={resetForm} style={{ background:"none",border:"none",color:"var(--navy-400)",cursor:"pointer",fontSize:13,marginBottom:20 }}>← Back</button>
           <div style={{ background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:28 }}>
-            <p style={{ fontFamily:"serif",fontSize:22,marginBottom:4 }}>Subject Vessel</p>
-            <p style={{ fontSize:12,color:"var(--navy-400)",marginBottom:16 }}>Paste a listing URL to auto-fill, upload a vessel PDF brochure/spec sheet, or enter details manually</p>
+            <p style={{ fontFamily:"serif",fontSize:22,marginBottom:4 }}>{editingId ? "Edit Analysis" : "Subject Vessel"}</p>
+            <p style={{ fontSize:12,color:"var(--navy-400)",marginBottom:16 }}>
+              {editingId ? "Update subject vessel details and proceed to adjust comp data" : "Paste a listing URL to auto-fill, upload a vessel PDF brochure/spec sheet, or enter details manually"}
+            </p>
 
             {/* URL auto-fill */}
             <div style={{ display:"flex",gap:8,marginBottom:12 }}>
@@ -735,7 +787,7 @@ export default function MarketAnalysisPage() {
           </div>
           <button onClick={generateAnalysis} disabled={totalComps===0}
             style={{ width:"100%",background:totalComps>0?"var(--brass-400)":"var(--border)",color:totalComps>0?"#fff":"var(--navy-400)",border:"none",borderRadius:12,padding:"14px 0",fontWeight:700,fontSize:15,cursor:totalComps>0?"pointer":"not-allowed",display:"flex",alignItems:"center",justifyContent:"center",gap:10 }}>
-            <BarChart2 className="w-5 h-5"/> Generate Market Intelligence Report
+            <BarChart2 className="w-5 h-5"/> {editingId ? "Regenerate Report" : "Generate Market Intelligence Report"}
           </button>
         </div>
       )}
