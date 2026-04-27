@@ -77,8 +77,7 @@ export default function MarketAnalysisPage() {
   const [uploadingActive, setUploadingActive] = React.useState(false);
 
   // Supplemental PDF + comp URLs + manual
-  const [supplementalText, setSupplementalText] = React.useState("");
-  const [supplementalFile, setSupplementalFile] = React.useState("");
+  const [suppDocs, setSuppDocs] = React.useState<{fileName:string;text:string;pages:number}[]>([]);
   const [uploadingSupp, setUploadingSupp] = React.useState(false);
   const [compUrls, setCompUrls] = React.useState<CompUrl[]>([
     { url: "", type: "sold", soldPrice: "", daysOnMarket: "", status: "idle", result: null, preview: null, error: "" }
@@ -177,6 +176,7 @@ export default function MarketAnalysisPage() {
   }
 
   async function uploadSupplementalPdf(file: File) {
+    if (suppDocs.length >= 5) { showToast("Maximum 5 supplemental PDFs", "error"); return; }
     setUploadingSupp(true);
     try {
       const form = new FormData();
@@ -184,9 +184,8 @@ export default function MarketAnalysisPage() {
       const r = await fetch("/api/market-analysis/extract-text", { method: "POST", body: form });
       const d = await r.json();
       if (!d.ok) { showToast(`Extract failed: ${d.error}`, "error"); return; }
-      setSupplementalText(d.text);
-      setSupplementalFile(d.fileName);
-      showToast(`✓ Loaded: ${d.pages} pages extracted`, "success");
+      setSuppDocs(p => [...p, { fileName: d.fileName, text: d.text, pages: d.pages }]);
+      showToast(`✓ Added: ${d.fileName} (${d.pages} pages)`, "success");
     } catch (err) { showToast(`Upload error: ${err}`, "error"); }
     finally { setUploadingSupp(false); }
   }
@@ -250,7 +249,7 @@ export default function MarketAnalysisPage() {
     setStep("generating"); setGenStatus("Compiling comp data…");
     const allSold = [...soldPdfComps, ...compUrls.filter(c => c.type === "sold" && c.result).map(c => c.result!), ...manualComps.filter(c => c.source === "sold_comps")];
     const allActive = [...activePdfComps, ...compUrls.filter(c => c.type === "active" && c.result).map(c => c.result!), ...manualComps.filter(c => c.source === "active_comps")];
-    const combinedSupplemental = [subjectPdfText, supplementalText].filter(Boolean).join("\n\n---\n\n");
+    const combinedSupplemental = [subjectPdfText, ...suppDocs.map(d=>d.text)].filter(Boolean).join("\n\n---\n\n");
     setGenStatus("Analyzing with AI…");
     try {
       const genRes = await fetch("/api/market-analysis/generate", {
@@ -304,7 +303,7 @@ export default function MarketAnalysisPage() {
     setWeights({ yearRatePerYear:1.5, yearCap:20, lengthCap:25, brandPerTier:5, brandCap:20, gtCap:3, engineCap:5, refitFull:8, refitMechanical:5, refitCosmetic:3, refitFadeYears:8, manualOverride:0 });
     setShowWeights(false);
     setSoldPdfComps([]); setActivePdfComps([]);
-    setSupplementalText(""); setSupplementalFile("");
+    setSuppDocs([]);
     setManualComps([]); setShowManualForm(false);
     setManualForm({ type: "sold", name: "", make: "", model: "", year: "", length: "", location: "", askPrice: "", soldPrice: "", daysOnMarket: "", listedDate: "", soldDate: "" });
     setCompUrls([{ url: "", type: "sold", soldPrice: "", daysOnMarket: "", status: "idle", result: null, preview: null, error: "" }]);
@@ -693,28 +692,37 @@ export default function MarketAnalysisPage() {
             )}
           </div>
 
-          {/* Supplemental Analysis PDF */}
+          {/* Supplemental Analysis PDFs — up to 5 */}
           <div style={{ background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:"20px 24px",marginBottom:16 }}>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:suppDocs.length>0?12:0 }}>
               <div>
-                <p style={{ fontSize:13,fontWeight:600 }}>Supplemental Analysis PDF <span style={{ fontSize:11,fontWeight:400,color:"var(--navy-400)" }}>— optional</span></p>
-                <p style={{ fontSize:12,color:"var(--navy-400)",marginTop:2 }}>Upload any existing market analysis, broker report, or pricing study — Claude will incorporate it</p>
+                <p style={{ fontSize:13,fontWeight:600 }}>Supplemental Analysis PDFs
+                  <span style={{ fontSize:11,fontWeight:400,color:"var(--navy-400)" }}> — optional, up to 5</span>
+                </p>
+                <p style={{ fontSize:12,color:"var(--navy-400)",marginTop:2 }}>Upload existing market analyses, broker reports, pricing studies — Claude incorporates all of them</p>
               </div>
               <div style={{ display:"flex",gap:8,alignItems:"center",flexShrink:0 }}>
                 {uploadingSupp&&<div className="spin" style={{ width:16,height:16,border:"2px solid rgba(255,255,255,.2)",borderTopColor:"var(--brass-400)",borderRadius:"50%" }}/>}
-                <button onClick={()=>suppPdfRef.current?.click()} disabled={uploadingSupp}
-                  style={{ background:"rgba(184,147,58,.08)",border:"1px solid rgba(184,147,58,.3)",color:"var(--brass-400)",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:5 }}>
-                  <Upload className="w-3 h-3"/> {supplementalFile?"Replace PDF":"Upload Analysis PDF"}
-                </button>
+                {suppDocs.length < 5 && (
+                  <button onClick={()=>suppPdfRef.current?.click()} disabled={uploadingSupp}
+                    style={{ background:"rgba(184,147,58,.08)",border:"1px solid rgba(184,147,58,.3)",color:"var(--brass-400)",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:5 }}>
+                    <Upload className="w-3 h-3"/> Add PDF ({suppDocs.length}/5)
+                  </button>
+                )}
                 <input ref={suppPdfRef} type="file" accept=".pdf" className="hidden" onChange={e=>{if(e.target.files?.[0]){uploadSupplementalPdf(e.target.files[0]);e.target.value="";}}}/>
               </div>
             </div>
-            {supplementalFile&&(
-              <div style={{ marginTop:10,display:"flex",alignItems:"center",gap:10,background:"rgba(184,147,58,.06)",border:"1px solid rgba(184,147,58,.2)",borderRadius:8,padding:"8px 14px" }}>
-                <span style={{ fontSize:20 }}>📄</span>
-                <span style={{ fontSize:13,color:"var(--foreground)",fontWeight:500 }}>{supplementalFile}</span>
-                <span style={{ fontSize:11,color:"var(--navy-400)" }}>{Math.round(supplementalText.length/1000)}k chars extracted</span>
-                <button onClick={()=>{setSupplementalText("");setSupplementalFile("");}} style={{ marginLeft:"auto",background:"none",border:"none",color:"#f87171",cursor:"pointer",fontSize:16 }}>×</button>
+            {suppDocs.length > 0 && (
+              <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                {suppDocs.map((doc,i) => (
+                  <div key={i} style={{ display:"flex",alignItems:"center",gap:10,background:"rgba(184,147,58,.06)",border:"1px solid rgba(184,147,58,.2)",borderRadius:8,padding:"8px 14px" }}>
+                    <span style={{ fontSize:18,flexShrink:0 }}>📄</span>
+                    <span style={{ fontSize:13,color:"var(--foreground)",fontWeight:500,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{doc.fileName}</span>
+                    <span style={{ fontSize:11,color:"var(--navy-400)",flexShrink:0 }}>{doc.pages} pages · {Math.round(doc.text.length/1000)}k chars</span>
+                    <button onClick={()=>setSuppDocs(p=>p.filter((_,j)=>j!==i))}
+                      style={{ background:"none",border:"none",color:"#f87171",cursor:"pointer",fontSize:16,flexShrink:0,padding:"0 4px" }}>×</button>
+                  </div>
+                ))}
               </div>
             )}
           </div>
