@@ -29,7 +29,7 @@ type Step = "list" | "setup" | "comps" | "generating" | "review" | "done";
 export default function MarketAnalysisPage() {
   const [step, setStep] = React.useState<Step>("list");
   const [analyses, setAnalyses] = React.useState<SavedAnalysis[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  const [loading, setLoading] = React.useState(false);
   const [toast, setToast] = React.useState<{ msg: string; type: "success" | "error" } | null>(null);
 
   // Subject vessel
@@ -119,6 +119,7 @@ export default function MarketAnalysisPage() {
     } catch { /* ignore */ }
     finally { setLoading(false); }
   }
+  React.useEffect(() => { loadAnalyses(); }, []);
   function loadIntoDraft(a: Record<string,unknown>) {
     const pricing = (a.pricingAnalysis as Record<string,unknown>) || {};
     const dom = (a.daysOnMarketForecast as Record<string,unknown>) || {};
