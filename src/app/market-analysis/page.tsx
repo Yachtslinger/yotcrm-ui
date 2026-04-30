@@ -215,6 +215,42 @@ export default function MarketAnalysisPage() {
   const refPositioning = React.useRef<HTMLTextAreaElement>(null);
   const refReduction   = React.useRef<HTMLTextAreaElement>(null);
   const refBroker      = React.useRef<HTMLTextAreaElement>(null);
+  const [generatingSection, setGeneratingSection] = React.useState<string | null>(null);
+
+  async function generateSection(section: string, targetRef?: React.RefObject<HTMLTextAreaElement>) {
+    setGeneratingSection(section);
+    try {
+      const pd = pendingGenData as Record<string,unknown> | null;
+      const r = await fetch("/api/market-analysis/generate-section", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          section,
+          subjectVessel, subjectYear, subjectMake, subjectModel,
+          subjectLength, subjectAskingPrice, notes,
+          soldComps: (pd?.allSold as CompRecord[]) || [],
+          activeComps: (pd?.allActive as CompRecord[]) || [],
+          recommendedPrice: draftPricing.recommendedListPriceFormatted,
+          domLow: draftDom.lowEstimate,
+          domHigh: draftDom.highEstimate,
+        }),
+      });
+      const d = await r.json();
+      if (!d.ok) { showToast(`Generate failed: ${d.error}`, "error"); return; }
+      if (d.type === "array") {
+        setDraftMktg(p => ({ ...p, keyDifferentiators: d.value }));
+      } else if (d.type === "text") {
+        if (targetRef?.current) {
+          targetRef.current.value = d.value;
+          // Also update draft state for sections stored in state not refs
+          if (section === "pricingRationale") setDraftPricing(p => ({ ...p, rationale: d.value }));
+          if (section === "domRationale") setDraftDom(p => ({ ...p, rationale: d.value }));
+        }
+      }
+      showToast("✓ Generated", "success");
+    } catch (err) { showToast(`Error: ${err}`, "error"); }
+    finally { setGeneratingSection(null); }
+  }
 
   function loadAnalysisForEdit(a: SavedAnalysis & { sold_comps?: CompRecord[]; active_comps?: CompRecord[]; notes?: string }) {
     setEditingId(a.id);
@@ -948,14 +984,20 @@ export default function MarketAnalysisPage() {
 
           {/* Helper for section cards */}
           {([
-            ["Executive Summary",        "executive",   refExecutive,   draft.executiveSummary],
-            ["Market Conditions",         "conditions",  refConditions,  draft.marketConditions],
-            ["Competitive Positioning",   "positioning", refPositioning, draft.competitivePositioning],
-            ["Price Reduction Strategy",  "reduction",   refReduction,   draft.priceReductionStrategy],
-            ["Broker Notes & Flags",      "broker",      refBroker,      draft.brokerNotes],
-          ] as [string,string,React.RefObject<HTMLTextAreaElement>,unknown][]).map(([title,refKey,ref,value]) => (
+            ["Executive Summary",       "executiveSummary",      "executive",   refExecutive,   draft.executiveSummary],
+            ["Market Conditions",       "marketConditions",       "conditions",  refConditions,  draft.marketConditions],
+            ["Competitive Positioning", "competitivePositioning", "positioning", refPositioning, draft.competitivePositioning],
+            ["Price Reduction Strategy","priceReductionStrategy", "reduction",   refReduction,   draft.priceReductionStrategy],
+            ["Broker Notes & Flags",    "brokerNotes",            "broker",      refBroker,      draft.brokerNotes],
+          ] as [string,string,string,React.RefObject<HTMLTextAreaElement>,unknown][]).map(([title,sectionKey,refKey,ref,value]) => (
             <div key={refKey} style={{ background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:"18px 22px",marginBottom:14 }}>
-              <label style={{ fontSize:10,letterSpacing:"0.14em",textTransform:"uppercase",color:"var(--brass-400)",marginBottom:8,display:"block" }}>{title}</label>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+                <label style={{ fontSize:10,letterSpacing:"0.14em",textTransform:"uppercase",color:"var(--brass-400)" }}>{title}</label>
+                <button onClick={()=>generateSection(sectionKey, ref)} disabled={!!generatingSection}
+                  style={{ background:"rgba(184,147,58,.1)",border:"1px solid rgba(184,147,58,.3)",color:"var(--brass-400)",borderRadius:7,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:generatingSection?"not-allowed":"pointer",display:"flex",alignItems:"center",gap:5,opacity:generatingSection&&generatingSection!==sectionKey?0.5:1 }}>
+                  {generatingSection===sectionKey?<><div className="spin" style={{ width:10,height:10,border:"1.5px solid rgba(184,147,58,.3)",borderTopColor:"var(--brass-400)",borderRadius:"50%" }}/> Generating…</>:"✦ Generate"}
+                </button>
+              </div>
               <textarea ref={ref}
                 defaultValue={String(value||"")}
                 style={{ width:"100%",background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)",borderRadius:8,padding:"10px 12px",fontSize:13,lineHeight:1.75,resize:"vertical",minHeight:100,fontFamily:"inherit" }}
@@ -986,7 +1028,13 @@ export default function MarketAnalysisPage() {
                   onChange={e=>setDraftPricing(p=>({...p,priceStrategyExplanation:e.target.value}))} />
               </div>
             </div>
-            <label style={{ fontSize:10,color:"var(--navy-400)",marginBottom:4,display:"block",textTransform:"uppercase",letterSpacing:"0.1em" }}>Pricing Rationale</label>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4 }}>
+              <label style={{ fontSize:10,color:"var(--navy-400)",textTransform:"uppercase",letterSpacing:"0.1em" }}>Pricing Rationale</label>
+              <button onClick={()=>generateSection("pricingRationale")} disabled={!!generatingSection}
+                style={{ background:"rgba(184,147,58,.1)",border:"1px solid rgba(184,147,58,.3)",color:"var(--brass-400)",borderRadius:7,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:generatingSection?"not-allowed":"pointer",display:"flex",alignItems:"center",gap:4 }}>
+                {generatingSection==="pricingRationale"?<><div className="spin" style={{ width:9,height:9,border:"1.5px solid rgba(184,147,58,.3)",borderTopColor:"var(--brass-400)",borderRadius:"50%" }}/> Generating…</>:"✦ Generate"}
+              </button>
+            </div>
             <textarea style={{ width:"100%",background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)",borderRadius:8,padding:"10px 12px",fontSize:13,lineHeight:1.75,resize:"vertical",minHeight:80,fontFamily:"inherit" }}
               value={draftPricing.rationale} onChange={e=>setDraftPricing(p=>({...p,rationale:e.target.value}))} />
           </div>
@@ -1004,7 +1052,13 @@ export default function MarketAnalysisPage() {
                 <input style={{ ...iStyle }} value={draftDom.highEstimate} onChange={e=>setDraftDom(p=>({...p,highEstimate:e.target.value}))} placeholder="240" />
               </div>
             </div>
-            <label style={{ fontSize:10,color:"var(--navy-400)",marginBottom:4,display:"block",textTransform:"uppercase",letterSpacing:"0.1em" }}>DOM Rationale</label>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4 }}>
+              <label style={{ fontSize:10,color:"var(--navy-400)",textTransform:"uppercase",letterSpacing:"0.1em" }}>DOM Rationale</label>
+              <button onClick={()=>generateSection("domRationale")} disabled={!!generatingSection}
+                style={{ background:"rgba(184,147,58,.1)",border:"1px solid rgba(184,147,58,.3)",color:"var(--brass-400)",borderRadius:7,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:generatingSection?"not-allowed":"pointer",display:"flex",alignItems:"center",gap:4 }}>
+                {generatingSection==="domRationale"?<><div className="spin" style={{ width:9,height:9,border:"1.5px solid rgba(184,147,58,.3)",borderTopColor:"var(--brass-400)",borderRadius:"50%" }}/> Generating…</>:"✦ Generate"}
+              </button>
+            </div>
             <textarea style={{ width:"100%",background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)",borderRadius:8,padding:"10px 12px",fontSize:13,lineHeight:1.75,resize:"vertical",minHeight:72,fontFamily:"inherit" }}
               value={draftDom.rationale} onChange={e=>setDraftDom(p=>({...p,rationale:e.target.value}))} />
           </div>
@@ -1022,7 +1076,13 @@ export default function MarketAnalysisPage() {
                 <input style={{ ...iStyle }} value={draftMktg.targetBuyerProfile} onChange={e=>setDraftMktg(p=>({...p,targetBuyerProfile:e.target.value}))} />
               </div>
             </div>
-            <label style={{ fontSize:10,color:"var(--navy-400)",marginBottom:6,display:"block",textTransform:"uppercase",letterSpacing:"0.1em" }}>Key Differentiators</label>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6 }}>
+              <label style={{ fontSize:10,color:"var(--navy-400)",textTransform:"uppercase",letterSpacing:"0.1em" }}>Key Differentiators</label>
+              <button onClick={()=>generateSection("keyDifferentiators")} disabled={!!generatingSection}
+                style={{ background:"rgba(184,147,58,.1)",border:"1px solid rgba(184,147,58,.3)",color:"var(--brass-400)",borderRadius:7,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:generatingSection?"not-allowed":"pointer",display:"flex",alignItems:"center",gap:4 }}>
+                {generatingSection==="keyDifferentiators"?<><div className="spin" style={{ width:9,height:9,border:"1.5px solid rgba(184,147,58,.3)",borderTopColor:"var(--brass-400)",borderRadius:"50%" }}/> Generating…</>:"✦ Generate"}
+              </button>
+            </div>
             <div style={{ display:"flex",flexDirection:"column",gap:6,marginBottom:8 }}>
               {draftMktg.keyDifferentiators.map((d,i)=>(
                 <div key={i} style={{ display:"flex",gap:6 }}>
