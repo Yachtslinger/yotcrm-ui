@@ -11,6 +11,13 @@ function avg(nums: number[]) {
 
 export function generateMarketReport(ma: MarketAnalysis, pdfMode = false, valuation?: ValuationResult): string {
   const a = ma.analysis_json as Record<string, unknown>;
+  const broker = (a._broker as { name: string; title: string; email: string; phone: string; location: string } | undefined) || {
+    name: "Will Noftsinger III",
+    title: "Yacht Broker",
+    email: "WN@DenisonYachting.com",
+    phone: "+1 (850) 461-3342",
+    location: "Fort Lauderdale, FL",
+  };
   const pricing = (a.pricingAnalysis as Record<string,unknown>) || {};
   const dom = (a.daysOnMarketForecast as Record<string,unknown>) || {};
   const mktg = (a.marketingStrategy as Record<string,unknown>) || {};
@@ -140,7 +147,7 @@ td.hl{font-weight:600;color:#050d1a;}
   <div>
     <div class="ey">Confidential · Market Intelligence Report</div>
     <div class="ct">${ma.subject_year} ${ma.subject_make} ${ma.subject_model}</div>
-    <div class="cs">${ma.subject_vessel||"Subject Vessel"} &nbsp;·&nbsp; ${ma.subject_length||""} &nbsp;·&nbsp; Will Noftsinger · Denison Yachting</div>
+    <div class="cs">${ma.subject_vessel||"Subject Vessel"} &nbsp;·&nbsp; ${ma.subject_length||""} &nbsp;·&nbsp; ${broker.name} · Denison Yachting</div>
   </div>
   <div class="cm">
     <div class="cm-cell"><div class="ml">Proposed Ask</div><div class="mv">${ma.subject_asking_price||"TBD"}</div></div>
@@ -368,8 +375,8 @@ ${a.brokerNotes ? `<div class="sec" style="border-left:4px solid #b8933a">
 
 <!-- ══ FOOTER ════════════════════════════════════════════════════ -->
 <div class="footer">
-  <strong>Will Noftsinger III &nbsp;·&nbsp; Yacht Broker &nbsp;·&nbsp; Denison Yachting</strong><br>
-  WN@DenisonYachting.com &nbsp;·&nbsp; +1 (850) 461-3342 &nbsp;·&nbsp; Fort Lauderdale, FL<br>
+  <strong>${broker.name} &nbsp;·&nbsp; ${broker.title} &nbsp;·&nbsp; Denison Yachting</strong><br>
+  ${broker.email} &nbsp;·&nbsp; ${broker.phone} &nbsp;·&nbsp; ${broker.location}<br>
   <span style="color:#ccc;font-size:10px">Confidential — Prepared for listing presentation purposes</span>
 </div>
 

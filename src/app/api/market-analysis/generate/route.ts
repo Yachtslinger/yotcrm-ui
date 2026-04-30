@@ -58,6 +58,7 @@ export async function POST(req: NextRequest) {
       grossTonnage, engineCount, engineBrand, engineHp,
       lastRefitYear, refitScope,
       valuationWeights,
+      brokerId,
     } = body as {
       subjectVessel: string; subjectYear: string; subjectMake: string;
       subjectModel: string; subjectLength: string; subjectAskingPrice: string;
@@ -72,7 +73,14 @@ export async function POST(req: NextRequest) {
       lastRefitYear?: number | null;
       refitScope?: "cosmetic" | "mechanical" | "full" | "none" | "";
       valuationWeights?: Partial<ValuationWeights>;
+      brokerId?: string;
     };
+
+    const BROKERS: Record<string, { name: string; title: string; email: string; phone: string; location: string; bio: string }> = {
+      will: { name: "Will Noftsinger III", title: "Yacht Broker", email: "WN@DenisonYachting.com", phone: "+1 (850) 461-3342", location: "Fort Lauderdale, FL", bio: "Will Noftsinger, a senior yacht broker at Denison Yachting in Fort Lauderdale with 15+ years of experience in superyacht transactions" },
+      erik: { name: "Erik Mayol", title: "Yacht Broker", email: "em@DenisonYachting.com", phone: "(949) 338-7907", location: "Newport Beach, CA", bio: "Erik Mayol, a yacht broker at Denison Yachting specializing in motor yachts" },
+    };
+    const broker = BROKERS[brokerId || "will"] || BROKERS.will;
 
     // Pre-compute key metrics to feed Claude
     const soldPrices = soldComps.map(c => c.soldPrice).filter(Boolean) as number[];
@@ -145,13 +153,14 @@ export async function POST(req: NextRequest) {
       `${c.year} ${c.make} ${c.model} "${c.name}" | Ask: ${fmt(c.askPrice ?? c.listedPrice)} | ${c.location}`
     ).join("\n");
 
-    const prompt = `You are Will Noftsinger, a senior yacht broker at Denison Yachting in Fort Lauderdale with 15+ years of experience in superyacht transactions. Write a Market Intelligence & Listing Strategy Report entirely in first-person professional broker voice.
+    const prompt = `You are ${broker.bio} at Denison Yachting. Write a Market Intelligence & Listing Strategy Report entirely in first-person professional broker voice.
 
 CRITICAL RULES:
 - Never reference AI, Claude, artificial intelligence, machine learning, or any automated system.
-- Never use phrases like "Based on my analysis as an AI", "As a language model", "I was trained", or any similar language.
+- Never use phrases like "Based on my analysis as an AI", "As a language model", or any similar language.
 - Write exactly as an experienced human yacht broker would write — confident, specific, data-driven, professional.
 - Use "I recommend", "my analysis of the comps shows", "in my professional opinion", "the data indicates" — natural broker language.
+- Sign your analysis as ${broker.name}, ${broker.title} at Denison Yachting.
 - Do NOT include any disclaimers, caveats about data limitations, or suggestions to consult other sources.
 - Be specific and decisive. Give a real price recommendation backed by the comp data provided.
 
@@ -241,6 +250,7 @@ Produce a JSON response ONLY (no markdown, no backticks) with this exact structu
       analysis = JSON.parse(raw.replace(/```json|```/g, "").trim());
       // Store valuation result inside analysis JSON for later retrieval
       analysis._valuation = valuation;
+      analysis._broker = broker;
     } catch {
       analysis = { error: "Could not parse analysis", raw };
     }

@@ -3,6 +3,29 @@ import React from "react";
 import { Upload, BarChart2, Trash2, ExternalLink, Plus, Link, X } from "lucide-react";
 import PageShell from "../components/PageShell";
 
+const BROKERS = [
+  {
+    id: "will",
+    name: "Will Noftsinger III",
+    title: "Yacht Broker",
+    email: "WN@DenisonYachting.com",
+    phone: "+1 (850) 461-3342",
+    location: "Fort Lauderdale, FL",
+    bio: "Will Noftsinger, a senior yacht broker at Denison Yachting in Fort Lauderdale with 15+ years of experience in superyacht transactions.",
+  },
+  {
+    id: "erik",
+    name: "Erik Mayol",
+    title: "Yacht Broker",
+    email: "em@DenisonYachting.com",
+    phone: "C: (949) 338-7907 | O: 949.791.4220",
+    location: "Newport Beach, CA",
+    bio: "Erik Mayol, a yacht broker at Denison Yachting specializing in motor yachts and sailing vessels.",
+  },
+] as const;
+
+type BrokerId = typeof BROKERS[number]["id"];
+
 type CompRecord = {
   name: string; make: string; model: string; year: string; length: string;
   listedPrice: number | null; soldPrice: number | null; askPrice: number | null;
@@ -31,6 +54,7 @@ export default function MarketAnalysisPage() {
   const [analyses, setAnalyses] = React.useState<SavedAnalysis[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [toast, setToast] = React.useState<{ msg: string; type: "success" | "error" } | null>(null);
+  const [selectedBroker, setSelectedBroker] = React.useState<BrokerId>("will");
 
   // Subject vessel
   const [subjectUrl, setSubjectUrl] = React.useState("");
@@ -353,6 +377,7 @@ export default function MarketAnalysisPage() {
           subjectLength, subjectAskingPrice, notes,
           soldComps: allSold, activeComps: allActive, broadSold: [], broadActive: [],
           supplementalText: combinedSupplemental || undefined,
+          brokerId: selectedBroker,
           grossTonnage: grossTonnage ? parseInt(grossTonnage) : null,
           engineCount:  engineCount  ? parseInt(engineCount)  : null,
           engineBrand:  engineBrand  || undefined,
@@ -418,7 +443,7 @@ export default function MarketAnalysisPage() {
   }
 
   function resetForm() {
-    setStep("list"); setEditingId(null); setSubjectUrl(""); setSubjectPreview(null);
+    setStep("list"); setEditingId(null); setSelectedBroker("will"); setSubjectUrl(""); setSubjectPreview(null);
     setSubjectPdfFile(""); setSubjectPdfText("");
     setSubjectVessel(""); setSubjectYear(""); setSubjectMake("");
     setSubjectModel(""); setSubjectLength(""); setSubjectAskingPrice(""); setNotes("");
@@ -514,6 +539,24 @@ export default function MarketAnalysisPage() {
             <p style={{ fontSize:12,color:"var(--navy-400)",marginBottom:16 }}>
               {editingId ? "Update subject vessel details and proceed to adjust comp data" : "Paste a listing URL to auto-fill, upload a vessel PDF brochure/spec sheet, or enter details manually"}
             </p>
+
+            {/* Broker selector */}
+            <div style={{ marginBottom:20 }}>
+              <label style={{ fontSize:10,letterSpacing:"0.12em",textTransform:"uppercase",color:"var(--brass-400)",marginBottom:8,display:"block" }}>Presenting Broker</label>
+              <div style={{ display:"flex",gap:10 }}>
+                {BROKERS.map(b => (
+                  <button key={b.id} onClick={()=>setSelectedBroker(b.id as BrokerId)}
+                    style={{ flex:1,padding:"12px 16px",borderRadius:10,border:`2px solid ${selectedBroker===b.id?"var(--brass-400)":"var(--border)"}`,background:selectedBroker===b.id?"rgba(184,147,58,.08)":"var(--card)",cursor:"pointer",textAlign:"left",transition:"all .15s" }}>
+                    <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
+                      <div style={{ width:10,height:10,borderRadius:"50%",background:selectedBroker===b.id?"var(--brass-400)":"var(--border)",flexShrink:0 }} />
+                      <span style={{ fontSize:13,fontWeight:700,color:"var(--foreground)" }}>{b.name}</span>
+                    </div>
+                    <div style={{ fontSize:11,color:"var(--navy-400)",paddingLeft:18 }}>{b.email}</div>
+                    <div style={{ fontSize:11,color:"var(--navy-400)",paddingLeft:18 }}>{b.phone}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {/* URL auto-fill */}
             <div style={{ display:"flex",gap:8,marginBottom:12 }}>
