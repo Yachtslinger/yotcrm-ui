@@ -77,8 +77,10 @@ export async function POST(req: NextRequest) {
     };
 
     const BROKERS: Record<string, { name: string; title: string; email: string; phone: string; location: string; bio: string }> = {
-      will: { name: "Will Noftsinger III", title: "Yacht Broker", email: "WN@DenisonYachting.com", phone: "+1 (850) 461-3342", location: "Fort Lauderdale, FL", bio: "Will Noftsinger, a senior yacht broker at Denison Yachting in Fort Lauderdale with 15+ years of experience in superyacht transactions" },
-      erik: { name: "Erik Mayol", title: "Yacht Broker", email: "em@DenisonYachting.com", phone: "(949) 338-7907", location: "Newport Beach, CA", bio: "Erik Mayol, a yacht broker at Denison Yachting specializing in motor yachts" },
+      will:  { name: "Will Noftsinger III", title: "Yacht Broker", email: "WN@DenisonYachting.com",   phone: "+1 (850) 461-3342",                        location: "Fort Lauderdale, FL",  bio: "Will Noftsinger, a senior yacht broker at Denison Yachting in Fort Lauderdale with 15+ years of experience in superyacht transactions" },
+      erik:  { name: "Erik Mayol",          title: "Yacht Broker", email: "em@DenisonYachting.com",   phone: "C: (949) 338-7907 | O: 949.791.4220",      location: "Newport Beach, CA",    bio: "Erik Mayol, a yacht broker at Denison Yachting specializing in motor yachts and sailing vessels" },
+      peter: { name: "Peter Quintal",       title: "Yacht Broker", email: "Peter@DenisonYachting.com", phone: "C: (954) 817-5662 | O: 954.763.3971",     location: "Fort Lauderdale, FL",  bio: "Peter Quintal, a yacht broker at Denison Yachting in Fort Lauderdale specializing in motor yachts" },
+      paolo: { name: "Paolo Ameglio",       title: "Yacht Broker", email: "PGA@DenisonYachting.com",  phone: "C: (786) 251-2588 | O: 954.763.3971",      location: "Fort Lauderdale, FL",  bio: "Paolo Ameglio, a yacht broker at Denison Yachting in Fort Lauderdale specializing in motor yachts" },
     };
     const broker = BROKERS[brokerId || "will"] || BROKERS.will;
 

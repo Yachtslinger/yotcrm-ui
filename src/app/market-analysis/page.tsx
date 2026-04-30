@@ -22,6 +22,24 @@ const BROKERS = [
     location: "Newport Beach, CA",
     bio: "Erik Mayol, a yacht broker at Denison Yachting specializing in motor yachts and sailing vessels.",
   },
+  {
+    id: "peter",
+    name: "Peter Quintal",
+    title: "Yacht Broker",
+    email: "Peter@DenisonYachting.com",
+    phone: "C: (954) 817-5662 | O: 954.763.3971",
+    location: "Fort Lauderdale, FL",
+    bio: "Peter Quintal, a yacht broker at Denison Yachting in Fort Lauderdale specializing in motor yachts.",
+  },
+  {
+    id: "paolo",
+    name: "Paolo Ameglio",
+    title: "Yacht Broker",
+    email: "PGA@DenisonYachting.com",
+    phone: "C: (786) 251-2588 | O: 954.763.3971",
+    location: "Fort Lauderdale, FL",
+    bio: "Paolo Ameglio, a yacht broker at Denison Yachting in Fort Lauderdale specializing in motor yachts.",
+  },
 ] as const;
 
 type BrokerId = typeof BROKERS[number]["id"];
