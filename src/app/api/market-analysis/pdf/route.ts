@@ -12,6 +12,7 @@ export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
   const id = req.nextUrl.searchParams.get("id");
+  const inline = req.nextUrl.searchParams.get("inline") === "1";
   if (!id) return NextResponse.json({ error: "No id" }, { status: 400 });
 
   const ma = getMarketAnalysis(parseInt(id));
@@ -31,7 +32,6 @@ export async function GET(req: NextRequest) {
     });
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0", timeout: 45000 });
-    // Give fonts a moment to render
     await new Promise(r => setTimeout(r, 1500));
     const pdf = await page.pdf({
       format: "A4",
@@ -43,10 +43,15 @@ export async function GET(req: NextRequest) {
     const safeName = [ma.subject_year, ma.subject_make, ma.subject_model, ma.subject_vessel]
       .filter(Boolean).join("-").replace(/[^a-zA-Z0-9-]/g, "-").toLowerCase();
 
+    const disposition = inline
+      ? `inline; filename="${safeName}-market-analysis.pdf"`
+      : `attachment; filename="${safeName}-market-analysis.pdf"`;
+
     return new NextResponse(Buffer.from(pdf), {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${safeName}-market-analysis.pdf"`,
+        "Content-Disposition": disposition,
+        "Cache-Control": "no-store",
       },
     });
   } finally {

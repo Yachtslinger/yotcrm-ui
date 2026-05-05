@@ -135,8 +135,34 @@ td.hl{font-weight:600;color:#050d1a;}
 .footer{text-align:center;padding:20px;color:#aaa;font-size:11px;border-top:1px solid #e8e4df;margin-top:16px;}
 
 /* ── PDF button (web only) ───────────────────────────────────── */
-.pdf-btn{position:fixed;bottom:24px;right:24px;background:#b8933a;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.2);text-decoration:none;display:flex;align-items:center;gap:8px;z-index:999;}
-@media print{.pdf-btn{display:none!important;}}
+/* ── Action bar (web only) ────────────────────────────────────── */
+.action-bar{
+  position:fixed;top:0;left:0;right:0;z-index:9999;
+  background:rgba(5,13,26,.94);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  display:flex;align-items:center;gap:8px;
+  padding:10px 16px;border-bottom:1px solid rgba(184,147,58,.2);
+  box-sizing:border-box;
+}
+.action-btn{
+  display:flex;align-items:center;gap:5px;
+  background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);
+  color:#fff;border-radius:8px;padding:8px 13px;
+  font-family:'Cinzel',serif;font-size:10px;letter-spacing:.06em;text-transform:uppercase;
+  cursor:pointer;text-decoration:none;white-space:nowrap;-webkit-tap-highlight-color:transparent;
+}
+.action-btn.gold{background:rgba(184,147,58,.2);border-color:rgba(184,147,58,.4);color:#e8c96a;}
+.action-bar-title{flex:1;font-family:'Raleway',sans-serif;font-size:11px;color:rgba(255,255,255,.45);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
+/* Push body down so content isn't under bar */
+.wrap{padding-top:56px;}
+@media(max-width:600px){
+  .action-bar{padding:8px 10px;gap:5px;}
+  .action-btn{padding:7px 9px;font-size:9px;letter-spacing:.04em;}
+  .action-bar-title{display:none;}
+  .cover{height:auto;min-height:85vh;}
+  table{font-size:11px;}
+  th,td{padding:6px 5px;}
+}
+@media print{.action-bar{display:none!important;}.wrap{padding-top:0;}}
 </style>
 </head>
 <body>
@@ -380,10 +406,31 @@ ${a.brokerNotes ? `<div class="sec" style="border-left:4px solid #b8933a">
   <span style="color:#ccc;font-size:10px">Confidential — Prepared for listing presentation purposes</span>
 </div>
 
-${!pdfMode ? `<a class="pdf-btn" href="/api/market-analysis/pdf?id=${ma.id}" target="_blank">
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-  Save as PDF
-</a>` : ""}
+${!pdfMode ? `
+<!-- Action bar: Back · title · Share · Download -->
+<div class="action-bar">
+  <button class="action-btn" onclick="window.history.length>1?window.history.back():window.close()">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+    Back
+  </button>
+  <span class="action-bar-title">${ma.subject_year} ${ma.subject_make} ${ma.subject_model}${ma.subject_vessel ? ' · ' + ma.subject_vessel : ''}</span>
+  <button class="action-btn gold" onclick="
+    var pdfUrl = '/api/market-analysis/pdf?id=${ma.id}&inline=1';
+    var title = '${ma.subject_year} ${ma.subject_make} ${ma.subject_model} Market Analysis';
+    if(navigator.share){
+      navigator.share({title:title, url:pdfUrl}).catch(function(){});
+    } else {
+      window.open(pdfUrl,'_blank');
+    }
+  ">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+    Share
+  </button>
+  <a class="action-btn" href="/api/market-analysis/pdf?id=${ma.id}" download>
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    PDF
+  </a>
+</div>` : ""}
 
 </div>
 </body>
