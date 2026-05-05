@@ -538,5 +538,21 @@ function parseDenison(url: string, html: string): VesselData {
 
   vessel.images = dedupeImages(vessel.images).filter(i => !isJunk(i.src));
 
+  // Cap images at 40 — beyond that the brochure payload becomes too large
+  if (vessel.images.length > 40) vessel.images = vessel.images.slice(0, 40);
+
+  // Sanitize: if any string field contains more than 2000 chars or looks like CSS/JS, wipe it
+  const CSS_HINT = /\{\s*display\s*:|@media\s|\.navbar|font-family\s*:|\.menu_|<script|function\s+\w+\s*\(/;
+  for (const k of Object.keys(vessel) as (keyof typeof vessel)[]) {
+    const v = (vessel as Record<string, unknown>)[k as string];
+    if (typeof v === "string" && (v.length > 3000 || CSS_HINT.test(v))) {
+      (vessel as Record<string, unknown>)[k as string] = "";
+    }
+  }
+  // Also cap description at 3000 chars
+  if (vessel.description && vessel.description.length > 3000) {
+    vessel.description = vessel.description.slice(0, 3000);
+  }
+
   return vessel;
 }
