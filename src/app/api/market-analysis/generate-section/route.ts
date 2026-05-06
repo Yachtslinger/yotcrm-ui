@@ -1,69 +1,59 @@
-/**
- * POST /api/market-analysis/generate-section
- * Generates or rewrites a single section of the market analysis report.
- * Used by the per-section "Generate" buttons in the review/edit step.
- */
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const SECTION_PROMPTS: Record<string, (ctx: Record<string, string>) => string> = {
-  executiveSummary: ctx => `Write a concise, compelling Executive Summary paragraph (3-5 sentences) for a yacht market analysis report.
-Subject vessel: ${ctx.year} ${ctx.make} ${ctx.model} "${ctx.vessel}", ${ctx.length}, proposed ask ${ctx.askingPrice}.
-Market data: ${ctx.soldCount} sold comps averaging ${ctx.avgSold}, ${ctx.activeCount} active competitors averaging ${ctx.avgActive}, average DOM ${ctx.avgDom} days.
-${ctx.notes ? `Broker notes: ${ctx.notes}` : ""}
-Write in first-person broker voice. Do not mention AI. 2-4 sentences. Return only the paragraph text, no labels or headers.`,
-
-  marketConditions: ctx => `Write a Market Conditions paragraph for a yacht market analysis report (4-6 sentences).
-Subject vessel: ${ctx.year} ${ctx.make} ${ctx.model} "${ctx.vessel}", ${ctx.length}.
-Market data: ${ctx.soldCount} sold comps averaging ${ctx.avgSold} (list-to-sold ratio ${ctx.ltsPct}%), ${ctx.activeCount} active competitors, average DOM ${ctx.avgDom} days.
-Sold comps: ${ctx.soldTable}
-Active comps: ${ctx.activeTable}
-Analyze supply/demand, price trends, and market dynamics. First-person broker voice. No AI references. Return only the paragraph text.`,
-
-  competitivePositioning: ctx => `Write a Competitive Positioning paragraph for a yacht market analysis report (4-6 sentences).
-Subject vessel: ${ctx.year} ${ctx.make} ${ctx.model} "${ctx.vessel}", ${ctx.length}, proposed ask ${ctx.askingPrice}.
-${ctx.notes ? `Key features/condition: ${ctx.notes}` : ""}
-Active competitors: ${ctx.activeTable}
-Describe how the subject vessel compares to competition — strengths, weaknesses, and what differentiates it. First-person broker voice. No AI references. Return only the paragraph text.`,
-
-  priceReductionStrategy: ctx => `Write a Price Reduction Strategy paragraph for a yacht market analysis report (3-5 sentences).
-Subject vessel: ${ctx.year} ${ctx.make} ${ctx.model} "${ctx.vessel}", recommended ask ${ctx.recommendedPrice}.
-Average DOM for sold comps: ${ctx.avgDom} days. Active competitors: ${ctx.activeCount}.
-Provide specific price reduction triggers with percentage reductions and timing. First-person broker voice. No AI references. Return only the paragraph text.`,
-
-  brokerNotes: ctx => `Write a Broker Intelligence / Notes & Flags section for a yacht market analysis report (3-5 sentences).
-Subject vessel: ${ctx.year} ${ctx.make} ${ctx.model} "${ctx.vessel}", ${ctx.length}, proposed ask ${ctx.askingPrice}.
-${ctx.notes ? `Broker context: ${ctx.notes}` : ""}
-Market data: ${ctx.soldCount} sold comps, ${ctx.activeCount} active, avg DOM ${ctx.avgDom} days.
-Highlight key risks, opportunities, watch items, and strategic flags the broker should monitor. First-person broker voice. No AI references. Return only the paragraph text.`,
-
-  pricingRationale: ctx => `Write a Pricing Rationale paragraph for a yacht market analysis report (3-5 sentences).
-Subject vessel: ${ctx.year} ${ctx.make} ${ctx.model} "${ctx.vessel}", ${ctx.length}.
-Recommended price: ${ctx.recommendedPrice}. Proposed ask: ${ctx.askingPrice}.
-Sold comps: ${ctx.soldTable}
-Explain why this price is justified by the comp data. First-person broker voice. No AI references. Return only the paragraph text.`,
-
-  domRationale: ctx => `Write a Days on Market Forecast rationale paragraph (2-4 sentences).
-Subject vessel: ${ctx.year} ${ctx.make} ${ctx.model} "${ctx.vessel}".
-Best case: ${ctx.domLow} days. Expected: ${ctx.domHigh} days. Avg sold comp DOM: ${ctx.avgDom} days. Active competitors: ${ctx.activeCount}.
-Explain the DOM forecast based on pricing and market conditions. First-person broker voice. No AI references. Return only the paragraph text.`,
-
-  keyDifferentiators: ctx => `Generate 4-6 key differentiators (selling points) for this vessel as a JSON array of strings.
-Subject vessel: ${ctx.year} ${ctx.make} ${ctx.model} "${ctx.vessel}", ${ctx.length}, asking ${ctx.askingPrice}.
-${ctx.notes ? `Features/condition: ${ctx.notes}` : ""}
-Each item should be a concise bullet point (1 sentence max). No AI references. 
-Return ONLY a valid JSON array like: ["Point one", "Point two", "Point three"]`,
+const PROMPTS: Record<string, (c: Record<string,string>) => string> = {
+  executiveSummary:      c => `You are a yacht broker. Write a 3-4 sentence Executive Summary paragraph for a market analysis of a ${c.year} ${c.make} ${c.model} named "${c.vessel}", ${c.length}, asking ${c.askingPrice}. Market data: ${c.soldCount} sold comps avg ${c.avgSold}, ${c.activeCount} active competitors avg ${c.avgActive}, avg DOM ${c.avgDom} days.${c.notes ? ` Notes: ${c.notes}` : ""} First-person broker voice. Return only the paragraph, no labels.`,
+  marketConditions:      c => `You are a yacht broker. Write a 4-5 sentence Market Conditions paragraph for a market analysis. Vessel: ${c.year} ${c.make} ${c.model}. Data: ${c.soldCount} sold comps avg ${c.avgSold} (list-to-sold ${c.ltsPct}%), ${c.activeCount} active competitors, avg DOM ${c.avgDom} days. Sold: ${c.soldTable}. Active: ${c.activeTable}. Analyze supply/demand and price trends. First-person broker voice. Return only the paragraph.`,
+  competitivePositioning:c => `You are a yacht broker. Write a 4-5 sentence Competitive Positioning paragraph. Vessel: ${c.year} ${c.make} ${c.model} "${c.vessel}", ${c.length}, asking ${c.askingPrice}.${c.notes ? ` Condition: ${c.notes}` : ""} Competitors: ${c.activeTable}. Compare strengths and weaknesses vs competition. First-person broker voice. Return only the paragraph.`,
+  priceReductionStrategy:c => `You are a yacht broker. Write a 3-4 sentence Price Reduction Strategy paragraph. Vessel: ${c.year} ${c.make} ${c.model}, recommended ask ${c.recommendedPrice}. Avg DOM: ${c.avgDom} days. ${c.activeCount} active competitors. Give specific reduction triggers with percentages and timing. First-person broker voice. Return only the paragraph.`,
+  brokerNotes:           c => `You are a yacht broker. Write a 3-4 sentence Broker Notes & Flags paragraph. Vessel: ${c.year} ${c.make} ${c.model} "${c.vessel}", ${c.length}, asking ${c.askingPrice}.${c.notes ? ` Context: ${c.notes}` : ""} ${c.soldCount} sold comps, ${c.activeCount} active, avg DOM ${c.avgDom} days. Flag key risks, opportunities and watch items. First-person broker voice. Return only the paragraph.`,
+  pricingRationale:      c => `You are a yacht broker. Write a 3-4 sentence Pricing Rationale paragraph. Vessel: ${c.year} ${c.make} ${c.model} "${c.vessel}", ${c.length}. Recommended: ${c.recommendedPrice}. Ask: ${c.askingPrice}. Comps: ${c.soldTable}. Justify the price using comp data. First-person broker voice. Return only the paragraph.`,
+  domRationale:          c => `You are a yacht broker. Write a 2-3 sentence DOM Forecast rationale. Vessel: ${c.year} ${c.make} ${c.model}. Best case: ${c.domLow} days. Expected: ${c.domHigh} days. Avg comp DOM: ${c.avgDom} days. ${c.activeCount} active competitors. Explain the forecast. First-person broker voice. Return only the paragraph.`,
+  keyDifferentiators:    c => `You are a yacht broker. List 4-6 key selling points for a ${c.year} ${c.make} ${c.model} "${c.vessel}", ${c.length}, asking ${c.askingPrice}.${c.notes ? ` Features: ${c.notes}` : ""} Return ONLY a JSON array of strings, e.g. ["Point one","Point two"]. No other text.`,
 };
 
-async function callClaude(prompt: string): Promise<string> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 25000);
+function avg(arr: number[]) { return arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : 0; }
+function fmt(n: number|null|undefined) { return n ? "$"+Number(n).toLocaleString("en-US") : "—"; }
+
+export async function POST(req: NextRequest) {
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const body = await req.json();
+    const { section, subjectVessel="", subjectYear="", subjectMake="", subjectModel="",
+      subjectLength="", subjectAskingPrice="", notes="",
+      soldComps=[], activeComps=[], recommendedPrice="", domLow="", domHigh="" } = body;
+
+    if (!PROMPTS[section]) return NextResponse.json({ ok:false, error:`Unknown section: ${section}` }, { status:400 });
+
+    const sc = soldComps as Record<string,unknown>[];
+    const ac = activeComps as Record<string,unknown>[];
+    const soldPrices  = sc.map(c=>c.soldPrice).filter(Boolean) as number[];
+    const listedPrices= sc.map(c=>c.listedPrice).filter(Boolean) as number[];
+    const domVals     = sc.map(c=>c.daysOnMarket).filter(v=>v&&Number(v)>0) as number[];
+    const activePrices= ac.map(c=>c.askPrice??c.listedPrice).filter(Boolean) as number[];
+    const avgSold   = avg(soldPrices);
+    const avgList   = avg(listedPrices);
+    const avgDom    = avg(domVals);
+    const avgActive = avg(activePrices);
+    const ltsPct    = avgList&&avgSold ? Math.round((avgSold/avgList)*100) : 0;
+    const soldTable  = sc.slice(0,6).map(c=>`${c.year} ${c.make} ${c.model} — Ask:${fmt(c.listedPrice as number)} Sold:${fmt(c.soldPrice as number)} DOM:${c.daysOnMarket??'?'}`).join("; ")||"none";
+    const activeTable= ac.slice(0,8).map(c=>`${c.year} ${c.make} ${c.model} — Ask:${fmt((c.askPrice??c.listedPrice) as number)} ${c.location}`).join("; ")||"none";
+
+    const ctx: Record<string,string> = {
+      vessel:subjectVessel, year:subjectYear, make:subjectMake, model:subjectModel,
+      length:subjectLength, askingPrice:subjectAskingPrice, notes,
+      soldCount:String(sc.length), activeCount:String(ac.length),
+      avgSold:fmt(avgSold), avgActive:fmt(avgActive), avgDom:String(avgDom||"unknown"),
+      ltsPct:String(ltsPct), soldTable, activeTable,
+      recommendedPrice:recommendedPrice||subjectAskingPrice,
+      domLow:String(domLow), domHigh:String(domHigh),
+    };
+
+    const prompt = PROMPTS[section](ctx);
+
+    const apiRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
         "x-api-key": process.env.ANTHROPIC_API_KEY!,
@@ -71,92 +61,38 @@ async function callClaude(prompt: string): Promise<string> {
       },
       body: JSON.stringify({
         model: "claude-opus-4-20250514",
-        max_tokens: 600,
-        messages: [{ role: "user", content: prompt }],
+        max_tokens: 800,
+        messages: [{ role:"user", content: prompt }],
       }),
     });
-    const data = await res.json();
-    const text = data.content?.[0]?.text?.trim() || "";
-    if (!text && data.error) console.error("[generate-section] API error:", data.error);
-    return text;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
 
-function avg(arr: number[]) {
-  return arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
-}
-function fmt(n: number | null) { return n ? "$" + n.toLocaleString("en-US") : "—"; }
+    const apiData = await apiRes.json();
 
-export async function POST(req: NextRequest) {
-  try {
-    const { section, subjectVessel, subjectYear, subjectMake, subjectModel,
-      subjectLength, subjectAskingPrice, notes,
-      soldComps, activeComps, recommendedPrice, domLow, domHigh,
-    } = await req.json();
-
-    if (!SECTION_PROMPTS[section]) {
-      return NextResponse.json({ ok: false, error: `Unknown section: ${section}` }, { status: 400 });
+    if (!apiRes.ok || apiData.type === "error" || apiData.error) {
+      const errMsg = apiData.error?.message || JSON.stringify(apiData);
+      console.error("[generate-section] Claude API error:", errMsg);
+      return NextResponse.json({ ok:false, error:`Claude API: ${errMsg}` }, { status:500 });
     }
 
-    const sc = soldComps || [];
-    const ac = activeComps || [];
-    const soldPrices = sc.map((c: Record<string,unknown>) => c.soldPrice).filter(Boolean) as number[];
-    const listedPrices = sc.map((c: Record<string,unknown>) => c.listedPrice).filter(Boolean) as number[];
-    const domVals = sc.map((c: Record<string,unknown>) => c.daysOnMarket).filter((v: unknown) => v && Number(v) > 0) as number[];
-    const activePrices = ac.map((c: Record<string,unknown>) => c.askPrice ?? c.listedPrice).filter(Boolean) as number[];
-    const avgSold = avg(soldPrices);
-    const avgList = avg(listedPrices);
-    const avgDom = avg(domVals);
-    const avgActive = avg(activePrices);
-    const ltsPct = avgList && avgSold ? Math.round((avgSold / avgList) * 100) : 0;
+    const text = apiData.content?.[0]?.text?.trim() || "";
+    if (!text) {
+      console.error("[generate-section] Empty response:", JSON.stringify(apiData).slice(0,300));
+      return NextResponse.json({ ok:false, error:"Claude returned empty response" }, { status:500 });
+    }
 
-    const soldTable = sc.slice(0, 6).map((c: Record<string,unknown>) =>
-      `${c.year} ${c.make} ${c.model} "${c.name}" — Ask: ${fmt(c.listedPrice as number)}, Sold: ${fmt(c.soldPrice as number)}, DOM: ${c.daysOnMarket ?? "?"}`
-    ).join("; ");
-
-    const activeTable = ac.slice(0, 8).map((c: Record<string,unknown>) =>
-      `${c.year} ${c.make} ${c.model} "${c.name}" — Ask: ${fmt((c.askPrice ?? c.listedPrice) as number)}, ${c.location}`
-    ).join("; ");
-
-    const ctx: Record<string, string> = {
-      vessel: subjectVessel || "",
-      year: subjectYear || "",
-      make: subjectMake || "",
-      model: subjectModel || "",
-      length: subjectLength || "",
-      askingPrice: subjectAskingPrice || "",
-      notes: notes || "",
-      soldCount: String(sc.length),
-      activeCount: String(ac.length),
-      avgSold: fmt(avgSold),
-      avgActive: fmt(avgActive),
-      avgDom: String(avgDom || "—"),
-      ltsPct: String(ltsPct),
-      soldTable: soldTable || "No sold comps provided",
-      activeTable: activeTable || "No active comps provided",
-      recommendedPrice: recommendedPrice || subjectAskingPrice || "",
-      domLow: String(domLow || ""),
-      domHigh: String(domHigh || ""),
-    };
-
-    const prompt = SECTION_PROMPTS[section](ctx);
-    const text = await callClaude(prompt);
-
-    // For keyDifferentiators, parse the JSON array
     if (section === "keyDifferentiators") {
       try {
-        const arr = JSON.parse(text.replace(/```json|```/g, "").trim());
-        return NextResponse.json({ ok: true, value: arr, type: "array" });
+        const arr = JSON.parse(text.replace(/```json|```/g,"").trim());
+        return NextResponse.json({ ok:true, value:arr, type:"array" });
       } catch {
-        return NextResponse.json({ ok: true, value: [text], type: "array" });
+        return NextResponse.json({ ok:true, value:[text], type:"array" });
       }
     }
 
-    return NextResponse.json({ ok: true, value: text, type: "text" });
-  } catch (err) {
-    console.error("generate-section error:", err);
-    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
+    return NextResponse.json({ ok:true, value:text, type:"text" });
+
+  } catch(err) {
+    console.error("[generate-section] Error:", err);
+    return NextResponse.json({ ok:false, error:String(err) }, { status:500 });
   }
 }

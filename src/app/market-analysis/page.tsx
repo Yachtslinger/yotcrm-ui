@@ -240,7 +240,7 @@ export default function MarketAnalysisPage() {
         setDraftMktg(p => ({ ...p, keyDifferentiators: d.value }));
       } else {
         const text = d.value || "";
-        if (!text) { showToast("Generated empty — try again", "error"); return; }
+        if (!text) { showToast("No content generated — try again", "error"); return; }
         if (targetRef?.current) targetRef.current.value = text;
         if (section === "pricingRationale") setDraftPricing(p => ({ ...p, rationale: text }));
         if (section === "domRationale") setDraftDom(p => ({ ...p, rationale: text }));
