@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
+export const maxDuration = 120;
 
 const SECTION_PROMPTS: Record<string, (ctx: Record<string, string>) => string> = {
   executiveSummary: ctx => `Write a concise, compelling Executive Summary paragraph (3-5 sentences) for a yacht market analysis report.
@@ -66,7 +66,7 @@ async function callClaude(prompt: string): Promise<string> {
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-opus-4-20250514",
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 600,
       messages: [{ role: "user", content: prompt }],
     }),
