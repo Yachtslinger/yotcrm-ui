@@ -72,6 +72,7 @@ async function callClaude(prompt: string): Promise<string> {
     }),
   });
   const data = await res.json();
+  console.log("[generate-section] Claude raw:", JSON.stringify(data).slice(0, 300));
   return data.content?.[0]?.text?.trim() || "";
 }
 
