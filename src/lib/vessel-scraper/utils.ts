@@ -324,7 +324,19 @@ export function assignSpec(vessel: VesselData, label: string, value: string): vo
       } else if (Array.isArray(vessel[field])) {
         // skip
       } else if (!(vessel[field] as string)) {
-        const v2 = DUAL_MEASURE_FIELDS.has(field) ? dualMeasure(enrichedValue) : enrichedValue;
+        let v2 = DUAL_MEASURE_FIELDS.has(field) ? dualMeasure(enrichedValue) : enrichedValue;
+
+        // ── Engine HP extraction ─────────────────────────────────────────
+        // If assigning to engines and the value contains HP (e.g. "2 x Caterpillar C12 715.00hp"),
+        // split the HP into vessel.power and strip it from the engine string.
+        if (field === "engines") {
+          const hpMatch = v2.match(/\s+([\d,.]+)\s*(?:hp|HP|bhp|mhp|kW|KW)\s*(?:each|total)?/i);
+          if (hpMatch) {
+            if (!vessel.power) vessel.power = hpMatch[1].replace(/,/g, "") + " " + hpMatch[0].trim().replace(/[\d,.]+\s*/,"");
+            v2 = v2.slice(0, hpMatch.index).trim();
+          }
+        }
+
         (vessel as unknown as Record<string, unknown>)[field] = v2;
       }
       return;
@@ -387,7 +399,7 @@ export function mineFromText(vessel: VesselData, raw: string): void {
 
   // ── Power ──────────────────────────────────────────────────────────────────
   if (!vessel.power) {
-    const pw = grab(/(\d[\d,]+)\s*(?:hp|HP|bhp|mhp|kW|KW)\s*(?:each|per\s+engine|total)?/i) ||
+    const pw = grab(/([\d,.]+)\s*(?:hp|HP|bhp|mhp|kW|KW)\s*(?:each|per\s+engine|total)?/i) ||
                grab(/(?:total\s+)?power\s+(?:output\s+)?(?:of\s+)?(\d[\d,]+\s*(?:hp|kW))/i);
     // Guard: must be ≥100 to avoid capturing knot speeds (e.g. "15.5 kn" → "15")
     if (pw) {
