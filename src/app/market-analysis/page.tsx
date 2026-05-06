@@ -221,31 +221,29 @@ export default function MarketAnalysisPage() {
     setGeneratingSection(section);
     try {
       const pd = pendingGenData as Record<string,unknown> | null;
+      const sc = (pd?.allSold as CompRecord[]) || [];
+      const ac = (pd?.allActive as CompRecord[]) || [];
       const r = await fetch("/api/market-analysis/generate-section", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          section,
-          subjectVessel, subjectYear, subjectMake, subjectModel,
+          section, subjectVessel, subjectYear, subjectMake, subjectModel,
           subjectLength, subjectAskingPrice, notes,
-          soldComps: (pd?.allSold as CompRecord[]) || [],
-          activeComps: (pd?.allActive as CompRecord[]) || [],
+          soldComps: sc, activeComps: ac,
           recommendedPrice: draftPricing.recommendedListPriceFormatted,
-          domLow: draftDom.lowEstimate,
-          domHigh: draftDom.highEstimate,
+          domLow: draftDom.lowEstimate, domHigh: draftDom.highEstimate,
         }),
       });
       const d = await r.json();
       if (!d.ok) { showToast(`Generate failed: ${d.error}`, "error"); return; }
       if (d.type === "array") {
         setDraftMktg(p => ({ ...p, keyDifferentiators: d.value }));
-      } else if (d.type === "text") {
-        if (targetRef?.current) {
-          targetRef.current.value = d.value;
-          // Also update draft state for sections stored in state not refs
-          if (section === "pricingRationale") setDraftPricing(p => ({ ...p, rationale: d.value }));
-          if (section === "domRationale") setDraftDom(p => ({ ...p, rationale: d.value }));
-        }
+      } else {
+        const text = d.value || "";
+        if (!text) { showToast("Generated empty — try again", "error"); return; }
+        if (targetRef?.current) targetRef.current.value = text;
+        if (section === "pricingRationale") setDraftPricing(p => ({ ...p, rationale: text }));
+        if (section === "domRationale") setDraftDom(p => ({ ...p, rationale: text }));
       }
       showToast("✓ Generated", "success");
     } catch (err) { showToast(`Error: ${err}`, "error"); }

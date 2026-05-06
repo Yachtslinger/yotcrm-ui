@@ -58,21 +58,30 @@ Return ONLY a valid JSON array like: ["Point one", "Point two", "Point three"]`,
 };
 
 async function callClaude(prompt: string): Promise<string> {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY!,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-opus-4-20250514",
-      max_tokens: 600,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-  const data = await res.json();
-  return data.content?.[0]?.text?.trim() || "";
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 25000);
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY!,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-opus-4-20250514",
+        max_tokens: 600,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    const data = await res.json();
+    const text = data.content?.[0]?.text?.trim() || "";
+    if (!text && data.error) console.error("[generate-section] API error:", data.error);
+    return text;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function avg(arr: number[]) {
