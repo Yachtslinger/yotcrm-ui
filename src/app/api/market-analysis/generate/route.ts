@@ -4,6 +4,7 @@
  * returns structured analysis JSON + full HTML report.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { callAI } from "@/lib/ai-client";
 import type { CompRecord } from "@/lib/market-analysis/storage";
 import { calculateValuation, getBrandTier, DEFAULT_WEIGHTS } from "@/lib/market-analysis/valuation";
 import type { SubjectVesselAttrs, ValuationWeights } from "@/lib/market-analysis/valuation";
@@ -11,23 +12,7 @@ import type { SubjectVesselAttrs, ValuationWeights } from "@/lib/market-analysis
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-async function callClaude(prompt: string): Promise<string> {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY!,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-opus-4-20250514",
-      max_tokens: 2000,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-  const data = await res.json();
-  return data.content?.find((b: { type: string; text?: string }) => b.type === "text")?.text || "{}";
-}
+
 
 function avg(nums: number[]): number {
   if (!nums.length) return 0;
@@ -246,7 +231,7 @@ Produce a JSON response ONLY (no markdown, no backticks) with this exact structu
   "brokerNotes": "Any flags, concerns, or opportunities the data reveals that the broker should know"
 }`;
 
-    const raw = await callClaude(prompt);
+    const raw = await callAI(prompt, 2000);
     let analysis: Record<string, unknown> = {};
     try {
       analysis = JSON.parse(raw.replace(/```json|```/g, "").trim());
