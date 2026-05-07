@@ -1,28 +1,22 @@
-/**
- * ai-client.ts
- * Unified AI client — uses local Ollama via Cloudflare tunnel if OLLAMA_URL is set,
- * falls back to Anthropic API otherwise.
- */
-
-const OLLAMA_URL = process.env.OLLAMA_URL; // set on Railway
+const OLLAMA_URL = process.env.OLLAMA_URL;
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gpt-oss:120b-cloud";
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
 export async function callAI(prompt: string, maxTokens = 1200): Promise<string> {
-  if (OLLAMA_URL) {
-    return callOllama(prompt, maxTokens);
-  }
-  if (ANTHROPIC_KEY) {
-    return callAnthropic(prompt, maxTokens);
-  }
-  throw new Error("No AI backend configured. Set OLLAMA_URL or ANTHROPIC_API_KEY.");
+  if (OLLAMA_URL && OLLAMA_API_KEY) return callOpenWebUI(prompt, maxTokens);
+  if (ANTHROPIC_KEY) return callAnthropic(prompt, maxTokens);
+  throw new Error("No AI backend configured. Set OLLAMA_URL+OLLAMA_API_KEY or ANTHROPIC_API_KEY.");
 }
 
-async function callOllama(prompt: string, maxTokens: number): Promise<string> {
-  // Use Ollama's OpenAI-compatible /v1/chat/completions endpoint
-  const res = await fetch(`${OLLAMA_URL}/v1/chat/completions`, {
+async function callOpenWebUI(prompt: string, maxTokens: number): Promise<string> {
+  const res = await fetch(`${OLLAMA_URL}/api/chat/completions`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${OLLAMA_API_KEY}`,
+      "bypass-tunnel-reminder": "true",
+    },
     body: JSON.stringify({
       model: OLLAMA_MODEL,
       messages: [{ role: "user", content: prompt }],
@@ -30,15 +24,10 @@ async function callOllama(prompt: string, maxTokens: number): Promise<string> {
       stream: false,
     }),
   });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Ollama error ${res.status}: ${err.slice(0, 200)}`);
-  }
-
+  if (!res.ok) throw new Error(`YotBot API ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data = await res.json();
   const text = data.choices?.[0]?.message?.content?.trim();
-  if (!text) throw new Error(`Ollama returned empty response: ${JSON.stringify(data).slice(0, 200)}`);
+  if (!text) throw new Error(`YotBot empty: ${JSON.stringify(data).slice(0, 200)}`);
   return text;
 }
 
@@ -56,12 +45,9 @@ async function callAnthropic(prompt: string, maxTokens: number): Promise<string>
       messages: [{ role: "user", content: prompt }],
     }),
   });
-
   const data = await res.json();
-  if (!res.ok || data.error || data.type === "error") {
-    throw new Error(`Anthropic error: ${data.error?.message || JSON.stringify(data)}`);
-  }
+  if (!res.ok || data.error) throw new Error(`Anthropic: ${data.error?.message || JSON.stringify(data)}`);
   const text = data.content?.[0]?.text?.trim();
-  if (!text) throw new Error(`Anthropic returned empty response`);
+  if (!text) throw new Error("Anthropic empty response");
   return text;
 }
