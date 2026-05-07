@@ -28,13 +28,13 @@ export function generateBrochureHTML(vessel: VesselData, brokers: BrokerInfo[]):
   const hasCategories = vessel.images.some(i => (i as any).category);
   const extImages  = hasCategories
     ? vessel.images.filter(i => (i as any).category === "exterior" || (i as any).category === "")
-    : vessel.images.slice(0, 8);
+    : vessel.images.slice(0, 20);
   const intImages  = hasCategories
     ? vessel.images.filter(i => (i as any).category === "interior")
-    : vessel.images.slice(8, 24);
+    : vessel.images.slice(20, 50);
   const techImages = hasCategories
     ? vessel.images.filter(i => (i as any).category === "technical")
-    : vessel.images.slice(24, 32);
+    : vessel.images.slice(50, 80);
   const gaImages   = (vessel as any).gaImages as { src: string; alt: string }[] | undefined || [];
   const videos     = (vessel as any).videos   as { url: string; thumbnail?: string; title?: string; type: string }[] | undefined || [];
 

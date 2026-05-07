@@ -538,8 +538,8 @@ function parseDenison(url: string, html: string): VesselData {
 
   vessel.images = dedupeImages(vessel.images).filter(i => !isJunk(i.src));
 
-  // Cap images at 40 — beyond that the brochure payload becomes too large
-  if (vessel.images.length > 40) vessel.images = vessel.images.slice(0, 40);
+  // Cap images at 80 — keeps payload reasonable while showing full gallery
+  if (vessel.images.length > 80) vessel.images = vessel.images.slice(0, 80);
 
   // Sanitize: if any string field contains more than 2000 chars or looks like CSS/JS, wipe it
   const CSS_HINT = /\{\s*display\s*:|@media\s|\.navbar|font-family\s*:|\.menu_|<script|function\s+\w+\s*\(/;
