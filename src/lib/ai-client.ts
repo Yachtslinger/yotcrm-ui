@@ -1,22 +1,24 @@
 /**
- * ai-client.ts
- * Uses YotBot One (Open WebUI) via OLLAMA_URL env var if set.
- * Falls back to Anthropic if ANTHROPIC_API_KEY is set.
- * OLLAMA_URL defaults to http://bore.pub:7777 if not overridden.
+ * ai-client.ts — YotBot One (Open WebUI) via bore.pub tunnel, falls back to Anthropic.
+ * Always uses bore.pub:7777 regardless of env var (env var may be stale).
  */
 
-// Default to bore.pub:7777 — bore is started with fixed port on Will's Mac
-const OLLAMA_URL = process.env.OLLAMA_URL || "http://bore.pub:7777";
+// Always target bore.pub:7777 — bore is started with fixed port on Will's Mac.
+// Ignore OLLAMA_URL env var if it looks like an old tunnel URL (cloudflare/loca.lt).
+const RAW_OLLAMA_URL = process.env.OLLAMA_URL || "";
+const OLLAMA_URL = (RAW_OLLAMA_URL && !RAW_OLLAMA_URL.includes("trycloudflare") && !RAW_OLLAMA_URL.includes("loca.lt"))
+  ? RAW_OLLAMA_URL
+  : "http://bore.pub:7777";
+
 const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "sk-yotcrm-301613feda903c146c05b8dd97869352af4846fdacfe9b01407deefd97103b31";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gpt-oss:20b";
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
 export async function callAI(prompt: string, maxTokens = 1200): Promise<string> {
-  // Try YotBot first, fall back to Anthropic
   try {
     return await callOpenWebUI(prompt, maxTokens);
   } catch (e) {
-    console.warn("[ai-client] YotBot failed, trying Anthropic:", e);
+    console.warn("[ai-client] YotBot failed:", String(e).slice(0, 100));
     if (ANTHROPIC_KEY) return await callAnthropic(prompt, maxTokens);
     throw e;
   }
@@ -41,7 +43,7 @@ async function callOpenWebUI(prompt: string, maxTokens: number): Promise<string>
   if (!res.ok) throw new Error(`YotBot ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data = await res.json();
   const text = data.choices?.[0]?.message?.content?.trim();
-  if (!text) throw new Error(`YotBot empty: ${JSON.stringify(data).slice(0, 200)}`);
+  if (!text) throw new Error(`YotBot empty: ${JSON.stringify(data).slice(0, 100)}`);
   return text;
 }
 
