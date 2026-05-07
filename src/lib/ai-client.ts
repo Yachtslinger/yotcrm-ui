@@ -8,7 +8,7 @@
 // Default to bore.pub:7777 — bore is started with fixed port on Will's Mac
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://bore.pub:7777";
 const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "sk-yotcrm-301613feda903c146c05b8dd97869352af4846fdacfe9b01407deefd97103b31";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gpt-oss:120b-cloud";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gpt-oss:20b";
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
 export async function callAI(prompt: string, maxTokens = 1200): Promise<string> {
