@@ -100,7 +100,7 @@ Return ONLY a raw JSON object — no markdown fences, no preamble, no explanatio
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-opus-4-6",
+        model: "claude-opus-4-7",
         max_tokens: 16000,
         messages: [{ role: "user", content: prompt }],
       }),

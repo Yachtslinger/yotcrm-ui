@@ -126,7 +126,7 @@ JSON structure (all numbers are annual USD amounts):
       },
       signal: AbortSignal.timeout(55000),
       body: JSON.stringify({
-        model: "claude-opus-4-6",
+        model: "claude-opus-4-7",
         max_tokens: 8192,
         messages: [{ role: "user", content: prompt }],
       }),
