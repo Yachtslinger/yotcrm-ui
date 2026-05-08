@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, Lock, CheckSquare,
   Mail, Settings, Anchor, Link2, MapPin, Briefcase,
   Search, X, LogOut, Zap, CalendarDays, Shield,
-  Upload, CreditCard, Globe, BookOpen, Grid, DollarSign, BarChart2,
+  Upload, CreditCard, Globe, BookOpen, Grid, DollarSign, BarChart2, Inbox,
 } from "lucide-react";
 
 /* ─── Navigation Config ─── */
@@ -31,6 +31,7 @@ const NAV_ITEMS = [
   { href: "/showings",  label: "Locations",   Icon: MapPin,          color: "#059669", group: "tools" },
   { href: "/intel",     label: "Lighthouse",      Icon: Shield,     color: "#7c3aed", group: "tools" },
   { href: "/market-analysis", label: "Market Analysis", Icon: BarChart2, color: "#b8933a", group: "tools" },
+  { href: "/comms",            label: "Comms Capture",  Icon: Inbox,     color: "#0ea5e9", group: "tools" },
   { href: "/marinas",   label: "Marinas",     Icon: Anchor,          color: "#0e7490", group: "tools" },
   { href: "/card/will",   label: "My Card",     Icon: CreditCard,      color: "#c9a55c", group: "account" },
   { href: "/card/paolo",  label: "Paolo's Card", Icon: CreditCard,      color: "#6366f1", group: "account" },
