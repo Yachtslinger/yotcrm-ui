@@ -195,13 +195,21 @@ function identifyEmailType(headers, body) {
         return 'boatshow';
     }
 
-    // Denison inquiry leads (forwarded from inquiry/inquiries addresses)
+    // Denison inquiry leads — ONLY from inquiry/inquiries addresses
     if (from.includes('inquiries@') || from.includes('inquiry@') || from.includes('inquieries@') || from.includes('inquiery@')) {
         if (from.includes('denisonyacht') || from.includes('denisonyachtsales') || from.includes('denison')) return 'denison';
     }
 
-    // Denison internal leads (general catch-all for denison-origin emails)
-    if (from.includes('denisonyacht') || from.includes('denison')) return 'denison';
+    // Denison website chat or specific lead subjects
+    if (from.includes('denisonyacht') || from.includes('denisonyachtsales')) {
+        if (subject.includes('new interested buyer') || subject.includes('website chat lead') ||
+            subject.includes('new lead') || subject.includes('contact form') ||
+            bodyLower.includes('website chat') || bodyLower.includes('client information')) {
+            return 'denison';
+        }
+    }
+
+    // Not a recognized lead source — reject
     return 'unknown';
 }
 
@@ -956,6 +964,13 @@ function processOneEmail(emlContent) {
   getDb();
   const { headers, body } = parseEml(emlContent);
   const emailType = identifyEmailType(headers, body);
+
+  // Reject anything that isn't a recognized lead source
+  // This is the primary gate — unknown emails are NOT saved as leads
+  if (emailType === 'unknown') {
+    return { ok: false, error: 'Not a recognized lead email source', emailType };
+  }
+
   const lead = parseEmail(headers, body, emailType);
 
   if (!lead.email) {
