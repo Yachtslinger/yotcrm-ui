@@ -16,9 +16,10 @@ export const runtime = "nodejs";
 
 function checkAuth(req: NextRequest): boolean {
   const secret = process.env.INGEST_SECRET;
-  if (!secret) return true;
-  return req.headers.get("x-ingest-secret") === secret ||
-         req.headers.get("x-api-key") === secret;
+  const commsSecret = process.env.COMMS_INGEST_SECRET || "yotcrm-comms-ingest-2026";
+  const provided = req.headers.get("x-ingest-secret") ?? req.headers.get("x-api-key") ?? "";
+  if (!provided) return false;
+  return provided === commsSecret || (!!secret && provided === secret);
 }
 
 export async function POST(req: NextRequest) {

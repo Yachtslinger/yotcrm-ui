@@ -398,6 +398,21 @@ export default function NavShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [searchOpen, setSearchOpen] = useState(false);
   const [appsOpen, setAppsOpen] = useState(false);
+  const [commsPending, setCommsPending] = useState(0);
+
+  // Poll for pending comms extractions every 60s
+  useEffect(() => {
+    async function fetchCommsPending() {
+      try {
+        const r = await fetch("/api/comms/threads?status=pending&limit=1");
+        const d = await r.json();
+        if (d.ok) setCommsPending(d.total ?? 0);
+      } catch { /* ignore */ }
+    }
+    fetchCommsPending();
+    const interval = setInterval(fetchCommsPending, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   const isActive = useCallback((href: string) => {
     if (href === "/card/will")  return pathname === "/card/will"  || pathname.startsWith("/card/will/");
@@ -465,6 +480,11 @@ export default function NavShell({ children }: { children: React.ReactNode }) {
                   <item.Icon className="shrink-0 transition-transform group-hover:scale-110"
                     style={{ width: 22, height: 22, color: active ? "var(--brass-400)" : "rgba(255,255,255,0.5)" }} />
                   <span className="text-[13.5px] font-medium">{item.label}</span>
+                  {item.href === "/comms" && commsPending > 0 && (
+                    <span style={{ marginLeft: "auto", background: "#0ea5e9", color: "#fff", fontSize: 10, fontWeight: 700, borderRadius: 20, padding: "1px 7px", minWidth: 18, textAlign: "center" }}>
+                      {commsPending > 99 ? "99+" : commsPending}
+                    </span>
+                  )}
                 </Link>
               );
             })}
