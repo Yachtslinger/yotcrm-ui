@@ -9,6 +9,7 @@ import { matchContact, createLeadFromComm } from "@/lib/comms/contact-matcher";
 import {
   findMessageByMessageId, findThreadByKey, createThread,
   createMessage, updateThreadActivity, createExtraction, logContactMatch,
+  isUntracked,
 } from "@/lib/comms/storage";
 import { runExtraction } from "@/lib/comms/extractor";
 
@@ -39,6 +40,18 @@ export async function POST(req: NextRequest) {
 
   // 1. Parse
   const parsed = parseEml(emlContent);
+
+  // 1b. Untracked check — if sender or any recipient is on the do-not-track list, reject
+  const allParties = [
+    parsed.from.address,
+    ...parsed.to.map(a => a.address),
+    ...parsed.cc.map(a => a.address),
+  ].filter(Boolean);
+  for (const addr of allParties) {
+    if (isUntracked(addr)) {
+      return NextResponse.json({ ok: true, status: "untracked", reason: `${addr} is on do-not-track list` }, { status: 200 });
+    }
+  }
 
   // 2. Deduplicate
   if (parsed.messageId && findMessageByMessageId(parsed.messageId)) {

@@ -66,6 +66,7 @@ export default function CommsThreadPage() {
   const [toast, setToast] = useState("");
   const [showDraft, setShowDraft] = useState(false);
   const [extracting, setExtracting] = useState<number | null>(null);
+  const [untracked, setUntracked] = useState<Record<string, boolean>>({});
 
   useEffect(() => { loadThread(); }, [id]);
 
@@ -74,8 +75,32 @@ export default function CommsThreadPage() {
     try {
       const r = await fetch(`/api/comms/threads/${id}`);
       const d = await r.json();
-      if (d.ok) { setThread(d.thread); setMessages(d.messages); setExtractions(d.extractions); }
+      if (d.ok) {
+        setThread(d.thread); setMessages(d.messages); setExtractions(d.extractions);
+        // Load current untracked state for any addresses involved
+        const ur = await fetch(`/api/comms/untracked`).then(r => r.json()).catch(() => null);
+        if (ur?.ok) {
+          const map: Record<string, boolean> = {};
+          for (const u of ur.untracked) map[u.email.toLowerCase()] = true;
+          setUntracked(map);
+        }
+      }
     } finally { setLoading(false); }
+  }
+
+  async function toggleUntracked(email: string) {
+    const isOff = !!untracked[email.toLowerCase()];
+    if (isOff) {
+      await fetch(`/api/comms/untracked?email=${encodeURIComponent(email)}`, { method: "DELETE" });
+      setUntracked(u => { const c = { ...u }; delete c[email.toLowerCase()]; return c; });
+      showToast(`Resumed tracking ${email}`);
+    } else {
+      const confirmed = confirm(`Stop tracking ${email}?\n\nAll future emails from/to this address will be ignored. No new threads, no Claude extraction, no review queue entries. You can re-enable tracking later from this same screen.`);
+      if (!confirmed) return;
+      await fetch(`/api/comms/untracked`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, reason: "marked from thread review" }) });
+      setUntracked(u => ({ ...u, [email.toLowerCase()]: true }));
+      showToast(`Stopped tracking ${email}`);
+    }
   }
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(""), 3000); }
@@ -177,6 +202,29 @@ export default function CommsThreadPage() {
                   <FieldRow label="Email" value={latestExt.contact_email} conf={latestExt.contact_email_conf} editable onEdit={v => handleEditField(latestExt.id, "contact_email", v)} />
                   <FieldRow label="Phone" value={latestExt.contact_phone} conf={latestExt.contact_phone_conf} editable onEdit={v => handleEditField(latestExt.id, "contact_phone", v)} />
                   <FieldRow label="Company" value={latestExt.contact_company} conf={latestExt.contact_company_conf} editable onEdit={v => handleEditField(latestExt.id, "contact_company", v)} />
+                  {/* Do-not-track toggle — uses sender email of the message thread */}
+                  {messages[0]?.from_address && (() => {
+                    const senderEmail = messages[0].from_address.toLowerCase();
+                    const isOff = !!untracked[senderEmail];
+                    return (
+                      <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8,
+                        background: isOff ? "rgba(239,68,68,.08)" : "rgba(107,114,128,.06)",
+                        border: `1px solid ${isOff ? "rgba(239,68,68,.25)" : "var(--border)"}` }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 12, userSelect: "none" }}>
+                          <input type="checkbox" checked={isOff} onChange={() => toggleUntracked(senderEmail)}
+                            style={{ width: 16, height: 16, accentColor: "#ef4444", cursor: "pointer" }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 600, color: isOff ? "#ef4444" : "var(--foreground)" }}>
+                              {isOff ? "Tracking disabled" : "Do not track this contact"}
+                            </div>
+                            <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+                              {isOff ? `Future emails from ${senderEmail} will be ignored. Uncheck to resume.` : `Stop YotBot from capturing any future emails from ${senderEmail}.`}
+                            </div>
+                          </div>
+                        </label>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Deal fields */}

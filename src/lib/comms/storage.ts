@@ -94,6 +94,13 @@ export function initCommsTables() {
       CREATE INDEX IF NOT EXISTS idx_comms_messages_thread  ON comms_messages(thread_id);
       CREATE INDEX IF NOT EXISTS idx_comms_extractions_msg  ON comms_extractions(message_id);
       CREATE INDEX IF NOT EXISTS idx_comms_extractions_stat ON comms_extractions(status);
+
+      CREATE TABLE IF NOT EXISTS comms_untracked (
+        email       TEXT    PRIMARY KEY COLLATE NOCASE,
+        reason      TEXT    DEFAULT '',
+        marked_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+        marked_by   TEXT    DEFAULT ''
+      );
     `);
     _tablesReady = true;
   } finally { db.close(); }
@@ -290,5 +297,34 @@ export function logContactMatch(data: { message_id: number; lead_id: number | nu
 export function getContactMatches(messageId: number): { lead_id: number | null; match_method: string; confidence: number }[] {
   initCommsTables(); const db = getDb();
   try { return db.prepare("SELECT lead_id, match_method, confidence FROM comms_contact_matches WHERE message_id = ? ORDER BY confidence DESC").all(messageId) as { lead_id: number | null; match_method: string; confidence: number }[]; }
+  finally { db.close(); }
+}
+
+// ── Untracked contacts (do-not-track list) ──────────────────────────────────
+export function isUntracked(email: string): boolean {
+  if (!email) return false;
+  initCommsTables(); const db = getDb();
+  try {
+    const row = db.prepare("SELECT email FROM comms_untracked WHERE email = ? COLLATE NOCASE").get(email.trim().toLowerCase());
+    return !!row;
+  } finally { db.close(); }
+}
+export function markUntracked(email: string, reason = "", markedBy = "user"): void {
+  if (!email) return;
+  initCommsTables(); const db = getDb();
+  try {
+    db.prepare("INSERT OR REPLACE INTO comms_untracked (email, reason, marked_at, marked_by) VALUES (?, ?, datetime('now'), ?)")
+      .run(email.trim().toLowerCase(), reason, markedBy);
+  } finally { db.close(); }
+}
+export function unmarkUntracked(email: string): void {
+  if (!email) return;
+  initCommsTables(); const db = getDb();
+  try { db.prepare("DELETE FROM comms_untracked WHERE email = ? COLLATE NOCASE").run(email.trim().toLowerCase()); }
+  finally { db.close(); }
+}
+export function listUntracked(): { email: string; reason: string; marked_at: string; marked_by: string }[] {
+  initCommsTables(); const db = getDb();
+  try { return db.prepare("SELECT email, reason, marked_at, marked_by FROM comms_untracked ORDER BY marked_at DESC").all() as { email: string; reason: string; marked_at: string; marked_by: string }[]; }
   finally { db.close(); }
 }
