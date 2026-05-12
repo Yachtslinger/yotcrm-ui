@@ -112,7 +112,7 @@ export default function CommsPage() {
                         <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20,
                           background: (EXTRACT_COLORS[t.extraction_status] ?? "#888") + "22",
                           color: EXTRACT_COLORS[t.extraction_status] ?? "#888" }}>
-                          {t.extraction_status === "pending" ? "⏳ AI Pending" : t.extraction_status === "approved" ? "✓ Reviewed" : t.extraction_status}
+                          {t.extraction_status === "pending" ? "⏳ Awaiting Review" : t.extraction_status === "approved" ? "✓ Reviewed" : t.extraction_status}
                         </span>
                       )}
                     </div>
