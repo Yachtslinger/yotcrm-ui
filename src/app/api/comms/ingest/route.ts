@@ -64,21 +64,47 @@ export async function POST(req: NextRequest) {
   if (!thread) thread = createThread({ thread_key: threadKey, subject: parsed.subject });
 
   // 4. Contact match (deterministic)
-  const nameParts = parsed.from.name.trim().split(/\s+/);
+  // For outbound emails (broker is sender), the "client" is the recipient — match against that instead.
+  // We detect outbound by checking if the sender's domain is a known internal broker domain.
+  const INTERNAL_DOMAINS = (process.env.INTERNAL_DOMAINS || "denisonyachting.com,denisonyachts.com,denison.com").split(",").map(s => s.trim().toLowerCase());
+  const fromDomain = parsed.from.address.split("@")[1]?.toLowerCase() ?? "";
+  const isOutbound = INTERNAL_DOMAINS.some(d => fromDomain === d || fromDomain.endsWith("." + d));
+
+  // Determine which party is the actual client (for matching purposes)
+  // Outbound: first non-internal recipient. Inbound: the sender.
+  let clientAddress = parsed.from.address;
+  let clientName = parsed.from.name;
+  if (isOutbound) {
+    const externalRecipient = parsed.to.find(t => {
+      const d = t.address.split("@")[1]?.toLowerCase() ?? "";
+      return d && !INTERNAL_DOMAINS.some(intd => d === intd || d.endsWith("." + intd))
+        // Also exclude the YotBot capture address itself
+        && !t.address.toLowerCase().includes("yotbot")
+        && !t.address.toLowerCase().includes("theyotbot");
+    });
+    if (externalRecipient) {
+      clientAddress = externalRecipient.address;
+      clientName = externalRecipient.name || "";
+    }
+  }
+
+  const clientNameParts = clientName.trim().split(/\s+/);
   const matchResult = matchContact({
-    email: parsed.from.address,
-    first_name: nameParts[0],
-    last_name: nameParts.slice(1).join(" "),
+    email: clientAddress,
+    first_name: clientNameParts[0],
+    last_name: clientNameParts.slice(1).join(" "),
   });
 
   let leadId: number | null = matchResult.lead_id;
 
-  // Create new lead if no match
-  if (!leadId && parsed.from.address && !parsed.from.address.includes("denisonyacht")) {
+  // Create new lead if no match — and the client address is external
+  const clientDomain = clientAddress.split("@")[1]?.toLowerCase() ?? "";
+  const clientIsInternal = INTERNAL_DOMAINS.some(d => clientDomain === d || clientDomain.endsWith("." + d));
+  if (!leadId && clientAddress && !clientIsInternal && !clientAddress.toLowerCase().includes("yotbot")) {
     leadId = createLeadFromComm({
-      email: parsed.from.address,
-      first_name: nameParts[0] ?? "",
-      last_name: nameParts.slice(1).join(" ") ?? "",
+      email: clientAddress,
+      first_name: clientNameParts[0] ?? "",
+      last_name: clientNameParts.slice(1).join(" ") ?? "",
       source: "comms_capture",
     });
     matchResult.match_method = "created_new";
