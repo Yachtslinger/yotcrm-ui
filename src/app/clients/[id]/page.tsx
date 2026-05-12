@@ -68,9 +68,20 @@ function LeadDetailPageClient({ id }: { id: string }) {
     } catch { toast("Could not reach mail-compose — are you running locally?", "error"); }
     finally { setEmailingClient(false); }
   };
-  const [activeTab, setActiveTab] = useState<"overview"|"notes"|"matches">("overview");
+  const [activeTab, setActiveTab] = useState<"overview"|"notes"|"matches"|"comms">("overview");
   const [leadMatches, setLeadMatches] = useState<any[]>([]);
   const [matchesLoading, setMatchesLoading] = useState(false);
+  const [commsData, setCommsData] = useState<any>(null);
+  const [commsLoading, setCommsLoading] = useState(false);
+  const fetchCommsForLead = useCallback(async (leadId: string) => {
+    setCommsLoading(true);
+    try {
+      const res = await fetch(`/api/clients/${leadId}/comms`);
+      const d = await res.json();
+      if (d.ok) setCommsData(d);
+    } catch { /* non-fatal */ }
+    finally { setCommsLoading(false); }
+  }, []);
   const fetchLeadMatches = useCallback(async (leadId: string) => {
     setMatchesLoading(true);
     try {
@@ -233,7 +244,9 @@ function LeadDetailPageClient({ id }: { id: string }) {
     };
 
     fetchLead();
-  }, [id, fetchIntel]);
+    // Also fetch comms data so the tab badge shows correct count
+    fetchCommsForLead(id);
+  }, [id, fetchIntel, fetchCommsForLead]);
 
   const handleSave = async () => {
     if (!form) return;
@@ -508,9 +521,14 @@ function LeadDetailPageClient({ id }: { id: string }) {
               { key: "overview" as const, label: "Overview" },
               { key: "notes"    as const, label: "Notes & Criteria" },
               { key: "matches"  as const, label: leadMatches.length > 0 ? `Matches (${leadMatches.length})` : "Matches" },
+              { key: "comms"    as const, label: commsData?.threads?.length ? `Comms (${commsData.threads.length})` : "Comms" },
             ]).map(tab => (
               <button key={tab.key}
-                onClick={() => { setActiveTab(tab.key); if (tab.key === "matches" && leadMatches.length === 0) fetchLeadMatches(id); }}
+                onClick={() => {
+                  setActiveTab(tab.key);
+                  if (tab.key === "matches" && leadMatches.length === 0) fetchLeadMatches(id);
+                  if (tab.key === "comms" && !commsData) fetchCommsForLead(id);
+                }}
                 className={`px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${
                   activeTab === tab.key
                     ? "border-blue-500 text-blue-600 dark:text-blue-400"
@@ -574,6 +592,9 @@ function LeadDetailPageClient({ id }: { id: string }) {
               )}
             </div>
           )}
+
+          {/* ═══ COMMS TAB — captured conversations + aggregated yacht intelligence ═══ */}
+          {activeTab === "comms" && <CommsTab loading={commsLoading} data={commsData} onRefresh={() => fetchCommsForLead(id)} />}
 
           {/* ═══ OVERVIEW TAB ═══ */}
           {activeTab === "overview" && (
@@ -989,6 +1010,190 @@ function LeadDetailPageClient({ id }: { id: string }) {
   );
 }
 
+
+function CommsTab({ loading, data, onRefresh }: { loading: boolean; data: any; onRefresh: () => void }) {
+  const router = useRouter();
+
+  if (loading) return <div className="text-sm text-gray-400 py-8 text-center">Loading communications…</div>;
+
+  if (!data || !data.threads?.length) {
+    return (
+      <div className="text-center py-12 text-gray-400">
+        <p className="font-medium text-sm">No captured emails yet</p>
+        <p className="text-xs mt-1 max-w-md mx-auto">
+          BCC <code className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-neutral-800 text-[11px]">theyotbot@gmail.com</code> on emails to or from this contact and they&apos;ll appear here automatically.
+        </p>
+        <button onClick={onRefresh} className="mt-3 text-xs text-blue-500 underline">Refresh</button>
+      </div>
+    );
+  }
+
+  const intel = data.intelligence;
+  const summaries = intel.summaries ?? [];
+  const tasks = intel.tasks ?? [];
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* LEFT — Conversation timeline (2 columns) */}
+      <div className="lg:col-span-2 space-y-3">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+            Conversation Timeline ({data.threads.length} thread{data.threads.length === 1 ? "" : "s"}, {data.messages.length} message{data.messages.length === 1 ? "" : "s"})
+          </h2>
+          <button onClick={onRefresh} className="text-xs text-blue-500 hover:underline">Refresh</button>
+        </div>
+
+        {data.threads.map((t: any) => {
+          const threadMessages = data.messages.filter((m: any) => m.thread_id === t.id);
+          return (
+            <div key={t.id} className="rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 p-4">
+              <div className="flex items-center justify-between mb-2">
+                <button onClick={() => router.push(`/comms/${t.id}`)} className="text-sm font-semibold text-left text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400">
+                  {t.subject || "(no subject)"}
+                </button>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase ${
+                  t.status === "pending" ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400" :
+                  t.status === "reviewed" ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" :
+                  "bg-gray-100 dark:bg-neutral-800 text-gray-500"
+                }`}>{t.status}</span>
+              </div>
+              <div className="text-[11px] text-gray-400 mb-3">
+                {t.message_count} message{t.message_count === 1 ? "" : "s"} • last activity {new Date(t.last_activity).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+              </div>
+              <div className="space-y-2">
+                {threadMessages.map((m: any) => (
+                  <div key={m.id} className="text-xs text-gray-700 dark:text-gray-300 border-l-2 border-gray-200 dark:border-neutral-700 pl-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-semibold">{m.from_name || m.from_address}</span>
+                      <span className="text-[10px] text-gray-400">{new Date(m.sent_at).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                    </div>
+                    <p className="text-gray-600 dark:text-gray-400 line-clamp-2">{m.body_plain?.slice(0, 240)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* RIGHT — Aggregated intelligence sidebar */}
+      <div className="space-y-4">
+        {/* Status header */}
+        <div className="rounded-lg border border-gray-200 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-900 p-3">
+          <div className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">Captured Intelligence</div>
+          <div className="text-xs text-gray-700 dark:text-gray-300">
+            <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{intel.approved_count}</span> approved · <span className="text-amber-600 dark:text-amber-400 font-semibold">{intel.pending_count}</span> awaiting review
+          </div>
+        </div>
+
+        <IntelBlock title="Intent" items={intel.intent} />
+        <IntelBlock title="Budget" items={intel.budget} />
+        <IntelBlock title="Timeline" items={intel.timeline} />
+
+        {intel.makes?.length > 0 && (
+          <ChipBlock title="Makes of Interest" items={intel.makes} />
+        )}
+        {intel.models?.length > 0 && (
+          <ChipBlock title="Models Mentioned" items={intel.models} />
+        )}
+        {intel.length_range?.length > 0 && (
+          <SimpleBlock title="Length Range" items={intel.length_range.map((r: any) => r.value)} />
+        )}
+        {intel.year_range?.length > 0 && (
+          <SimpleBlock title="Year Range" items={intel.year_range.map((r: any) => r.value)} />
+        )}
+        {intel.locations?.length > 0 && (
+          <ChipBlock title="Locations" items={intel.locations} />
+        )}
+        {intel.features?.length > 0 && (
+          <ChipBlock title="Features Mentioned" items={intel.features} />
+        )}
+        {intel.categories?.length > 0 && (
+          <ChipBlock title="Categories" items={intel.categories} />
+        )}
+
+        {/* Conversation summaries */}
+        {summaries.length > 0 && (
+          <div className="rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 p-3">
+            <div className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">Conversation Summaries</div>
+            <div className="space-y-2">
+              {summaries.map((s: any, i: number) => (
+                <div key={i} className="text-xs">
+                  <div className="text-[10px] text-gray-400 mb-0.5">{new Date(s.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} · <span className="uppercase">{s.status}</span></div>
+                  <div className="text-gray-700 dark:text-gray-300">{s.text}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Tasks suggested by Claude */}
+        {tasks.length > 0 && (
+          <div className="rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 p-3">
+            <div className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">Suggested Tasks</div>
+            <div className="space-y-2">
+              {tasks.map((t: any, i: number) => (
+                <div key={i} className="flex items-start gap-2 text-xs">
+                  <span className={`flex-shrink-0 text-[9px] uppercase font-bold px-1.5 py-0.5 rounded ${
+                    t.priority === "high" ? "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400" :
+                    t.priority === "medium" ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400" :
+                    "bg-gray-100 dark:bg-neutral-800 text-gray-500"
+                  }`}>{t.priority}</span>
+                  <span className="text-gray-700 dark:text-gray-300 flex-1">{t.text}</span>
+                  <span className="text-[10px] text-gray-400 flex-shrink-0">{t.status}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function IntelBlock({ title, items }: { title: string; items: { value: string; confidence?: number; source_date: string }[] }) {
+  if (!items?.length) return null;
+  return (
+    <div className="rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 p-3">
+      <div className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">{title}</div>
+      <div className="space-y-1">
+        {items.map((it, i) => (
+          <div key={i} className="flex items-center justify-between text-xs">
+            <span className="text-gray-800 dark:text-gray-200 font-medium">{it.value}</span>
+            <span className="text-[10px] text-gray-400">
+              {it.confidence != null && <span className={`mr-2 ${it.confidence >= 0.8 ? "text-emerald-500" : it.confidence >= 0.6 ? "text-amber-500" : "text-red-500"}`}>{Math.round(it.confidence * 100)}%</span>}
+              {new Date(it.source_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ChipBlock({ title, items }: { title: string; items: string[] }) {
+  if (!items?.length) return null;
+  return (
+    <div className="rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 p-3">
+      <div className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">{title}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((it, i) => (
+          <span key={i} className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300">{it}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SimpleBlock({ title, items }: { title: string; items: string[] }) {
+  if (!items?.length) return null;
+  return (
+    <div className="rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 p-3">
+      <div className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">{title}</div>
+      <div className="text-xs text-gray-800 dark:text-gray-200">{items.join(" · ")}</div>
+    </div>
+  );
+}
 
 function SentEmailsSection({ leadId, leadEmail }: { leadId: number; leadEmail?: string }) {
   const [emails, setEmails] = React.useState<any[]>([]);

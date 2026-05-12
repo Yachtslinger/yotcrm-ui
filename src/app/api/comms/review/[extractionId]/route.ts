@@ -40,19 +40,35 @@ export async function POST(req: NextRequest, { params }: { params: { extractionI
   if (action === "approve") {
     // Get the latest extraction state (may have been edited via PATCH)
     const fresh = getExtraction(id)!;
-    // Apply non-empty contact fields to lead if we have one
+    let writtenFields: string[] = [];
+    let conflicts: { field: string; existing: string; incoming: string }[] = [];
+    // Apply non-empty contact + yacht fields to lead if we have one
     const db = new Database(DB_PATH);
     try {
       const match = db.prepare("SELECT lead_id FROM comms_contact_matches WHERE message_id = ? ORDER BY confidence DESC LIMIT 1").get(fresh.message_id) as { lead_id: number } | undefined;
       const leadId = match?.lead_id;
-      if (leadId && fresh.contact_email) {
-        applyExtractionToLead(leadId, {
+      if (leadId) {
+        const result = applyExtractionToLead(leadId, {
           email: fresh.contact_email ?? undefined,
           phone: fresh.contact_phone ?? undefined,
           first_name: fresh.contact_name?.split(" ")[0] ?? undefined,
           last_name: fresh.contact_name?.split(" ").slice(1).join(" ") ?? undefined,
           company: fresh.contact_company ?? undefined,
+          // Yacht intelligence — Phase 2 sync
+          intent: fresh.intent ?? undefined,
+          budget_range: fresh.budget_range ?? undefined,
+          timeline: fresh.timeline ?? undefined,
+          yacht_makes: fresh.yacht_makes,
+          yacht_models: fresh.yacht_models,
+          yacht_length_range: fresh.yacht_length_range ?? undefined,
+          year_range: fresh.year_range ?? undefined,
+          location_pref: fresh.location_pref ?? undefined,
+          features_mentioned: fresh.features_mentioned,
+          lead_category: fresh.lead_category ?? undefined,
+          summary: fresh.summary ?? undefined,
         });
+        writtenFields = result.written;
+        conflicts = result.conflicts;
       }
       // Create approved tasks as todos
       if (fresh.suggested_tasks?.length) {
@@ -73,7 +89,7 @@ export async function POST(req: NextRequest, { params }: { params: { extractionI
     } finally { db.close(); }
 
     updateExtraction(id, { status: "approved", reviewed_at: new Date().toISOString(), reviewed_by: body.reviewed_by ?? "broker" });
-    return NextResponse.json({ ok: true, status: "approved" });
+    return NextResponse.json({ ok: true, status: "approved", written: writtenFields, conflicts });
   }
 
   return NextResponse.json({ ok: false, error: "Unknown action" }, { status: 400 });
