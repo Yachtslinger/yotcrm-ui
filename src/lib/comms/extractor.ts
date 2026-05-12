@@ -78,7 +78,7 @@ export async function runExtraction(messageDbId: number): Promise<void> {
 
   let raw = "";
   try {
-    raw = await callAI(prompt, 1200);
+    raw = await callAI(prompt, 4096);
   } catch (e) {
     // Claude unavailable — mark extraction as pending, will retry later
     updateExtraction(extraction.id, { status: "pending", raw_extraction: `ERROR: ${String(e)}` });
