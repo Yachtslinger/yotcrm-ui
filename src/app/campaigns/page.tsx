@@ -465,6 +465,15 @@ export default function CampaignsPage(): React.ReactElement {
       nlTitle, nlSubtitle, nlIntro, nlSections, nlFeatured,
       showcaseTitle, showcaseSubtitle, showcaseIntro, showcaseHeroUrl, boats]);
 
+  /* Blob URL for iframe preview — avoids srcDoc data: URL blocking */
+  const [previewUrl, setPreviewUrl] = React.useState("");
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [html]);
+
   /* ── Draft save / load ── */
   const DRAFT_KEY = "yotcrm_campaign_draft_v2";
 
@@ -1273,9 +1282,9 @@ export default function CampaignsPage(): React.ReactElement {
             <div className="flex-1 overflow-y-auto bg-[#f1f5f9] py-8 px-4">
               <div className="mx-auto bg-white rounded-xl shadow-2xl overflow-hidden" style={{maxWidth:640}}>
                 <iframe
-                  key={html.length}
+                  key={previewUrl}
                   title="live-preview"
-                  src={URL.createObjectURL(new Blob([html],{type:"text/html"}))}
+                  src={previewUrl}
                   className="w-full block"
                   style={{border:"none",minHeight:"100vh"}}
                   onLoad={e => {
@@ -1519,9 +1528,9 @@ export default function CampaignsPage(): React.ReactElement {
           <div className="flex-1 overflow-auto bg-[#1a2b4a]">
             <div className="mx-auto" style={{maxWidth:620,padding:"16px 10px"}}>
               <iframe
-              key={html.length}
+              key={previewUrl}
               title="email-preview"
-              src={typeof window!=="undefined"?URL.createObjectURL(new Blob([html],{type:"text/html"})):""}
+              src={previewUrl}
               className="w-full bg-white rounded-lg shadow-2xl"
               style={{border:"none",minHeight:"100vh"}}
               onLoad={e => { const f=e.currentTarget; try { const h=f.contentDocument?.documentElement?.scrollHeight; if(h&&h>200)f.style.height=h+"px"; } catch {} }}
