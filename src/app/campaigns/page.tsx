@@ -491,9 +491,8 @@ export default function CampaignsPage(): React.ReactElement {
   }
 
   function loadDraftData(d: Record<string, unknown>) {
-      // Strip any old server-side file URLs (ephemeral Railway filesystem) — clear them so user re-uploads
       const sanitizeUrl = (u: unknown) => typeof u === "string" && u.startsWith("/api/listings/files/") ? "" : u;
-      const sanitizeText = (t: unknown) => typeof t === "string" ? t.split("\n").map(l=>l.trim()).filter(l=>l && !l.startsWith("/api/listings/files/")).join("\n") : t;
+      const sanitizeText = (t: unknown) => typeof t === "string" ? t.split("\n").map((l:string)=>l.trim()).filter((l:string)=>l && !l.startsWith("/api/listings/files/")).join("\n") : t;
       if (d.mode) selectTemplate(d.mode as Mode);
       if (d.subject)    setSubject(d.subject as string);
       if (d.heroUrl)    setHeroUrl(sanitizeUrl(d.heroUrl) as string);
@@ -967,14 +966,7 @@ export default function CampaignsPage(): React.ReactElement {
           {mode==="Open House" && (
             <Card title="Showing Details">
               <Field label="Vessel Name"    value={ohVessel}  set={setOhVessel} />
-              <div className="mb-2">
-                <div className="text-xs text-gray-400 mb-1">Hero Image</div>
-                <div className="flex gap-2 items-center">
-                  <input value={heroUrl} onChange={e=>setHeroUrl(e.target.value)} placeholder="Paste URL or upload →" className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
-                  <Hero2Uploader onUrl={setHeroUrl} currentUrl={heroUrl} />
-                </div>
-                {heroUrl && <div className="mt-1 relative rounded overflow-hidden border border-gray-200" style={{maxHeight:64}}><img src={heroUrl} alt="" className="w-full object-cover" style={{maxHeight:64}} /><button onClick={()=>setHeroUrl("")} className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white" style={{background:"rgba(0,0,0,.6)"}}>✕</button></div>}
-              </div>
+              <Field label="Hero Image URL" value={heroUrl}   set={setHeroUrl} />
               <div className="grid grid-cols-2 gap-3 mb-2">
                 <div>
                   <div className="text-xs text-gray-400 mb-1">Date</div>
@@ -1018,9 +1010,7 @@ export default function CampaignsPage(): React.ReactElement {
                     <div className="mb-2">
                       <div className="text-xs text-gray-400 mb-1">Image</div>
                       <div className="flex gap-2 items-center">
-                        <input value={f.imageUrl} onChange={e=>updateNLFeatured(f.id,"imageUrl",e.target.value)}
-                          placeholder="Paste URL or upload →"
-                          className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                        <input value={f.imageUrl} onChange={e=>updateNLFeatured(f.id,"imageUrl",e.target.value)} placeholder="Paste URL or upload →" className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
                         <Hero2Uploader onUrl={v=>updateNLFeatured(f.id,"imageUrl",v)} currentUrl={f.imageUrl} />
                       </div>
                       {f.imageUrl && <div className="mt-1 relative rounded overflow-hidden border border-gray-200" style={{maxHeight:64}}><img src={f.imageUrl} alt="" className="w-full object-cover" style={{maxHeight:64}} /><button onClick={()=>updateNLFeatured(f.id,"imageUrl","")} className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white" style={{background:"rgba(0,0,0,.6)"}}>✕</button></div>}
@@ -1052,16 +1042,7 @@ export default function CampaignsPage(): React.ReactElement {
                   <TArea label="Description" rows={3} value={boat.description} set={v=>updateBoat(boat.id,"description",v)} />
                   <Field label="Price"        value={boat.price}         set={v=>updateBoat(boat.id,"price",v)} />
                   <Field label="Build Time"   value={boat.buildTime||""} set={v=>updateBoat(boat.id,"buildTime",v)} />
-                  <div className="mb-2">
-                    <div className="text-xs text-gray-400 mb-1">Image</div>
-                    <div className="flex gap-2 items-center">
-                      <input value={boat.imageUrl} onChange={e=>updateBoat(boat.id,"imageUrl",e.target.value)}
-                        placeholder="Paste URL or upload →"
-                        className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
-                      <Hero2Uploader onUrl={v=>updateBoat(boat.id,"imageUrl",v)} currentUrl={boat.imageUrl} />
-                    </div>
-                    {boat.imageUrl && <div className="mt-1 relative rounded overflow-hidden border border-gray-200" style={{maxHeight:64}}><img src={boat.imageUrl} alt="" className="w-full object-cover" style={{maxHeight:64}} /><button onClick={()=>updateBoat(boat.id,"imageUrl","")} className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white" style={{background:"rgba(0,0,0,.6)"}}>✕</button></div>}
-                  </div>
+                  <Field label="Image URL"    value={boat.imageUrl}      set={v=>updateBoat(boat.id,"imageUrl",v)} />
                   <Field label="Image links to (URL)" value={boat.imageLink||""} set={v=>updateBoat(boat.id,"imageLink",v)} />
                   <Field label="Details Link" value={boat.ctaUrl}        set={v=>updateBoat(boat.id,"ctaUrl",v)} />
                   <button onClick={()=>delBoat(boat.id)} className="text-xs text-red-500 hover:bg-red-50 px-2 py-1 rounded mt-1">Remove boat</button>
@@ -1625,10 +1606,7 @@ function Hero2Uploader({ onUrl, currentUrl }: { onUrl: (url: string) => void; cu
     setUploading(true);
     try {
       const dataUrl = await new Promise<string>((res, rej) => {
-        const r = new FileReader();
-        r.onload = () => res(r.result as string);
-        r.onerror = rej;
-        r.readAsDataURL(file);
+        const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = rej; r.readAsDataURL(file);
       });
       onUrl(dataUrl);
       toast("Image added");
@@ -1694,12 +1672,8 @@ function GalleryImageInput({ value, set }: { value: string; set: (v: string) => 
     if (!arr.length) return;
     setUploading(true);
     try {
-      // Convert images to base64 data URLs directly — avoids ephemeral Railway filesystem
       const newUrls: string[] = await Promise.all(arr.map(f => new Promise<string>((res, rej) => {
-        const r = new FileReader();
-        r.onload = () => res(r.result as string);
-        r.onerror = rej;
-        r.readAsDataURL(f);
+        const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = rej; r.readAsDataURL(f);
       })));
       const existing = value.split("\n").map((s: string) => s.trim()).filter(Boolean);
       const merged = [...existing, ...newUrls].slice(0, 6);
@@ -1715,21 +1689,15 @@ function GalleryImageInput({ value, set }: { value: string; set: (v: string) => 
     <div className="mb-3">
       <div className="text-xs text-gray-400 mb-1.5 font-medium">Gallery Images (max 6)</div>
       <div className="flex gap-2 mb-2">
-        {/* URL textarea — hide if all entries are base64 (show thumbnails instead) */}
-        {urls.every(u => u.startsWith("data:")) && urls.length > 0 ? (
-          <div className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-xs text-gray-400 bg-gray-50 flex items-center">
-            {urls.length} image{urls.length > 1 ? "s" : ""} uploaded — drag more or remove below
-          </div>
-        ) : (
-          <textarea
-            value={value}
-            onChange={e => set(e.target.value)}
-            rows={3}
-            placeholder={"Paste image URLs (one per line)\nhttps://cdn.example.com/photo1.jpg"}
-            className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm resize-y"
-            style={{ minHeight: 72 }}
-          />
-        )}
+        {/* URL textarea */}
+        <textarea
+          value={value}
+          onChange={e => set(e.target.value)}
+          rows={3}
+          placeholder={"Paste image URLs (one per line)\nhttps://cdn.example.com/photo1.jpg"}
+          className="flex-1 px-3 py-2 rounded-lg border border-[var(--sand-200)] dark:border-[var(--navy-700)] text-sm bg-white dark:bg-[var(--navy-800)] text-[var(--navy-900)] dark:text-white resize-y"
+          style={{ minHeight: 72 }}
+        />
         {/* Upload button */}
         <div
           onDragOver={e => { e.preventDefault(); setDragOver(true); }}
@@ -1744,7 +1712,7 @@ function GalleryImageInput({ value, set }: { value: string; set: (v: string) => 
           }}
         >
           {uploading
-            ? <span className="text-xs text-gray-400 animate-pulse">Adding…</span>
+            ? <span className="text-xs text-gray-400 animate-pulse">Uploading…</span>
             : <>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                 <span className="text-[10px] text-gray-400 text-center leading-tight mt-1">Drop or<br/>click</span>
@@ -1850,10 +1818,9 @@ function linkedImg(src: string, link: string, style: string, alt = ""): string {
 function agentCardHtml(a: Agent, allAgents?: Agent[], subject?: string): string {
   const photo = a.photo.startsWith("http") ? a.photo : `${RAILWAY_URL}${a.photo}`;
   const isWill = a.email.toLowerCase().includes("wn@denison");
-  // Build mailto href: primary = this agent, cc = other enabled agents
   const others = allAgents ? allAgents.filter(o => o.enabled && o.email !== a.email) : [];
   const mailtoHref = others.length
-    ? `mailto:${encodeURIComponent(a.email)}?cc=${others.map(o=>encodeURIComponent(o.email)).join(",")}${subject?`&subject=${encodeURIComponent("Re: "+subject)}`:"" }`
+    ? `mailto:${encodeURIComponent(a.email)}?cc=${others.map(o=>encodeURIComponent(o.email)).join(",")}${subject?`&subject=${encodeURIComponent("Re: "+subject)}`:""}`
     : `mailto:${encodeURIComponent(a.email)}${subject?`?subject=${encodeURIComponent("Re: "+subject)}`:""}`;
   return `<tr><td style="padding:20px 24px 10px;"><table role="presentation" width="100%" style="border-top:1px solid #e2e8f0;padding-top:20px;"><tr>
     <td width="100" valign="top" style="padding-right:16px;"><img src="${escA(photo)}" width="100" height="100" style="display:block;width:100px;height:100px;border-radius:50%;object-fit:cover;" /></td>
@@ -1866,9 +1833,7 @@ function agentCardHtml(a: Agent, allAgents?: Agent[], subject?: string): string 
         <tr><td style="font-size:11px;color:${ORANGE};font-weight:800;padding-right:8px;padding-bottom:4px;">OFFICE</td><td style="font-size:13px;padding-bottom:4px;">${esc(a.office)}</td></tr>
         ${isWill ? `<tr><td style="font-size:11px;color:${ORANGE};font-weight:800;padding-right:8px;">INSTAGRAM</td><td style="font-size:13px;"><a href="https://www.instagram.com/yachtslinger" style="color:${DARK_BLUE};text-decoration:none;">@yachtslinger</a></td></tr>` : ""}
       </table>
-      <div style="margin-top:12px;">
-        <a href="${escA(mailtoHref)}" style="display:inline-block;font-size:11px;color:#fff;background:${ORANGE};padding:9px 20px;border-radius:4px;text-decoration:none;font-weight:700;letter-spacing:0.8px;">✉ EMAIL ${esc(a.name.split(" ")[0].toUpperCase())}</a>
-      </div>
+      <div style="margin-top:12px;"><a href="${escA(mailtoHref)}" style="display:inline-block;font-size:11px;color:#fff;background:${ORANGE};padding:9px 20px;border-radius:4px;text-decoration:none;font-weight:700;letter-spacing:0.8px;">✉ EMAIL ${esc(a.name.split(" ")[0].toUpperCase())}</a></div>
     </td>
   </tr></table></td></tr>`;
 }
@@ -1933,6 +1898,7 @@ function buildSingleListingHtml(opts:{subject:string;bannerTag:string;headline:s
     ${denisonFooterHtml()}`;
   return emailShell(subject,body);
 }
+
 /* ─── Price Drop ─── */
 function buildPriceDropHtml(opts:{subject:string;headline:string;location:string;ctaHref:string;price:string;wasPrice:string;heroUrl:string;heroLink:string;intro:string;gallery:string[];specs:Spec[];featuresText:string;agents:Agent[];extraButtons:CtaButton[]}&ImgOpts): string {
   const {subject,headline,location,ctaHref,price,wasPrice,heroUrl,heroLink,intro,gallery,specs,featuresText,agents,extraButtons,heroSize,heroPosition,hero2Url,hero2Link,hero2Size,hero2Position,galleryColumns,galleryPosition,galleryLink}=opts;
@@ -1961,6 +1927,7 @@ function buildPriceDropHtml(opts:{subject:string;headline:string;location:string
     ${denisonFooterHtml()}`;
   return emailShell(subject,body);
 }
+
 function buildBoatShowHtml(opts:{subject:string;heroUrl:string;heroLink:string;showName:string;showDates:string;showVenue:string;showBooth:string;showAddress:string;showDesc:string;showCta:string;showCtaUrl:string;gallery:string[];agents:Agent[];extraButtons:CtaButton[];showVesselName:string;showVesselSpecs:Spec[];showVesselDesc:string;showVesselCtaUrl:string}&ImgOpts): string {
   const {subject,heroUrl,heroLink,showName,showDates,showVenue,showBooth,showAddress,showDesc,showCta,showCtaUrl,gallery,agents,extraButtons,showVesselName,showVesselSpecs,showVesselDesc,showVesselCtaUrl,heroSize,heroPosition,hero2Url,hero2Link,hero2Size,hero2Position,galleryColumns,galleryPosition,galleryLink}=opts;
   const galHtml = galleryHtml(gallery, galleryColumns, galleryLink);
@@ -2024,6 +1991,7 @@ function buildBoatShowHtml(opts:{subject:string;heroUrl:string;heroLink:string;s
     ${denisonFooterHtml()}`;
   return emailShell(subject,body);
 }
+
 /* ─── Open House ─── */
 function buildOpenHouseHtml(opts:{subject:string;heroUrl:string;heroLink:string;ohVessel:string;ohDate:string;ohTime:string;ohMarina:string;ohAddress:string;ohDesc:string;ohRsvp:string;agents:Agent[];extraButtons:CtaButton[]}&ImgOpts): string {
   const {subject,heroUrl,heroLink,ohVessel,ohDate,ohTime,ohMarina,ohAddress,ohDesc,ohRsvp,agents,extraButtons,heroSize,heroPosition,hero2Url,hero2Link,hero2Size,hero2Position}=opts;
@@ -2059,49 +2027,36 @@ function buildOpenHouseHtml(opts:{subject:string;heroUrl:string;heroLink:string;
     ${denisonFooterHtml()}`;
   return emailShell(subject,body);
 }
+
 /* ─── Newsletter ─── */
 function buildNewsletterHtml(opts:{subject:string;nlTitle:string;nlSubtitle:string;nlIntro:string;nlSections:NLSection[];nlFeatured:NLFeatured[];agents:Agent[];extraButtons:CtaButton[]}&ImgOpts): string {
   const {subject,nlTitle,nlSubtitle,nlIntro,nlSections,nlFeatured,agents,extraButtons,hero2Url,hero2Link,hero2Size,hero2Position}=opts;
-
-  const sectionHtml = nlSections.map((s,i)=>`
-    <tr><td style="padding:${i===0?"28px":"20px"} 32px 4px;">
-      <table role="presentation" width="100%" style="border-top:2px solid ${ORANGE};padding-top:14px;">
-        <tr><td>
-          <div style="font-size:11px;color:${ORANGE};font-weight:800;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;">Market Insight</div>
-          <div style="font-size:18px;font-weight:900;color:${DARK_BLUE};line-height:1.3;margin-bottom:12px;">${esc(s.heading)}</div>
-          <p style="margin:0;font-size:15px;color:#334155;line-height:1.8;">${esc(s.body).replace(/\n\n/g,"</p><p style='margin:12px 0 0;font-size:15px;color:#334155;line-height:1.8;'>").replace(/\n/g,"<br/>")}</p>
-        </td></tr>
-      </table>
+  const sectionHtml = nlSections.map(s=>`
+    <tr><td style="padding:16px 24px 4px;">
+      <div style="font-size:15px;font-weight:800;color:${DARK_BLUE};border-bottom:2px solid ${ORANGE};padding-bottom:6px;margin-bottom:10px;">${esc(s.heading)}</div>
+      <p style="margin:0;font-size:14px;color:${GRAY};line-height:1.7;">${esc(s.body).replace(/\n/g,"<br/>")}</p>
     </td></tr>`).join("");
-
-  const activeFeatured = nlFeatured.filter(f=>f.name);
-  const featuredHtml = activeFeatured.length>0 ? `
-    <tr><td style="padding:28px 32px 8px;background:#f8fafc;">
-      <div style="font-size:11px;color:${ORANGE};font-weight:800;letter-spacing:2px;text-transform:uppercase;margin-bottom:16px;border-top:2px solid ${ORANGE};padding-top:14px;">Featured Listings</div>
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-        <tr>
-          ${activeFeatured.slice(0,3).map(f=>`
-          <td valign="top" style="padding:0 6px 0 0;width:${activeFeatured.length===1?"60%":activeFeatured.length===2?"50%":"33.3%"};">
+  const featuredHtml = nlFeatured.filter(f=>f.name).length>0 ? `
+    <tr><td style="padding:20px 24px 8px;">
+      <div style="font-size:14px;font-weight:800;color:${DARK_BLUE};letter-spacing:0.3px;border-bottom:1px solid #e2e8f0;padding-bottom:8px;margin-bottom:14px;">FEATURED LISTINGS</div>
+      <table role="presentation" width="100%"><tr>
+        ${nlFeatured.filter(f=>f.name).slice(0,3).map(f=>`
+          <td valign="top" style="padding:4px;width:${Math.floor(100/Math.min(nlFeatured.filter(x=>x.name).length,3))}%;">
             <a href="${escA(f.url||"#")}" style="text-decoration:none;display:block;">
-              ${f.imageUrl?`<div style="position:relative;overflow:hidden;border-radius:6px;margin-bottom:8px;">
-                <img src="${escA(toAbs(f.imageUrl))}" width="100%" style="display:block;width:100%;height:auto;border-radius:6px;" />
-              </div>`:""}
-              <div style="font-size:13px;font-weight:800;color:${DARK_BLUE};line-height:1.3;margin-bottom:3px;">${esc(f.name)}</div>
-              ${f.price?`<div style="font-size:13px;color:${ORANGE};font-weight:700;">${esc(f.price)}</div>`:""}
-              <div style="margin-top:8px;font-size:10px;color:${ORANGE};font-weight:800;letter-spacing:1px;text-transform:uppercase;">View Listing →</div>
+              ${f.imageUrl?`<img src="${escA(toAbs(f.imageUrl))}" width="100%" style="display:block;width:100%;height:auto;border-radius:6px;margin-bottom:6px;" />`:""}
+              <div style="font-size:13px;font-weight:700;color:${DARK_BLUE};">${esc(f.name)}</div>
+              ${f.price?`<div style="font-size:12px;color:${ORANGE};font-weight:700;">${esc(f.price)}</div>`:""}
             </a>
           </td>`).join("")}
-        </tr>
-      </table>
+      </tr></table>
     </td></tr>` : "";
 
   const body=`
-    <tr><td style="background:${NAVY};padding:32px 32px 28px;">
-      ${nlSubtitle?`<div style="font-size:10px;color:${ORANGE};font-weight:800;letter-spacing:3px;text-transform:uppercase;margin-bottom:10px;">${esc(nlSubtitle)}</div>`:""}
-      <div style="font-size:28px;font-weight:900;color:#ffffff;line-height:1.2;letter-spacing:-0.3px;">${esc(nlTitle)}</div>
-      <div style="height:1px;background:rgba(255,255,255,0.15);margin:16px 0;"></div>
-      ${nlIntro?`<p style="margin:0;font-size:14px;color:#94a3b8;line-height:1.8;">${esc(nlIntro)}</p>`:""}
+    <tr><td align="center" style="background:${NAVY};padding:24px;">
+      <div style="font-size:22px;font-weight:900;color:#ffffff;letter-spacing:1px;">${esc(nlTitle)}</div>
+      ${nlSubtitle?`<div style="font-size:11px;color:#94a3b8;letter-spacing:1px;margin-top:6px;">${esc(nlSubtitle)}</div>`:""}
     </td></tr>
+    ${nlIntro?`<tr><td style="padding:20px 24px 8px;"><p style="margin:0;font-size:14px;color:${GRAY};line-height:1.7;border-left:3px solid ${ORANGE};padding-left:12px;font-style:italic;">${esc(nlIntro)}</p></td></tr>`:""}
     ${sectionHtml}
     ${featuredHtml}
     ${hero2Html(hero2Position,"bottom",hero2Url,hero2Link,hero2Size)}
@@ -2111,6 +2066,7 @@ function buildNewsletterHtml(opts:{subject:string;nlTitle:string;nlSubtitle:stri
     ${denisonFooterHtml()}`;
   return emailShell(subject,body);
 }
+
 /* ─── Multi-Boat Showcase ─── */
 function buildMultiBoatHtml(opts:{subject:string;showcaseTitle:string;showcaseSubtitle:string;showcaseIntro:string;showcaseHeroUrl:string;heroLink:string;boats:BoatCard[];agents:Agent[];extraButtons:CtaButton[]}&ImgOpts): string {
   const {subject,showcaseTitle,showcaseSubtitle,showcaseIntro,showcaseHeroUrl,heroLink,boats,agents,extraButtons,heroSize,heroPosition,hero2Url,hero2Link,hero2Size,hero2Position}=opts;
@@ -2131,3 +2087,7 @@ function buildMultiBoatHtml(opts:{subject:string;showcaseTitle:string;showcaseSu
     ${hero2Html(hero2Position,"bottom",hero2Url,hero2Link,hero2Size)}
     ${extraButtonsHtml(extraButtons)}
     ${agents.map(a=>agentCardHtml(a, agents, subject)).join("")}
+    <tr><td style="height:12px;">&nbsp;</td></tr>
+    ${denisonFooterHtml()}`;
+  return emailShell(subject,body);
+}
