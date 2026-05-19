@@ -1254,49 +1254,38 @@ export default function CampaignsPage(): React.ReactElement {
               </label>
             ))}
           </Card>
-        {/* ── Live Preview — full-screen modal overlay ── */}
-        {livePreview && (
-          <div className="fixed inset-0 z-[200] flex flex-col bg-[#0f172a]">
-            {/* Header bar */}
-            <div className="flex items-center justify-between px-4 py-3 bg-[#1a2b4a] text-white shrink-0">
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-bold tracking-wide">Live Preview</span>
-                <span className="text-xs text-gray-400 truncate max-w-[200px]">{subject}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button onClick={copyHtml} className={`text-xs px-3 py-1.5 rounded-lg font-semibold ${copied?"bg-green-600":"bg-[#e57b2e] hover:bg-[#d06a20]"}`}>{copied?"✓ Copied":"Copy HTML"}</button>
-                <button onClick={()=>{
-                  const w=window.open("","_blank");
-                  if(w){w.document.write(html);w.document.close();setTimeout(()=>w.print(),500);}
-                }} className="text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 font-semibold flex items-center gap-1.5">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-                  Save PDF
-                </button>
-                <button onClick={()=>setLivePreview(false)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 font-semibold">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                  Close & Continue Editing
-                </button>
-              </div>
-            </div>
-            {/* Scrollable email content */}
-            <div className="flex-1 overflow-y-auto bg-[#f1f5f9] py-8 px-4">
-              <div className="mx-auto bg-white rounded-xl shadow-2xl overflow-hidden" style={{maxWidth:640}}>
-                <iframe
-                  key={previewUrl}
-                  title="live-preview"
-                  src={previewUrl}
-                  className="w-full block"
-                  style={{border:"none",minHeight:"100vh"}}
-                  onLoad={e => {
-                    const f=e.currentTarget;
-                    try { const h=f.contentDocument?.documentElement?.scrollHeight; if(h&&h>200)f.style.height=h+"px"; } catch {}
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-        )}
-        </div>{/* end form */}
+         {/* ── Live Preview — full-screen overlay using dangerouslySetInnerHTML ── */}
+         {livePreview && (
+           <div className="fixed inset-0 z-[200] flex flex-col" style={{background:"#0f172a"}}>
+             {/* Header bar */}
+             <div className="flex items-center justify-between px-4 py-3 shrink-0" style={{background:"#1a2b4a"}}>
+               <div className="flex items-center gap-3">
+                 <span className="text-sm font-bold text-white tracking-wide">Live Preview</span>
+                 <span className="text-xs text-gray-400 truncate max-w-[200px]">{subject}</span>
+               </div>
+               <div className="flex items-center gap-2">
+                 <button onClick={copyHtml} className={`text-xs px-3 py-1.5 rounded-lg font-semibold ${copied?"bg-green-600 text-white":"bg-[#e57b2e] text-white hover:bg-[#d06a20]"}`}>{copied?"✓ Copied":"Copy HTML"}</button>
+                 <button onClick={()=>{const w=window.open("","_blank");if(w){w.document.write(html);w.document.close();setTimeout(()=>w.print(),600);}}}
+                   className="text-xs px-3 py-1.5 rounded-lg font-semibold text-white flex items-center gap-1.5" style={{background:"rgba(255,255,255,0.1)"}}>
+                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                   Save PDF
+                 </button>
+                 <button onClick={()=>setLivePreview(false)}
+                   className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-semibold text-white" style={{background:"rgba(255,255,255,0.1)"}}>
+                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                   Close
+                 </button>
+               </div>
+             </div>
+             {/* Email rendered directly — no iframe, no blob URL, images always show */}
+             <div className="flex-1 overflow-y-auto py-8 px-4" style={{background:"#f1f5f9"}}>
+               <div className="mx-auto rounded-xl shadow-2xl overflow-hidden" style={{maxWidth:640,background:"#fff"}}>
+                 <div dangerouslySetInnerHTML={{__html: html}} />
+               </div>
+             </div>
+           </div>
+         )}
+         </div>{/* end form */}
 
         {/* ── Sticky Action Bar ── */}
         <div className="fixed bottom-[72px] md:bottom-0 left-0 right-0 z-[110] bg-white border-t border-gray-200 shadow-lg safe-area-pb">
