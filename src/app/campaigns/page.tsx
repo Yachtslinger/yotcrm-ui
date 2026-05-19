@@ -984,48 +984,61 @@ export default function CampaignsPage(): React.ReactElement {
             </Card>
           )}
 
-          {/* ── Newsletter fields ── */}
-          {mode==="Newsletter" && (
-            <>
-              <Card title="Newsletter Header">
-                <Field label="Title"    value={nlTitle}    set={setNlTitle} />
-                <Field label="Subtitle" value={nlSubtitle} set={setNlSubtitle} />
-                <TArea label="Opening paragraph" rows={3} value={nlIntro} set={setNlIntro} />
-              </Card>
-              {nlSections.map((s,i)=>(
-                <Card key={s.id} title={`Section ${i+1}`}>
-                  <Field label="Heading" value={s.heading} set={v=>updateNLSection(s.id,"heading",v)} />
-                  <TArea label="Body" rows={5} value={s.body} set={v=>updateNLSection(s.id,"body",v)} />
-                  <button onClick={()=>delNLSection(s.id)} className="text-xs text-red-500 hover:bg-red-50 px-2 py-1 rounded mt-1">Remove section</button>
-                </Card>
-              ))}
-              <button onClick={addNLSection} className="text-sm px-4 py-2 rounded-lg border border-dashed border-gray-300 hover:bg-gray-50 w-full">+ Add Section</button>
-              <Card title="Featured Listings">
-                <p className="text-xs text-gray-400 mb-3">Add up to 3 featured boats (thumbnail grid)</p>
-                {nlFeatured.map((f,i)=>(
-                  <div key={f.id} className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-2">
-                    <div className="text-xs font-semibold text-gray-600 mb-2">Featured #{i+1}</div>
-                    <Field label="Vessel name" value={f.name}     set={v=>updateNLFeatured(f.id,"name",v)} />
-                    <Field label="Price"       value={f.price}    set={v=>updateNLFeatured(f.id,"price",v)} />
-                    <div className="mb-2">
-                      <div className="text-xs text-gray-400 mb-1">Image</div>
-                      <div className="flex gap-2 items-center">
-                        <input value={f.imageUrl} onChange={e=>updateNLFeatured(f.id,"imageUrl",e.target.value)} placeholder="Paste URL or upload →" className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
-                        <Hero2Uploader onUrl={v=>updateNLFeatured(f.id,"imageUrl",v)} currentUrl={f.imageUrl} />
-                      </div>
-                      {f.imageUrl && <div className="mt-1 relative rounded overflow-hidden border border-gray-200" style={{maxHeight:64}}><img src={f.imageUrl} alt="" className="w-full object-cover" style={{maxHeight:64}} /><button onClick={()=>updateNLFeatured(f.id,"imageUrl","")} className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white" style={{background:"rgba(0,0,0,.6)"}}>✕</button></div>}
-                    </div>
-                    <Field label="Link URL"    value={f.url}      set={v=>updateNLFeatured(f.id,"url",v)} />
-                    <button onClick={()=>delNLFeatured(f.id)} className="text-xs text-red-500 hover:bg-red-50 px-2 py-1 rounded">Remove</button>
-                  </div>
-                ))}
-                <div className="flex gap-2 flex-wrap">
-                  {nlFeatured.length<3 && <button onClick={addNLFeatured} className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50">+ Add Featured Listing</button>}
-                  {nlFeatured.length>0 && <button onClick={()=>setNlFeatured([])} className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50">Remove All / Hide Section</button>}
-                </div>
-              </Card>
-            </>
-          )}
+           {/* ── Newsletter fields ── */}
+           {mode==="Newsletter" && (
+             <>
+               <Card title="Hero Image">
+                 <div className="mb-2">
+                   <div className="text-xs text-gray-400 mb-1">Hero Image (optional — appears at top of email)</div>
+                   <div className="flex gap-2 items-center">
+                     <input value={heroUrl} onChange={e=>setHeroUrl(e.target.value)} placeholder="Paste URL or upload →" className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                     <Hero2Uploader onUrl={setHeroUrl} currentUrl={heroUrl} />
+                   </div>
+                   {heroUrl && <div className="mt-2 relative rounded-lg overflow-hidden border border-gray-200" style={{maxHeight:100}}>
+                     <img src={heroUrl} alt="" className="w-full object-cover block" style={{maxHeight:100}} />
+                     <button onClick={()=>setHeroUrl("")} className="absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{background:"rgba(0,0,0,.55)"}}>✕</button>
+                   </div>}
+                 </div>
+               </Card>
+               <Card title="Newsletter Header">
+                 <Field label="Title" value={nlTitle} set={setNlTitle} />
+                 <Field label="Subtitle (shown above title in orange caps)" value={nlSubtitle} set={setNlSubtitle} />
+                 <TArea label="Opening paragraph (shown as italic pull-quote)" rows={3} value={nlIntro} set={setNlIntro} />
+               </Card>
+               {nlSections.map((s,i)=>(
+                 <Card key={s.id} title={`Section ${i+1}`}>
+                   <Field label="Heading" value={s.heading} set={v=>updateNLSection(s.id,"heading",v)} />
+                   <TArea label="Body (blank line between paragraphs)" rows={6} value={s.body} set={v=>updateNLSection(s.id,"body",v)} />
+                   <button onClick={()=>delNLSection(s.id)} className="text-xs text-red-500 hover:bg-red-50 px-2 py-1 rounded mt-1">Remove section</button>
+                 </Card>
+               ))}
+               <button onClick={addNLSection} className="text-sm px-4 py-2 rounded-lg border border-dashed border-gray-300 hover:bg-gray-50 w-full">+ Add Section</button>
+               <Card title="Featured Listings">
+                 <p className="text-xs text-gray-400 mb-3">Add up to 3 featured boats (thumbnail grid)</p>
+                 {nlFeatured.map((f,i)=>(
+                   <div key={f.id} className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-2">
+                     <div className="text-xs font-semibold text-gray-600 mb-2">Featured #{i+1}</div>
+                     <Field label="Vessel name" value={f.name}     set={v=>updateNLFeatured(f.id,"name",v)} />
+                     <Field label="Price"       value={f.price}    set={v=>updateNLFeatured(f.id,"price",v)} />
+                     <div className="mb-2">
+                       <div className="text-xs text-gray-400 mb-1">Image</div>
+                       <div className="flex gap-2 items-center">
+                         <input value={f.imageUrl} onChange={e=>updateNLFeatured(f.id,"imageUrl",e.target.value)} placeholder="Paste URL or upload →" className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                         <Hero2Uploader onUrl={v=>updateNLFeatured(f.id,"imageUrl",v)} currentUrl={f.imageUrl} />
+                       </div>
+                       {f.imageUrl && <div className="mt-1 relative rounded overflow-hidden border border-gray-200" style={{maxHeight:64}}><img src={f.imageUrl} alt="" className="w-full object-cover" style={{maxHeight:64}} /><button onClick={()=>updateNLFeatured(f.id,"imageUrl","")} className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white" style={{background:"rgba(0,0,0,.6)"}}>✕</button></div>}
+                     </div>
+                     <Field label="Link URL"    value={f.url}      set={v=>updateNLFeatured(f.id,"url",v)} />
+                     <button onClick={()=>delNLFeatured(f.id)} className="text-xs text-red-500 hover:bg-red-50 px-2 py-1 rounded">Remove</button>
+                   </div>
+                 ))}
+                 <div className="flex gap-2 flex-wrap">
+                   {nlFeatured.length<3 && <button onClick={addNLFeatured} className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50">+ Add Featured Listing</button>}
+                   {nlFeatured.length>0 && <button onClick={()=>setNlFeatured([])} className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50">Remove All / Hide Section</button>}
+                 </div>
+               </Card>
+             </>
+           )}
 
           {/* ── Multi-Boat fields ── */}
           {mode==="Multi-Boat Showcase" && (
@@ -1260,16 +1273,14 @@ export default function CampaignsPage(): React.ReactElement {
             <div className="flex-1 overflow-y-auto bg-[#f1f5f9] py-8 px-4">
               <div className="mx-auto bg-white rounded-xl shadow-2xl overflow-hidden" style={{maxWidth:640}}>
                 <iframe
+                  key={html.length}
                   title="live-preview"
-                  srcDoc={html}
+                  src={URL.createObjectURL(new Blob([html],{type:"text/html"}))}
                   className="w-full block"
                   style={{border:"none",minHeight:"100vh"}}
                   onLoad={e => {
-                    const iframe = e.currentTarget;
-                    try {
-                      const h = iframe.contentDocument?.documentElement?.scrollHeight;
-                      if (h && h > 200) iframe.style.height = h + "px";
-                    } catch {}
+                    const f=e.currentTarget;
+                    try { const h=f.contentDocument?.documentElement?.scrollHeight; if(h&&h>200)f.style.height=h+"px"; } catch {}
                   }}
                 />
               </div>
@@ -2088,33 +2099,54 @@ function buildOpenHouseHtml(opts:{subject:string;heroUrl:string;heroLink:string;
 
 /* ─── Newsletter ─── */
 function buildNewsletterHtml(opts:{subject:string;nlTitle:string;nlSubtitle:string;nlIntro:string;nlSections:NLSection[];nlFeatured:NLFeatured[];agents:Agent[];extraButtons:CtaButton[]}&ImgOpts): string {
-  const {subject,nlTitle,nlSubtitle,nlIntro,nlSections,nlFeatured,agents,extraButtons,hero2Url,hero2Link,hero2Size,hero2Position}=opts;
+  const {subject,nlTitle,nlSubtitle,nlIntro,nlSections,nlFeatured,agents,extraButtons,heroUrl,heroLink,heroSize,heroPosition,hero2Url,hero2Link,hero2Size,hero2Position}=opts;
+
+  // Convert body text: double newline = new paragraph, single = line break
+  function fmtBody(text: string): string {
+    return text.split(/\n\n+/).map(p =>
+      `<p style="margin:0 0 12px;font-size:15px;color:#334155;line-height:1.8;">${esc(p).replace(/\n/g,"<br/>")}</p>`
+    ).join("");
+  }
+
+  const activeFeatured = nlFeatured.filter(f=>f.name);
+
   const sectionHtml = nlSections.map(s=>`
-    <tr><td style="padding:16px 24px 4px;">
-      <div style="font-size:15px;font-weight:800;color:${DARK_BLUE};border-bottom:2px solid ${ORANGE};padding-bottom:6px;margin-bottom:10px;">${esc(s.heading)}</div>
-      <p style="margin:0;font-size:14px;color:${GRAY};line-height:1.7;">${esc(s.body).replace(/\n/g,"<br/>")}</p>
+    <tr><td style="padding:24px 32px 8px;">
+      <table role="presentation" width="100%" style="border-top:2px solid ${ORANGE};padding-top:14px;">
+        <tr><td>
+          <div style="font-size:10px;color:${ORANGE};font-weight:800;letter-spacing:3px;text-transform:uppercase;margin-bottom:8px;">Market Insight</div>
+          <div style="font-size:20px;font-weight:900;color:${DARK_BLUE};line-height:1.3;margin-bottom:14px;">${esc(s.heading)}</div>
+          ${fmtBody(s.body)}
+        </td></tr>
+      </table>
     </td></tr>`).join("");
-  const featuredHtml = nlFeatured.filter(f=>f.name).length>0 ? `
-    <tr><td style="padding:20px 24px 8px;">
-      <div style="font-size:14px;font-weight:800;color:${DARK_BLUE};letter-spacing:0.3px;border-bottom:1px solid #e2e8f0;padding-bottom:8px;margin-bottom:14px;">FEATURED LISTINGS</div>
-      <table role="presentation" width="100%"><tr>
-        ${nlFeatured.filter(f=>f.name).slice(0,3).map(f=>`
-          <td valign="top" style="padding:4px;width:${Math.floor(100/Math.min(nlFeatured.filter(x=>x.name).length,3))}%;">
+
+  const featuredHtml = activeFeatured.length>0 ? `
+    <tr><td style="padding:24px 32px 16px;background:#f8fafc;">
+      <div style="font-size:10px;color:${ORANGE};font-weight:800;letter-spacing:3px;text-transform:uppercase;margin-bottom:16px;border-top:2px solid ${ORANGE};padding-top:14px;">Featured Listings</div>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>
+        ${activeFeatured.slice(0,3).map(f=>`
+          <td valign="top" style="padding-right:12px;width:${activeFeatured.length===1?"60%":activeFeatured.length===2?"50%":"33.3%"};">
             <a href="${escA(f.url||"#")}" style="text-decoration:none;display:block;">
-              ${f.imageUrl?`<img src="${escA(toAbs(f.imageUrl))}" width="100%" style="display:block;width:100%;height:auto;border-radius:6px;margin-bottom:6px;" />`:""}
-              <div style="font-size:13px;font-weight:700;color:${DARK_BLUE};">${esc(f.name)}</div>
-              ${f.price?`<div style="font-size:12px;color:${ORANGE};font-weight:700;">${esc(f.price)}</div>`:""}
+              ${f.imageUrl?`<img src="${escA(toAbs(f.imageUrl))}" width="100%" style="display:block;width:100%;height:180px;object-fit:cover;border-radius:8px;margin-bottom:10px;" />`:""}
+              <div style="font-size:14px;font-weight:800;color:${DARK_BLUE};line-height:1.3;margin-bottom:4px;">${esc(f.name)}</div>
+              ${f.price?`<div style="font-size:13px;color:${ORANGE};font-weight:700;margin-bottom:6px;">${esc(f.price)}</div>`:""}
+              <div style="font-size:10px;color:${ORANGE};font-weight:800;letter-spacing:1.5px;text-transform:uppercase;">View →</div>
             </a>
           </td>`).join("")}
       </tr></table>
     </td></tr>` : "";
 
+  const heroHtml = heroUrl ? `<tr><td style="padding:0;">${sizedImg(toAbs(heroUrl), heroLink||"", heroSize||"100%")}</td></tr>` : "";
+
   const body=`
-    <tr><td align="center" style="background:${NAVY};padding:24px;">
-      <div style="font-size:22px;font-weight:900;color:#ffffff;letter-spacing:1px;">${esc(nlTitle)}</div>
-      ${nlSubtitle?`<div style="font-size:11px;color:#94a3b8;letter-spacing:1px;margin-top:6px;">${esc(nlSubtitle)}</div>`:""}
+    ${heroHtml}
+    <tr><td style="background:${NAVY};padding:28px 32px 24px;">
+      ${nlSubtitle?`<div style="font-size:10px;color:${ORANGE};font-weight:800;letter-spacing:3px;text-transform:uppercase;margin-bottom:10px;">${esc(nlSubtitle)}</div>`:""}
+      <div style="font-size:28px;font-weight:900;color:#ffffff;line-height:1.2;letter-spacing:-0.3px;">${esc(nlTitle)}</div>
+      <div style="height:1px;background:rgba(255,255,255,0.15);margin:16px 0;"></div>
+      ${nlIntro?`<p style="margin:0;font-size:14px;color:#94a3b8;line-height:1.8;font-style:italic;">${esc(nlIntro)}</p>`:""}
     </td></tr>
-    ${nlIntro?`<tr><td style="padding:20px 24px 8px;"><p style="margin:0;font-size:14px;color:${GRAY};line-height:1.7;border-left:3px solid ${ORANGE};padding-left:12px;font-style:italic;">${esc(nlIntro)}</p></td></tr>`:""}
     ${sectionHtml}
     ${featuredHtml}
     ${hero2Html(hero2Position,"bottom",hero2Url,hero2Link,hero2Size)}
