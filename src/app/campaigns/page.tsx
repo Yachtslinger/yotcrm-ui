@@ -1232,14 +1232,41 @@ export default function CampaignsPage(): React.ReactElement {
               </label>
             ))}
           </Card>
-        {/* ── Live Preview (inline, toggleable) ── */}
+        {/* ── Live Preview — full-screen modal overlay ── */}
         {livePreview && (
-          <div className="mt-2 rounded-2xl overflow-hidden border border-gray-200 shadow-lg">
-            <div className="flex items-center justify-between px-4 py-2 bg-[#1a2b4a] text-white">
-              <span className="text-xs font-bold tracking-wide">Live Preview</span>
-              <button onClick={()=>setLivePreview(false)} className="text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/20">✕ Close</button>
+          <div className="fixed inset-0 z-[200] flex flex-col bg-[#0f172a]">
+            {/* Header bar */}
+            <div className="flex items-center justify-between px-4 py-3 bg-[#1a2b4a] text-white shrink-0">
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-bold tracking-wide">Live Preview</span>
+                <span className="text-xs text-gray-400 truncate max-w-[200px]">{subject}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={copyHtml} className={`text-xs px-3 py-1.5 rounded-lg font-semibold ${copied?"bg-green-600":"bg-[#e57b2e] hover:bg-[#d06a20]"}`}>{copied?"✓ Copied":"Copy HTML"}</button>
+                <button onClick={()=>setLivePreview(false)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 font-semibold">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  Close & Continue Editing
+                </button>
+              </div>
             </div>
-            <iframe title="live-preview" srcDoc={html} className="w-full bg-white" style={{height:500,border:"none"}} />
+            {/* Scrollable email content */}
+            <div className="flex-1 overflow-y-auto bg-[#f1f5f9] py-8 px-4">
+              <div className="mx-auto bg-white rounded-xl shadow-2xl overflow-hidden" style={{maxWidth:640}}>
+                <iframe
+                  title="live-preview"
+                  srcDoc={html}
+                  className="w-full block"
+                  style={{border:"none",minHeight:"100vh"}}
+                  onLoad={e => {
+                    const iframe = e.currentTarget;
+                    try {
+                      const h = iframe.contentDocument?.documentElement?.scrollHeight;
+                      if (h && h > 200) iframe.style.height = h + "px";
+                    } catch {}
+                  }}
+                />
+              </div>
+            </div>
           </div>
         )}
         </div>{/* end form */}
@@ -1816,7 +1843,7 @@ function linkedImg(src: string, link: string, style: string, alt = ""): string {
 }
 
 function agentCardHtml(a: Agent, allAgents?: Agent[], subject?: string): string {
-  const photo = a.photo.startsWith("http") ? a.photo : `${RAILWAY_URL}${a.photo}`;
+  const photo = (a.photo.startsWith("http") || a.photo.startsWith("data:")) ? a.photo : `${RAILWAY_URL}${a.photo}`;
   const isWill = a.email.toLowerCase().includes("wn@denison");
   const others = allAgents ? allAgents.filter(o => o.enabled && o.email !== a.email) : [];
   const mailtoHref = others.length
@@ -1851,13 +1878,25 @@ function denisonFooterHtml(): string {
 function emailShell(subject: string, bodyRows: string): string {
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${esc(subject)}</title>
-<style>body,table,td{font-family:Arial,Helvetica,sans-serif;}img{border:0;line-height:0;outline:none;text-decoration:none;}table{border-collapse:collapse;}@media(max-width:620px){.c{width:100%!important;}.p{padding-left:12px!important;padding-right:12px!important;}}</style>
-</head><body style="margin:0;padding:0;background:${NAVY};">
-<table role="presentation" width="100%" bgcolor="${NAVY}"><tr><td align="center" class="p">
-  <table role="presentation" width="600" class="c" style="width:600px;">
-    <tr><td align="center" style="padding:16px 0;"><img src="${escA(DENISON_HEADER_IMG)}" width="600" style="display:block;width:600px;max-width:100%;height:auto;" /></td></tr>
+<style>
+  body,table,td{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;}
+  img{border:0;line-height:0;outline:none;text-decoration:none;display:block;}
+  table{border-collapse:collapse;}
+  a{color:#1a2b4a;}
+  @media(max-width:640px){.c{width:100%!important;}.p{padding-left:16px!important;padding-right:16px!important;}.hero-img{height:220px!important;}}
+</style>
+</head><body style="margin:0;padding:0;background:#0f172a;">
+<table role="presentation" width="100%" style="background:#0f172a;"><tr><td align="center" style="padding:24px 12px 0;" class="p">
+  <!-- Header logo bar -->
+  <table role="presentation" width="600" class="c" style="width:600px;background:#1a2b4a;border-radius:12px 12px 0 0;overflow:hidden;">
+    <tr><td align="center" style="padding:20px 32px;">
+      <img src="${escA(DENISON_HEADER_IMG)}" width="180" style="width:180px;max-width:100%;height:auto;" />
+    </td></tr>
   </table>
-  <table role="presentation" width="600" class="c" style="width:600px;background:#ffffff;">${bodyRows}</table>
+  <!-- Email body -->
+  <table role="presentation" width="600" class="c" style="width:600px;background:#ffffff;border-radius:0 0 12px 12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.4);">${bodyRows}</table>
+  <!-- Footer spacer -->
+  <table role="presentation" width="600" class="c" style="width:600px;"><tr><td style="height:40px;"></td></tr></table>
 </td></tr></table></body></html>`;
 }
 
@@ -1869,7 +1908,7 @@ function emailShell(subject: string, bodyRows: string): string {
 function buildSingleListingHtml(opts:{subject:string;bannerTag:string;headline:string;location:string;ctaText:string;ctaHref:string;heroUrl:string;heroLink:string;price:string;intro:string;gallery:string[];specs:Spec[];featuresText:string;agents:Agent[];extraButtons:CtaButton[]}&ImgOpts): string {
   const {subject,bannerTag,headline,location,ctaText,ctaHref,price,heroUrl,heroLink,intro,gallery,specs,featuresText,agents,extraButtons,heroSize,heroPosition,hero2Url,hero2Link,hero2Size,hero2Position,galleryColumns,galleryPosition,galleryLink}=opts;
   const r1=specs.slice(0,3),r2=specs.slice(3,6);
-  const specRow=(row:Spec[])=>row.length?`<tr>${row.map(s=>`<td width="33%" style="padding:8px 0;text-align:left;"><div style="color:${LABEL};font-size:11px;letter-spacing:0.5px;font-weight:700;">${esc(s.label)}</div><div style="color:#fff;font-size:14px;font-weight:700;margin-top:2px;">${esc(s.value)}</div></td>`).join("")}</tr>`:"";
+  const specRow=(row:Spec[])=>row.length?`<tr>${row.map(s=>`<td width="33%" style="padding:10px 6px;text-align:center;"><div style="color:${ORANGE};font-size:9px;letter-spacing:2px;font-weight:800;text-transform:uppercase;margin-bottom:4px;">${esc(s.label)}</div><div style="color:#fff;font-size:16px;font-weight:900;">${esc(s.value)}</div></td>`).join("")}</tr>`:"";
   const features=featuresText.split("\n").map(t=>t.trim()).filter(Boolean);
   const galHtml = galleryHtml(gallery, galleryColumns, galleryLink);
   const body=`
@@ -1881,17 +1920,22 @@ function buildSingleListingHtml(opts:{subject:string;bannerTag:string;headline:s
     ${heroAtPos(heroPosition,"after-specs",heroUrl,heroLink,heroSize)}
     ${hero2Html(hero2Position,"after-specs",hero2Url,hero2Link,hero2Size)}
     ${galleryPosition==="after-specs"?galHtml:""}
-    <tr><td align="center" style="background:${ORANGE};color:#fff;font-weight:700;font-size:14px;padding:10px 16px;">${esc(bannerTag)}</td></tr>
-    <tr><td align="center" style="padding:20px 24px 0;"><div style="font-size:22px;color:${DARK_BLUE};font-weight:800;">${esc(headline)}</div><div style="font-size:12px;color:${DARK_BLUE};margin-top:6px;">📍 ${esc(location)}</div></td></tr>
-    <tr><td align="center" style="padding:14px 24px;"><a href="${escA(ctaHref)}" style="display:inline-block;font-size:12px;color:${ORANGE};border:2px solid ${ORANGE};padding:10px 24px;border-radius:4px;text-decoration:none;font-weight:700;letter-spacing:1px;text-transform:uppercase;">${esc(ctaText)}</a></td></tr>
+    <tr><td style="padding:0;"><table role="presentation" width="100%" style="background:${ORANGE};"><tr><td align="center" style="padding:10px 24px;"><span style="color:#fff;font-weight:800;font-size:11px;letter-spacing:3px;text-transform:uppercase;">${esc(bannerTag)}</span></td></tr></table></td></tr>
+    <tr><td align="center" style="padding:28px 32px 8px;">
+      <div style="font-size:28px;color:${DARK_BLUE};font-weight:900;line-height:1.2;letter-spacing:-0.5px;">${esc(headline)}</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:8px;letter-spacing:2px;text-transform:uppercase;">${esc(location)}</div>
+    </td></tr>
+    <tr><td align="center" style="padding:12px 24px 20px;">
+      <a href="${escA(ctaHref)}" style="display:inline-block;font-size:11px;color:#fff;background:${ORANGE};padding:12px 32px;border-radius:6px;text-decoration:none;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;box-shadow:0 4px 12px rgba(229,123,46,0.4);">${esc(ctaText)}</a>
+    </td></tr>
     ${extraButtonsHtml(extraButtons)}
-    ${intro?`<tr><td style="padding:4px 24px 12px;"><p style="margin:0;font-size:14px;color:${GRAY};line-height:1.65;text-align:center;">${esc(intro)}</p></td></tr>`:""}
+    ${intro?`<tr><td style="padding:4px 32px 20px;"><p style="margin:0;font-size:15px;color:${TEXT};line-height:1.8;border-left:3px solid ${ORANGE};padding-left:16px;font-style:italic;">${esc(intro)}</p></td></tr>`:""}
     ${heroAtPos(heroPosition,"after-desc",heroUrl,heroLink,heroSize)}
     ${hero2Html(hero2Position,"after-desc",hero2Url,hero2Link,hero2Size)}
     ${price?`<tr><td align="center" style="padding:8px 24px 16px;font-size:20px;color:${ORANGE};font-weight:800;">${esc(price)}</td></tr>`:""}
     ${galleryPosition==="after-desc"?galHtml:""}
     ${hero2Html(hero2Position,"after-gallery",hero2Url,hero2Link,hero2Size)}
-    ${features.length?`<tr><td style="padding:12px 24px 8px;"><div style="color:${DARK_BLUE};font-weight:800;font-size:14px;border-bottom:1px solid #e2e8f0;padding-bottom:8px;">KEY FEATURES</div><ul style="padding-left:20px;margin:10px 0 0;">${features.map(f=>`<li style="margin-bottom:6px;font-size:14px;color:${TEXT};line-height:1.5;">${esc(f)}</li>`).join("")}</ul></td></tr>`:""}
+    ${features.length?`<tr><td style="padding:20px 32px 16px;"><div style="font-size:10px;color:${ORANGE};font-weight:800;letter-spacing:3px;text-transform:uppercase;margin-bottom:14px;border-top:2px solid ${ORANGE};padding-top:14px;">Key Features</div><table role="presentation" width="100%">${features.map((f,i)=>i%2===0?`<tr><td width="50%" style="padding:4px 8px 4px 0;font-size:13px;color:${TEXT};line-height:1.5;">✦ ${esc(f)}</td>`:`<td width="50%" style="padding:4px 0 4px 8px;font-size:13px;color:${TEXT};line-height:1.5;">✦ ${esc(f)}</td></tr>`).join("")}${features.length%2!==0?"<td></td></tr>":""}</table></td></tr>`:""}
     ${hero2Html(hero2Position,"bottom",hero2Url,hero2Link,hero2Size)}
     ${agents.map(a=>agentCardHtml(a, agents, subject)).join("")}
     <tr><td style="height:12px;">&nbsp;</td></tr>
@@ -1920,7 +1964,7 @@ function buildPriceDropHtml(opts:{subject:string;headline:string;location:string
     ${hero2Html(hero2Position,"after-desc",hero2Url,hero2Link,hero2Size)}
     ${galleryPosition==="after-desc"?galHtml:""}
     ${hero2Html(hero2Position,"after-gallery",hero2Url,hero2Link,hero2Size)}
-    ${features.length?`<tr><td style="padding:12px 24px 8px;"><div style="color:${DARK_BLUE};font-weight:800;font-size:14px;border-bottom:1px solid #e2e8f0;padding-bottom:8px;">KEY FEATURES</div><ul style="padding-left:20px;margin:10px 0 0;">${features.map(f=>`<li style="margin-bottom:6px;font-size:14px;color:${TEXT};line-height:1.5;">${esc(f)}</li>`).join("")}</ul></td></tr>`:""}
+    ${features.length?`<tr><td style="padding:20px 32px 16px;"><div style="font-size:10px;color:${ORANGE};font-weight:800;letter-spacing:3px;text-transform:uppercase;margin-bottom:14px;border-top:2px solid ${ORANGE};padding-top:14px;">Key Features</div><table role="presentation" width="100%">${features.map((f,i)=>i%2===0?`<tr><td width="50%" style="padding:4px 8px 4px 0;font-size:13px;color:${TEXT};line-height:1.5;">✦ ${esc(f)}</td>`:`<td width="50%" style="padding:4px 0 4px 8px;font-size:13px;color:${TEXT};line-height:1.5;">✦ ${esc(f)}</td></tr>`).join("")}${features.length%2!==0?"<td></td></tr>":""}</table></td></tr>`:""}
     ${hero2Html(hero2Position,"bottom",hero2Url,hero2Link,hero2Size)}
     ${agents.map(a=>agentCardHtml(a, agents, subject)).join("")}
     <tr><td style="height:12px;">&nbsp;</td></tr>
