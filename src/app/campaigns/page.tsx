@@ -1739,15 +1739,15 @@ function GalleryImageInput({ value, set }: { value: string; set: (v: string) => 
           className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed cursor-pointer transition-colors shrink-0"
           style={{
             width: 88, minHeight: 72,
-            borderColor: dragOver ? "#c5a064" : "var(--sand-200)",
-            background: dragOver ? "rgba(197,160,100,.07)" : "transparent",
+            borderColor: dragOver ? "#e57b2e" : "#d1d5db",
+            background: dragOver ? "rgba(229,123,46,.07)" : "transparent",
           }}
         >
           {uploading
-            ? <span className="text-xs text-gray-400 animate-pulse">Uploading…</span>
+            ? <span className="text-xs text-gray-400 animate-pulse">Adding…</span>
             : <>
-                <span className="text-lg mb-0.5">📎</span>
-                <span className="text-[10px] text-center leading-tight" style={{ color: "var(--navy-400)" }}>Drop or<br/>click</span>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <span className="text-[10px] text-gray-400 text-center leading-tight mt-1">Drop or<br/>click</span>
               </>}
           <input ref={fileRef} type="file" accept="image/*" multiple className="hidden"
             onChange={e => e.target.files && handleFiles(e.target.files)} />
