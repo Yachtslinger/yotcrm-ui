@@ -1280,7 +1280,11 @@ export default function CampaignsPage(): React.ReactElement {
              {/* Email rendered directly — no iframe, no blob URL, images always show */}
              <div className="flex-1 overflow-y-auto py-8 px-4" style={{background:"#f1f5f9"}}>
                <div className="mx-auto rounded-xl shadow-2xl overflow-hidden" style={{maxWidth:640,background:"#fff"}}>
-                 <div dangerouslySetInnerHTML={{__html: html}} />
+                 <div dangerouslySetInnerHTML={{__html: (()=>{
+                  // Extract body content from full HTML doc for safe inline rendering
+                  const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+                  return bodyMatch ? bodyMatch[1] : html;
+                })()} } />
                </div>
              </div>
            </div>
