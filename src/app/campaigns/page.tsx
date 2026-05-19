@@ -1243,6 +1243,13 @@ export default function CampaignsPage(): React.ReactElement {
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={copyHtml} className={`text-xs px-3 py-1.5 rounded-lg font-semibold ${copied?"bg-green-600":"bg-[#e57b2e] hover:bg-[#d06a20]"}`}>{copied?"✓ Copied":"Copy HTML"}</button>
+                <button onClick={()=>{
+                  const w=window.open("","_blank");
+                  if(w){w.document.write(html);w.document.close();setTimeout(()=>w.print(),500);}
+                }} className="text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 font-semibold flex items-center gap-1.5">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                  Save PDF
+                </button>
                 <button onClick={()=>setLivePreview(false)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 font-semibold">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                   Close & Continue Editing
@@ -1500,7 +1507,14 @@ export default function CampaignsPage(): React.ReactElement {
           </div>
           <div className="flex-1 overflow-auto bg-[#1a2b4a]">
             <div className="mx-auto" style={{maxWidth:620,padding:"16px 10px"}}>
-              <iframe title="email-preview" srcDoc={html} className="w-full bg-white rounded-lg shadow-2xl" style={{height:"calc(100vh - 72px)",border:"none"}} />
+              <iframe
+              key={html.length}
+              title="email-preview"
+              src={typeof window!=="undefined"?URL.createObjectURL(new Blob([html],{type:"text/html"})):""}
+              className="w-full bg-white rounded-lg shadow-2xl"
+              style={{border:"none",minHeight:"100vh"}}
+              onLoad={e => { const f=e.currentTarget; try { const h=f.contentDocument?.documentElement?.scrollHeight; if(h&&h>200)f.style.height=h+"px"; } catch {} }}
+            />
             </div>
           </div>
         </div>
@@ -1890,7 +1904,7 @@ function emailShell(subject: string, bodyRows: string): string {
   <!-- Header logo bar -->
   <table role="presentation" width="600" class="c" style="width:600px;background:#1a2b4a;border-radius:12px 12px 0 0;overflow:hidden;">
     <tr><td align="center" style="padding:20px 32px;">
-      <img src="${escA(DENISON_HEADER_IMG)}" width="180" style="width:180px;max-width:100%;height:auto;" />
+      <img src="${escA(DENISON_HEADER_IMG)}" width="560" style="width:100%;max-width:560px;height:auto;" />
     </td></tr>
   </table>
   <!-- Email body -->
