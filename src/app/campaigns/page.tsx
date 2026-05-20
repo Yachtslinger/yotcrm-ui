@@ -1895,7 +1895,6 @@ function agentCardHtml(a: Agent, allAgents?: Agent[], subject?: string): string 
 function denisonFooterHtml(): string {
   return `<tr><td style="height:8px;line-height:8px;font-size:0;">&nbsp;</td></tr>
   <tr><td style="background:${NAVY};padding:24px;text-align:center;font-family:Arial,Helvetica,sans-serif;">
-    <img src="${escA(DENISON_HEADER_IMG)}" width="200" style="display:inline-block;width:200px;height:auto;margin-bottom:16px;" />
     <div style="font-size:9px;color:#94a3b8;line-height:1.8;letter-spacing:0.5px;max-width:480px;margin:0 auto 16px;">${esc(OFFICES)}</div>
     <div style="margin-bottom:12px;"><a href="mailto:WN@DenisonYachting.com" style="color:#ffffff;text-decoration:none;font-size:12px;">WN@DenisonYachting.com</a><span style="color:#64748b;font-size:12px;"> | 850.461.3342</span></div>
     <div style="font-size:10px;color:#64748b;line-height:1.6;">Proud member of: IYBA, MYBA, CYBA, YBAA, MIASF, NWYBA, NMMA<br/>Will Noftsinger &nbsp;·&nbsp; Denison Yachting &nbsp;·&nbsp; Fort Lauderdale, FL<br/><br/>You received this email because you are a client or contact of Will Noftsinger.<br/><a href="#" style="color:#94a3b8;text-decoration:underline;">Unsubscribe</a></div>
