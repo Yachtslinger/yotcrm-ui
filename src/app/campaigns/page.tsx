@@ -455,7 +455,7 @@ export default function CampaignsPage(): React.ReactElement {
     if (mode==="Single Listing") return buildSingleListingHtml(listing);
     if (mode==="Boat Show")    return buildBoatShowHtml({ subject, heroUrl, heroLink:heroLink||showCtaUrl, showName, showDates, showVenue, showBooth, showAddress, showDesc, showCta, showCtaUrl, gallery, agents:enabledAgents, extraButtons, showVesselName, showVesselSpecs, showVesselDesc, showVesselCtaUrl, ...imgOpts });
     if (mode==="Open House")   return buildOpenHouseHtml({ subject, heroUrl, heroLink:heroLink||`mailto:${ohRsvp}`, ohVessel, ohDate, ohTime, ohMarina, ohAddress, ohDesc, ohRsvp, agents:enabledAgents, extraButtons, ...imgOpts });
-    if (mode==="Newsletter")   return buildNewsletterHtml({ subject, nlTitle, nlSubtitle, nlIntro, nlSections, nlFeatured, agents:enabledAgents, extraButtons, ...imgOpts });
+    if (mode==="Newsletter")   return buildNewsletterHtml({ subject, nlTitle, nlSubtitle, nlIntro, nlSections, nlFeatured, heroUrl, heroLink:heroLink||ctaHref, gallery, agents:enabledAgents, extraButtons, ...imgOpts });
     return buildMultiBoatHtml({ subject, showcaseTitle, showcaseSubtitle, showcaseIntro, showcaseHeroUrl, heroLink:heroLink||ctaHref, boats, agents:enabledAgents, extraButtons, ...imgOpts });
   }, [mode, subject, bannerTag, headline, location, ctaText, ctaHref, heroUrl, heroLink, heroSize, heroPosition,
       hero2Url, hero2Link, hero2Size, hero2Position, galleryLink, galleryColumns, galleryPosition,
@@ -2100,8 +2100,8 @@ function buildOpenHouseHtml(opts:{subject:string;heroUrl:string;heroLink:string;
 }
 
 /* ─── Newsletter ─── */
-function buildNewsletterHtml(opts:{subject:string;nlTitle:string;nlSubtitle:string;nlIntro:string;nlSections:NLSection[];nlFeatured:NLFeatured[];agents:Agent[];extraButtons:CtaButton[]}&ImgOpts): string {
-  const {subject,nlTitle,nlSubtitle,nlIntro,nlSections,nlFeatured,agents,extraButtons,heroUrl,heroLink,heroSize,heroPosition,hero2Url,hero2Link,hero2Size,hero2Position}=opts;
+function buildNewsletterHtml(opts:{subject:string;nlTitle:string;nlSubtitle:string;nlIntro:string;nlSections:NLSection[];nlFeatured:NLFeatured[];heroUrl:string;heroLink:string;gallery:string[];agents:Agent[];extraButtons:CtaButton[]}&ImgOpts): string {
+  const {subject,nlTitle,nlSubtitle,nlIntro,nlSections,nlFeatured,agents,extraButtons,heroUrl,heroLink,heroSize,heroPosition,hero2Url,hero2Link,hero2Size,hero2Position,gallery,galleryColumns,galleryPosition,galleryLink}=opts;
 
   // Convert body text: double newline = new paragraph, single = line break
   function fmtBody(text: string): string {
@@ -2141,16 +2141,25 @@ function buildNewsletterHtml(opts:{subject:string;nlTitle:string;nlSubtitle:stri
 
   const heroHtml = heroUrl ? `<tr><td style="padding:0;">${sizedImg(toAbs(heroUrl), heroLink||"", heroSize||"100%")}</td></tr>` : "";
 
+  const galHtml = galleryHtml(gallery||[], galleryColumns||3, galleryLink||"");
+
   const body=`
     ${heroHtml}
+    ${hero2Html(hero2Position,"top",hero2Url,hero2Link,hero2Size)}
     <tr><td style="background:${NAVY};padding:28px 32px 24px;">
       ${nlSubtitle?`<div style="font-size:10px;color:${ORANGE};font-weight:800;letter-spacing:3px;text-transform:uppercase;margin-bottom:10px;">${esc(nlSubtitle)}</div>`:""}
       <div style="font-size:28px;font-weight:900;color:#ffffff;line-height:1.2;letter-spacing:-0.3px;">${esc(nlTitle)}</div>
       <div style="height:1px;background:rgba(255,255,255,0.15);margin:16px 0;"></div>
       ${nlIntro?`<p style="margin:0;font-size:14px;color:#94a3b8;line-height:1.8;font-style:italic;">${esc(nlIntro)}</p>`:""}
     </td></tr>
+    ${galleryPosition==="after-hero"?galHtml:""}
     ${sectionHtml}
+    ${galleryPosition==="after-specs"?galHtml:""}
+    ${hero2Html(hero2Position,"after-specs",hero2Url,hero2Link,hero2Size)}
+    ${galleryPosition==="after-desc"?galHtml:""}
+    ${hero2Html(hero2Position,"after-desc",hero2Url,hero2Link,hero2Size)}
     ${featuredHtml}
+    ${hero2Html(hero2Position,"after-gallery",hero2Url,hero2Link,hero2Size)}
     ${hero2Html(hero2Position,"bottom",hero2Url,hero2Link,hero2Size)}
     ${extraButtonsHtml(extraButtons)}
     ${agents.map(a=>agentCardHtml(a, agents, subject)).join("")}
