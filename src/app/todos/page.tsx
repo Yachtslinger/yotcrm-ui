@@ -347,7 +347,7 @@ export default function TodosPage() {
         ) : undefined
       }
     >
-      <div className="flex gap-6 items-start" style={{ maxWidth: 1160, margin: "0 auto" }}>
+      <div className="flex flex-col lg:flex-row gap-6 lg:items-start" style={{ maxWidth: 1160, margin: "0 auto" }}>
       <div className="flex-1 min-w-0">
       {/* Person Tabs */}
       <div className="flex gap-2 mb-4">
@@ -683,12 +683,15 @@ export default function TodosPage() {
                   {checkbox}
                   <div className="flex-1 min-w-0">
                     {editingId === todo.id ? (
-                      <div className="flex gap-2">
+                      <div className="flex flex-col sm:flex-row gap-2">
                         <input value={editText} onChange={e => setEditText(e.target.value)}
                           onKeyDown={e => { if (e.key === "Enter") saveEdit(todo.id); if (e.key === "Escape") setEditingId(null); }}
-                          autoFocus className="form-input flex-1" />
-                        <button onClick={() => saveEdit(todo.id)} className="btn-primary text-xs">Save</button>
-                        <button onClick={() => setEditingId(null)} className="btn-ghost text-xs">Cancel</button>
+                          autoFocus className="form-input flex-1 min-w-0"
+                          style={{ fontSize: "16px", minHeight: "44px" }} />
+                        <div className="flex gap-2 shrink-0">
+                          <button onClick={() => saveEdit(todo.id)} className="btn-primary text-xs flex-1 sm:flex-none">Save</button>
+                          <button onClick={() => setEditingId(null)} className="btn-ghost text-xs flex-1 sm:flex-none">Cancel</button>
+                        </div>
                       </div>
                     ) : (
                       <div>
@@ -712,7 +715,7 @@ export default function TodosPage() {
                       </div>
                     )}
                   </div>
-                  {!selectMode && (
+                  {!selectMode && editingId !== todo.id && (
                     <div className="shrink-0 flex gap-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                       <button onClick={() => { setEditingId(todo.id); setEditText(todo.text); }} className="btn-ghost text-xs" title="Edit">✏️</button>
                       <button onClick={() => deleteTodo(todo.id)} className="btn-ghost text-xs" title="Delete">🗑</button>
@@ -725,7 +728,7 @@ export default function TodosPage() {
         </div>
       )}
       </div>{/* end left column */}
-      <div className="shrink-0 flex flex-col gap-4" style={{ width: 340 }}>
+      <div className="shrink-0 flex flex-col gap-4 w-full lg:w-[340px]">
         <SharedNotes />
         <HighMatches />
       </div>

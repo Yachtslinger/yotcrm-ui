@@ -25,27 +25,20 @@ function r5(n: number): number { return Math.round(n / 5000) * 5000; }
 function r1(n: number): number { return Math.round(n / 1000) * 1000; }
 
 /* ─── Lookup tables ────────────────────────────────────────────────────────── */
-
-// Agreed hull value for insurance — what a surveyor sets on a quality used vessel.
-// This is market value + ~25-30% premium, NOT new-build replacement cost.
-// Nadan (46m, asking $14M) → surveyor agrees ~$18-22M → use $22M bracket
 function insuredValue(m: number): number {
-  if (m < 24) return 2_000_000;  if (m < 28) return 3_800_000;
-  if (m < 32) return 6_200_000;  if (m < 36) return 9_500_000;
-  if (m < 40) return 13_500_000; if (m < 45) return 17_500_000;
-  if (m < 50) return 22_000_000; if (m < 55) return 30_000_000;
-  if (m < 62) return 42_000_000; return 58_000_000;
+  if (m < 24) return 3_000_000;  if (m < 28) return 5_500_000;
+  if (m < 32) return 9_000_000;  if (m < 36) return 14_000_000;
+  if (m < 40) return 19_000_000; if (m < 45) return 25_000_000;
+  if (m < 50) return 32_000_000; if (m < 55) return 42_000_000;
+  if (m < 62) return 56_000_000; return 75_000_000;
 }
-
-// Routine engineering base (routine ops, NOT capital). Age mult applied separately.
 function engBaseVal(m: number): number {
-  if (m < 24) return 28_000;  if (m < 28) return 40_000;
-  if (m < 32) return 55_000;  if (m < 36) return 72_000;
-  if (m < 40) return 90_000;  if (m < 45) return 112_000;
-  if (m < 50) return 138_000; if (m < 55) return 172_000;
-  if (m < 62) return 215_000; return 275_000;
+  if (m < 24) return 32_000;  if (m < 28) return 48_000;
+  if (m < 32) return 65_000;  if (m < 36) return 85_000;
+  if (m < 40) return 108_000; if (m < 45) return 135_000;
+  if (m < 50) return 168_000; if (m < 55) return 210_000;
+  if (m < 62) return 265_000; return 340_000;
 }
-
 function captainMid(m: number): number {
   if (m < 24) return 110_000; if (m < 28) return 130_000;
   if (m < 32) return 148_000; if (m < 36) return 162_000;
@@ -53,35 +46,30 @@ function captainMid(m: number): number {
   if (m < 50) return 192_000; if (m < 55) return 210_000;
   if (m < 62) return 232_000; return 260_000;
 }
-
-// Age multiplier — capped at 1.30 max for routine engineering
-// (older vessels need more maintenance but it doesn't grow to 1.6x)
 function ageMult(yr: number): number {
   const age = 2026 - yr;
-  if (age >= 20) return 1.30; if (age >= 15) return 1.22;
-  if (age >= 12) return 1.14; if (age >= 8)  return 1.07;
+  if (age >= 20) return 1.90; if (age >= 15) return 1.60;
+  if (age >= 12) return 1.32; if (age >= 8)  return 1.14;
   return 1.0;
 }
-
 function fuelBurnLph(m: number): number {
-  if (m < 28) return 50;  if (m < 32) return 68;  if (m < 36) return 88;
-  if (m < 40) return 108; if (m < 45) return 128; if (m < 50) return 148;
-  if (m < 55) return 188; return 238;
+  if (m < 28) return 55;  if (m < 32) return 75;  if (m < 36) return 95;
+  if (m < 40) return 115; if (m < 45) return 135; if (m < 50) return 155;
+  if (m < 55) return 195; return 245;
 }
-
 function dockMonthlyPerFt(port: string): { l: number; m: number; h: number } {
   const p = port.toLowerCase();
-  if (p.includes("mediterr") || p.includes(" med")) return { l: 55, m: 90,  h: 165 };
-  if (p.includes("florida")  || p.includes("east")) return { l: 28, m: 48,  h: 82  };
-  if (p.includes("gulf"))                            return { l: 22, m: 36,  h: 62  };
-  if (p.includes("caribbean"))                       return { l: 22, m: 38,  h: 68  };
-  if (p.includes("pacific")  || p.includes("alaska"))return { l: 18, m: 30,  h: 52  };
-  if (p.includes("worldwide")|| p.includes("expedi"))return { l: 35, m: 60,  h: 115 };
-  return { l: 28, m: 48, h: 82 };
+  if (p.includes("mediterr") || p.includes(" med")) return { l:55, m:90,  h:165 };
+  if (p.includes("florida")  || p.includes("east")) return { l:30, m:52,  h:88  };
+  if (p.includes("gulf"))                            return { l:24, m:40,  h:68  };
+  if (p.includes("caribbean"))                       return { l:25, m:43,  h:75  };
+  if (p.includes("pacific")  || p.includes("alaska"))return { l:20, m:33,  h:56  };
+  if (p.includes("worldwide")|| p.includes("expedi"))return { l:38, m:66,  h:122 };
+  return { l:30, m:52, h:88 };
 }
 
 /* ─── Full deterministic budget builder ────────────────────────────────────── */
-function buildBudget(v: Record<string, string>, port: string, style: string, hrs: number) {
+function buildBudget(v: Record<string,string>, port: string, style: string, hrs: number) {
   const lm   = parseLoaMeters(v.loa || "");
   const lft  = lm * 3.28084;
   const yr   = parseYear(v.year || "");
@@ -93,189 +81,376 @@ function buildBudget(v: Record<string, string>, port: string, style: string, hrs
   const hrsL = Math.round(hrs * 0.55);
   const hrsH = Math.round(hrs * 1.55);
 
-  /* ── Crew salaries ──────────────────────────────────────────────────────── */
+  // ── Salaries ────────────────────────────────────────────────────────
   const capM = captainMid(lm);
   const S = {
-    cap:  { l: r5(capM * 0.82), m: capM,            h: r5(capM * 1.20) },
-    eng:  { l: r5(capM * 0.74 * 0.82), m: r5(capM * 0.74), h: r5(capM * 0.74 * 1.18) },
-    chef: { l: r5(capM * 0.62 * 0.82), m: r5(capM * 0.62), h: r5(capM * 0.62 * 1.18) },
-    stew: { l: r5(capM * 0.55 * 0.82), m: r5(capM * 0.55), h: r5(capM * 0.55 * 1.18) },
-    jr:   { l: 58_000,                 m: 70_000,           h: 85_000 },
+    cap:  { l: r5(capM*0.82), m: capM,            h: r5(capM*1.20) },
+    eng:  { l: r5(capM*0.74*0.82), m: r5(capM*0.74), h: r5(capM*0.74*1.18) },
+    chef: { l: r5(capM*0.62*0.82), m: r5(capM*0.62), h: r5(capM*0.62*1.18) },
+    stew: { l: r5(capM*0.55*0.82), m: r5(capM*0.55), h: r5(capM*0.55*1.18) },
+    jr:   { l: 60_000,             m: 72_000,         h: 87_000 },
   };
-  const jrCt = Math.max(0, cc - 4);
+  const namedCt = Math.min(cc, 4);
+  const jrCt    = Math.max(0, cc - 4);
   const salL = S.cap.l + S.eng.l + S.chef.l + S.stew.l + jrCt * S.jr.l;
   const salM = S.cap.m + S.eng.m + S.chef.m + S.stew.m + jrCt * S.jr.m;
   const salH = S.cap.h + S.eng.h + S.chef.h + S.stew.h + jrCt * S.jr.h;
 
-  /* ── Crew support costs ─────────────────────────────────────────────────── */
-  const foodDailyMid = isLux ? 46 : 34;
-  const crewFood = { l: r5(cc * 32 * 365), m: r5(cc * foodDailyMid * 365), h: r5(cc * 62 * 365) };
-  const recruit  = { l: r1(cc * 2_500),  m: r1(cc * 4_000),  h: r1(cc * 7_000) };
-  const travel   = { l: r1(cc * 3_200),  m: r1(cc * 5_200),  h: r1(cc * 9_000) };
-  const accom    = { l: r1(cc * 900),    m: r1(cc * 1_500),  h: r1(cc * 2_600) };
-  const uniform  = { l: r1(cc * 1_000),  m: r1(cc * 1_600),  h: r1(cc * 2_600) };
-  const training = { l: r1(cc * 1_400),  m: r1(cc * 2_200),  h: r1(cc * 3_800) };
-  const medical  = { l: r1(cc * 800),    m: r1(cc * 1_300),  h: r1(cc * 2_200) };
-  const dayWork  = { l: r1(lm * 300),    m: r1(lm * 550),    h: r1(lm * 1_050) };
-  const entmt    = { l: r1(cc * 450),    m: r1(cc * 800),    h: r1(cc * 1_500) };
+  // ── Other crew ──────────────────────────────────────────────────────
+  const foodDailyMid = isLux ? 48 : 36;
+  const crewFood = { l: r5(cc*34*365), m: r5(cc*foodDailyMid*365), h: r5(cc*65*365) };
+  const recruit  = { l: r1(cc*2800),  m: r1(cc*4200),  h: r1(cc*7500) };
+  const travel   = { l: r1(cc*3500),  m: r1(cc*5500),  h: r1(cc*9500) };
+  const accom    = { l: r1(cc*1000),  m: r1(cc*1600),  h: r1(cc*2800) };
+  const uniform  = { l: r1(cc*1100),  m: r1(cc*1700),  h: r1(cc*2800) };
+  const training = { l: r1(cc*1600),  m: r1(cc*2500),  h: r1(cc*4200) };
+  const medical  = { l: r1(cc*900),   m: r1(cc*1500),  h: r1(cc*2500) };
+  const dayWork  = { l: r1(lm*400),   m: r1(lm*700),   h: r1(lm*1300) };
+  const entmt    = { l: r1(cc*500),   m: r1(cc*900),   h: r1(cc*1600) };
 
-  /* ── Communications ─────────────────────────────────────────────────────── */
+  // ── Comms ───────────────────────────────────────────────────────────
   const phone  = { l: 7_000,  m: 10_000, h: 15_000 };
   const satTv  = { l: 5_000,  m: 7_000,  h: 11_000 };
   const satcom = { l: 20_000, m: 30_000, h: 48_000 };
 
-  /* ── Operations ─────────────────────────────────────────────────────────── */
+  // ── Operations ──────────────────────────────────────────────────────
   const eBase = engBaseVal(lm);
-  const eng  = { l: r5(eBase * am * 0.72), m: r5(eBase * am),      h: r5(eBase * am * 1.50) };
+  const eng  = { l: r5(eBase*am*0.70), m: r5(eBase*am),      h: r5(eBase*am*1.55) };
   const fuelGph = fuelBurnLph(lm) * 0.264172;
-  const fuel = { l: r5(hrsL * fuelGph * 4.6), m: r5(hrs * fuelGph * 5.0), h: r5(hrsH * fuelGph * 5.5) };
+  const fuel = { l: r5(hrsL*fuelGph*4.8), m: r5(hrs*fuelGph*5.1), h: r5(hrsH*fuelGph*5.6) };
   const dr   = dockMonthlyPerFt(port);
-  const dock = { l: r5(lft * dr.l * 12 * 1.25), m: r5(lft * dr.m * 12 * 1.25), h: r5(lft * dr.h * 12 * 1.25) };
-  const galley   = { l: r5(Math.max(40_000, lm * 850)),  m: r5(Math.max(60_000, lm * 1_350)), h: r5(Math.max(95_000, lm * 2_200)) };
-  const interior = { l: r5(lm * (isLux ? 550 : 300)),    m: r5(lm * (isLux ? 950 : 500)),    h: r5(lm * (isLux ? 1_500 : 780)) };
-  const agency   = { l: r1(lm * 250),  m: r1(lm * 440),  h: r1(lm * 780) };
-  const av       = { l: r1(lm * 70),   m: r1(lm * 140),  h: r1(lm * 260) };
-  const auto_v   = { l: r1(lm * 80),   m: r1(lm * 145),  h: r1(lm * 255) };
-  const bridge   = { l: r1(lm * 90),   m: r1(lm * 160),  h: r1(lm * 270) };
-  const computer = { l: r1(lm * 80),   m: r1(lm * 145),  h: r1(lm * 240) };
-  const deck     = { l: r1(lm * 290),  m: r1(lm * 500),  h: r1(lm * 850) };
-  const dockExp  = { l: r1(lm * 55),   m: r1(lm * 100),  h: r1(lm * 175) };
-  const launches = { l: r1(lm * 125),  m: r1(lm * 215),  h: r1(lm * 380) };
-  const mail     = { l: r1(lm * 50),   m: r1(lm * 90),   h: r1(lm * 160) };
-  const office   = { l: r1(lm * 58),   m: r1(lm * 105),  h: r1(lm * 180) };
-  const safety   = { l: r1(lm * 100),  m: r1(lm * 180),  h: r1(lm * 320) };
-  const security = { l: r1(lm * 62),   m: r1(lm * 120),  h: r1(lm * 235) };
-  const survey   = { l: r1(lm * 150),  m: r1(lm * 270),  h: r1(lm * 470) };
-  const ware     = { l: r1(lm * 70),   m: r1(lm * 135),  h: r1(lm * 240) };
+  const dock = { l: r5(lft*dr.l*12*1.28), m: r5(lft*dr.m*12*1.28), h: r5(lft*dr.h*12*1.28) };
+  const galley   = { l: r5(Math.max(45_000, lm*950)),  m: r5(Math.max(70_000, lm*1500)), h: r5(Math.max(110_000, lm*2400)) };
+  const interior = { l: r5(lm*(isLux?600:350)),  m: r5(lm*(isLux?1050:550)),  h: r5(lm*(isLux?1650:850)) };
+  const agency   = { l: r1(lm*280),   m: r1(lm*480),   h: r1(lm*850) };
+  const av       = { l: r1(lm*80),    m: r1(lm*160),   h: r1(lm*290) };
+  const auto_v   = { l: r1(lm*90),    m: r1(lm*160),   h: r1(lm*280) };
+  const bridge   = { l: r1(lm*100),   m: r1(lm*180),   h: r1(lm*290) };
+  const computer = { l: r1(lm*90),    m: r1(lm*160),   h: r1(lm*260) };
+  const deck     = { l: r1(lm*320),   m: r1(lm*550),   h: r1(lm*920) };
+  const dockExp  = { l: r1(lm*60),    m: r1(lm*110),   h: r1(lm*190) };
+  const launches = { l: r1(lm*140),   m: r1(lm*240),   h: r1(lm*420) };
+  const mail     = { l: r1(lm*55),    m: r1(lm*100),   h: r1(lm*175) };
+  const office   = { l: r1(lm*65),    m: r1(lm*115),   h: r1(lm*195) };
+  const safety   = { l: r1(lm*110),   m: r1(lm*200),   h: r1(lm*360) };
+  const security = { l: r1(lm*70),    m: r1(lm*135),   h: r1(lm*260) };
+  const survey   = { l: r1(lm*170),   m: r1(lm*300),   h: r1(lm*520) };
+  const ware     = { l: r1(lm*80),    m: r1(lm*150),   h: r1(lm*260) };
 
-  /* ── Insurance ──────────────────────────────────────────────────────────── */
-  const hv    = insuredValue(lm);
-  const hm    = { l: r5(hv * 0.0082), m: r5(hv * 0.0118), h: r5(hv * 0.0168) };
-  const pi    = { l: r5(hm.l * 0.10), m: r5(hm.m * 0.10), h: r5(hm.h * 0.10) };
-  const crewH = { l: r5(cc * 4_500),  m: r5(cc * 5_800),  h: r5(cc * 8_000) };
+  // ── Insurance ───────────────────────────────────────────────────────
+  const hv  = insuredValue(lm);
+  const hm  = { l: r5(hv*0.0082), m: r5(hv*0.0118), h: r5(hv*0.0168) };
+  const pi  = { l: r5(hm.l*0.10), m: r5(hm.m*0.10), h: r5(hm.h*0.10) };
+  const crewH = { l: r5(cc*4800), m: r5(cc*6200),   h: r5(cc*8500) };
 
-  /* ── Administrative ─────────────────────────────────────────────────────── */
-  const profFees = { l: r1(lm * 320),  m: r1(lm * 560),   h: r1(lm * 980) };
-  const bankCh   = { l: 3_000,         m: 4_000,           h: 6_500 };
-  const mgmtTrav = { l: r1(lm * 80),   m: r1(lm * 155),   h: r1(lm * 275) };
+  // ── Administrative ──────────────────────────────────────────────────
+  const profFees = { l: r1(lm*350), m: r1(lm*600),  h: r1(lm*1050) };
+  const bankCh   = { l: 3_000,      m: 4_500,        h: 7_000 };
+  const mgmtTrav = { l: r1(lm*90),  m: r1(lm*170),  h: r1(lm*300) };
 
-  /* ── Capital improvements (annualised reserves) ─────────────────────────── */
+  // ── Capital ─────────────────────────────────────────────────────────
   const paintCycle = isExp ? 3 : 5;
-  const paintJob   = isExp ? lft * 350 : lft * 1_950;
-  const paint      = { l: r5(paintJob * 0.80 / paintCycle), m: r5(paintJob / paintCycle), h: r5(paintJob * 1.35 / paintCycle) };
-  // Cap eng reserve: lower multiplier — this is planned capex, not emergency spend
-  const capEng     = { l: r5(eBase * 0.72 * am * 0.60), m: r5(eBase * 0.72 * am), h: r5(eBase * 0.72 * am * 1.60) };
-  const capAv      = { l: r1(lm * 80),   m: r1(lm * 175),  h: r1(lm * 360) };
-  const capInt     = { l: r1(lm * 240),  m: r1(lm * 480),  h: r1(lm * 880) };
-  const capTend    = { l: r1(lm * 170),  m: r1(lm * 350),  h: r1(lm * 660) };
-  const capOther   = { l: r1(lm * 175),  m: r1(lm * 335),  h: r1(lm * 620) };
+  const paintJob   = isExp ? lft*380 : lft*2100;
+  const paint      = { l: r5(paintJob*0.80/paintCycle), m: r5(paintJob/paintCycle), h: r5(paintJob*1.35/paintCycle) };
+  const capEng     = { l: r5(eBase*0.90*am*0.62), m: r5(eBase*0.90*am), h: r5(eBase*0.90*am*1.65) };
+  const capAv      = { l: r1(lm*90),  m: r1(lm*200),  h: r1(lm*400) };
+  const capInt     = { l: r1(lm*280), m: r1(lm*560),  h: r1(lm*1000) };
+  const capTend    = { l: r1(lm*200), m: r1(lm*400),  h: r1(lm*750) };
+  const capOther   = { l: r1(lm*200), m: r1(lm*380),  h: r1(lm*700) };
 
-  /* ── Management fee (after sub-total) ───────────────────────────────────── */
-  function sum(items: {l:number;m:number;h:number}[], key: "l"|"m"|"h") {
-    return items.reduce((acc, i) => acc + i[key], 0);
-  }
-  const allItems = [
-    {l:salL,m:salM,h:salH}, crewFood, recruit, travel, accom, uniform, training, medical, dayWork, entmt,
-    phone, satTv, satcom,
-    eng, fuel, dock, galley, interior, agency, av, auto_v, bridge, computer, deck,
-    dockExp, launches, mail, office, safety, security, survey, ware,
-    hm, pi, crewH, profFees, bankCh, mgmtTrav,
-    paint, capEng, capAv, capInt, capTend, capOther,
-  ];
-  const preMgmt = { l: sum(allItems,"l"), m: sum(allItems,"m"), h: sum(allItems,"h") };
-  const mgmt    = { l: r5(preMgmt.l * 0.038), m: r5(preMgmt.m * 0.058), h: r5(preMgmt.h * 0.080) };
+  // ── Management fee (computed after sub-total) ────────────────────────
+  const preMgmt = {
+    l: salL+crewFood.l+recruit.l+travel.l+accom.l+uniform.l+training.l+medical.l+dayWork.l+entmt.l
+      +phone.l+satTv.l+satcom.l
+      +eng.l+fuel.l+dock.l+galley.l+interior.l+agency.l+av.l+auto_v.l+bridge.l+computer.l
+      +deck.l+dockExp.l+launches.l+mail.l+office.l+safety.l+security.l+survey.l+ware.l
+      +hm.l+pi.l+crewH.l
+      +profFees.l+bankCh.l+mgmtTrav.l
+      +paint.l+capEng.l+capAv.l+capInt.l+capTend.l+capOther.l,
+    m: salM+crewFood.m+recruit.m+travel.m+accom.m+uniform.m+training.m+medical.m+dayWork.m+entmt.m
+      +phone.m+satTv.m+satcom.m
+      +eng.m+fuel.m+dock.m+galley.m+interior.m+agency.m+av.m+auto_v.m+bridge.m+computer.m
+      +deck.m+dockExp.m+launches.m+mail.m+office.m+safety.m+security.m+survey.m+ware.m
+      +hm.m+pi.m+crewH.m
+      +profFees.m+bankCh.m+mgmtTrav.m
+      +paint.m+capEng.m+capAv.m+capInt.m+capTend.m+capOther.m,
+    h: salH+crewFood.h+recruit.h+travel.h+accom.h+uniform.h+training.h+medical.h+dayWork.h+entmt.h
+      +phone.h+satTv.h+satcom.h
+      +eng.h+fuel.h+dock.h+galley.h+interior.h+agency.h+av.h+auto_v.h+bridge.h+computer.h
+      +deck.h+dockExp.h+launches.h+mail.h+office.h+safety.h+security.h+survey.h+ware.h
+      +hm.h+pi.h+crewH.h
+      +profFees.h+bankCh.h+mgmtTrav.h
+      +paint.h+capEng.h+capAv.h+capInt.h+capTend.h+capOther.h,
+  };
+  const mgmt = { l: r5(preMgmt.l*0.040), m: r5(preMgmt.m*0.062), h: r5(preMgmt.h*0.085) };
 
-  /* ── Salary breakdown ───────────────────────────────────────────────────── */
+  // ── Salary breakdown array ───────────────────────────────────────────
   const jrNames = ["2nd Stewardess","Deckhand","2nd Deckhand","3rd Stewardess","Bosun","Additional Crew"];
   const breakdown = [
-    { role: "Captain",                     low: S.cap.l,  mid: S.cap.m,  high: S.cap.h  },
-    { role: "Chief Engineer / First Mate", low: S.eng.l,  mid: S.eng.m,  high: S.eng.h  },
-    { role: "Chef",                        low: S.chef.l, mid: S.chef.m, high: S.chef.h },
-    { role: "Chief Stewardess",            low: S.stew.l, mid: S.stew.m, high: S.stew.h },
+    { role:"Captain",                     low:S.cap.l,  mid:S.cap.m,  high:S.cap.h  },
+    { role:"Chief Engineer / First Mate", low:S.eng.l,  mid:S.eng.m,  high:S.eng.h  },
+    { role:"Chef",                        low:S.chef.l, mid:S.chef.m, high:S.chef.h },
+    { role:"Chief Stewardess",            low:S.stew.l, mid:S.stew.m, high:S.stew.h },
   ];
   for (let i = 0; i < jrCt; i++) {
-    breakdown.push({ role: jrNames[i] || `Crew ${5 + i}`, low: S.jr.l, mid: S.jr.m, high: S.jr.h });
+    breakdown.push({ role: jrNames[i] || `Crew ${5+i}`, low:S.jr.l, mid:S.jr.m, high:S.jr.h });
   }
+
+  return {
+    lm, lft, yr, am, cc, hv, salL, salM, salH, breakdown,
+    model: {
+      crew: {
+        salaries:    { low:salL, mid:salM, high:salH, breakdown },
+        recruitment: recruit,  travel,        accommodation: accom,
+        uniforms:    uniform,  training,      foodBeverage:  crewFood,
+        medical,               dayWorkers:    dayWork,       entertainment: entmt,
+      },
+      communications: { phone, satTV: satTv, satcom },
+      operations: {
+        agency, audioVisual: av, auto: auto_v, bridge, computer, deck,
+        dockExpress: dockExp, engineering: eng, fuels: fuel, galley,
+        interior, launches,  mailFreight: mail, office, dockage: dock,
+        safetyMedical: safety, security, survey, warehousing: ware,
+      },
+      insurance: { hull: hm, pi, crewHealth: crewH },
+      administrative: { professionalFees: profFees, bankCharges: bankCh, managementFee: mgmt, managementTravel: mgmtTrav },
+      capital: { av: capAv, engineeringDeck: capEng, interior: capInt, paint, tendersToys: capTend, other: capOther },
+    },
+    grandTotal: { l: preMgmt.l + mgmt.l, m: preMgmt.m + mgmt.m, h: preMgmt.h + mgmt.h },
+  };
+}
+
+/* ═══ 40–80 ft SEGMENT ══════════════════════════════════════════════════════
+   A separate cost engine for sub-80ft vessels. These boats run a different
+   ownership regime: owner-operated or single-captain crew, agreed-value hull
+   insurance, dry-stack / per-foot wet slips, and no management-company or
+   flag-state overhead. Output uses the SAME CostModel shape as buildBudget so
+   the table / analysis / PDF UI is reused unchanged — categories that do not
+   apply to this segment are returned as zero. crewMode is user-selected:
+   "owner" (no paid crew), "captain" (one captain, day-rate), "captain_mate"
+   (full-time captain + mate).
+*/
+
+// Dry-stack / wet-slip monthly rate per foot by region (small-craft market).
+function smallDockPerFt(port: string): { l: number; m: number; h: number } {
+  const p = port.toLowerCase();
+  if (p.includes("mediterr") || p.includes(" med")) return { l: 32, m: 52, h: 95 };
+  if (p.includes("florida")  || p.includes("east")) return { l: 18, m: 30, h: 52 };
+  if (p.includes("gulf"))                            return { l: 14, m: 24, h: 40 };
+  if (p.includes("caribbean"))                       return { l: 16, m: 27, h: 46 };
+  if (p.includes("pacific")  || p.includes("alaska"))return { l: 13, m: 21, h: 36 };
+  if (p.includes("worldwide")|| p.includes("expedi"))return { l: 20, m: 34, h: 60 };
+  return { l: 18, m: 30, h: 52 };
+}
+
+// Agreed hull value for sub-80ft craft (what these actually sell for), by metres.
+function smallAgreedValue(m: number): number {
+  const ft = m * 3.28084;
+  if (ft < 45) return 450_000;   if (ft < 50) return 750_000;
+  if (ft < 55) return 1_100_000; if (ft < 60) return 1_600_000;
+  if (ft < 65) return 2_300_000; if (ft < 70) return 3_200_000;
+  if (ft < 75) return 4_400_000; return 6_000_000;
+}
+
+// Day-rate captain: annual cost assuming part-time engagement (~120 days/yr mid).
+function smallCaptainAnnual(m: number): { l: number; m: number; h: number } {
+  const ft = m * 3.28084;
+  const rate = ft < 50 ? 480 : ft < 60 ? 560 : ft < 70 ? 650 : 760; // $/day mid
+  return { l: r5(rate * 75 * 0.9), m: r5(rate * 120), h: r5(rate * 180 * 1.1) };
+}
+
+type SmallOpts = { crewMode: "owner" | "captain" | "captain_mate" };
+
+function buildSmallBudget(
+  v: Record<string,string>, port: string, style: string, hrs: number, opts: SmallOpts
+) {
+  const lm   = parseLoaMeters(v.loa || "");
+  const lft  = lm * 3.28084;
+  const yr   = parseYear(v.year || "");
+  const am   = ageMult(yr);
+  const isLux = !style.toLowerCase().includes("explorer") && !style.toLowerCase().includes("commercial");
+  const Z = { low: 0, mid: 0, high: 0 };
+
+  const hrsL = Math.round(hrs * 0.55);
+  const hrsH = Math.round(hrs * 1.55);
+
+  // ── Crew (depends on user-selected crewMode) ────────────────────────
+  const capAnnual = smallCaptainAnnual(lm);
+  let salL = 0, salM = 0, salH = 0;
+  const breakdown: { role: string; low: number; mid: number; high: number }[] = [];
+  if (opts.crewMode === "captain" || opts.crewMode === "captain_mate") {
+    breakdown.push({ role: "Captain (day-rate)", low: capAnnual.l, mid: capAnnual.m, high: capAnnual.h });
+    salL += capAnnual.l; salM += capAnnual.m; salH += capAnnual.h;
+  }
+  if (opts.crewMode === "captain_mate") {
+    const mate = { l: r5(capAnnual.l * 0.62), m: r5(capAnnual.m * 0.62), h: r5(capAnnual.h * 0.62) };
+    breakdown.push({ role: "Mate / Deckhand", low: mate.l, mid: mate.m, high: mate.h });
+    salL += mate.l; salM += mate.m; salH += mate.h;
+  }
+  const cc = breakdown.length;
+  const sal = { low: salL, mid: salM, high: salH };
+
+  // Crew support costs — scaled to paid headcount; zero when owner-operated.
+  const crewFood = cc ? { low: r1(cc*22*120), mid: r1(cc*30*120), high: r1(cc*42*120) } : Z;
+  const uniform  = cc ? { low: r1(cc*400),    mid: r1(cc*650),    high: r1(cc*1000) }   : Z;
+  const training = cc ? { low: r1(cc*600),    mid: r1(cc*1000),   high: r1(cc*1700) }   : Z;
+  const crewH    = opts.crewMode === "captain_mate"
+    ? { low: r5(cc*4200), mid: r5(cc*5400), high: r5(cc*7200) } : Z; // only full-time crew
+
+  // ── Operations ──────────────────────────────────────────────────────
+  const eBase = engBaseVal(lm) * 0.55; // small-craft engineering runs lighter
+  const eng  = { low: r5(eBase*am*0.70), mid: r5(eBase*am), high: r5(eBase*am*1.55) };
+  const fuelGph = Math.max(8, fuelBurnLph(lm) * 0.45) * 0.264172;
+  const fuel = { low: r5(hrsL*fuelGph*4.8), mid: r5(hrs*fuelGph*5.1), high: r5(hrsH*fuelGph*5.6) };
+  const dr   = smallDockPerFt(port);
+  const dock = { low: r5(lft*dr.l*12), mid: r5(lft*dr.m*12), high: r5(lft*dr.h*12) };
+  // Haul-out, bottom paint, winterizing — folded into warehousing line.
+  const haulStore = { low: r5(lft*55 + 1500), mid: r5(lft*95 + 2600), high: r5(lft*160 + 4200) };
+  const deck     = { low: r1(lm*120), mid: r1(lm*210), high: r1(lm*360) };
+  const galley   = { low: r5(Math.max(6_000, lm*260)), mid: r5(Math.max(11_000, lm*460)), high: r5(Math.max(18_000, lm*760)) };
+  const interior = { low: r1(lm*(isLux?120:70)), mid: r1(lm*(isLux?220:130)), high: r1(lm*(isLux?360:210)) };
+  const safety   = { low: r1(lm*45), mid: r1(lm*85), high: r1(lm*150) };
+  const survey   = { low: r1(lm*55), mid: r1(lm*100), high: r1(lm*175) };
+  const bridge   = { low: r1(lm*40), mid: r1(lm*75), high: r1(lm*130) };
+  const launches = { low: r1(lm*55), mid: r1(lm*100), high: r1(lm*180) };
+
+  // ── Insurance — agreed value, not GT replacement ────────────────────
+  const hv  = smallAgreedValue(lm);
+  const hm  = { low: r5(hv*0.0125), mid: r5(hv*0.0165), high: r5(hv*0.0225) };
+  const pi  = { low: r5(hm.low*0.12), mid: r5(hm.mid*0.12), high: r5(hm.high*0.12) };
+
+  // ── Capital ─────────────────────────────────────────────────────────
+  const paintCycle = isLux ? 7 : 9;
+  const paintJob   = lft * (isLux ? 850 : 420);
+  const paint    = { low: r5(paintJob*0.80/paintCycle), mid: r5(paintJob/paintCycle), high: r5(paintJob*1.35/paintCycle) };
+  const capEng   = { low: r5(eBase*0.85*am*0.62), mid: r5(eBase*0.85*am), high: r5(eBase*0.85*am*1.6) };
+  const capTend  = { low: r1(lm*80), mid: r1(lm*160), high: r1(lm*300) };
+  const capOther = { low: r1(lm*90), mid: r1(lm*180), high: r1(lm*340) };
+
+  // ── Communications — modest for this segment ────────────────────────
+  const phone  = { low: 1_200, mid: 2_000, high: 3_200 };
+  const satcom = { low: 1_500, mid: 3_000, high: 6_000 }; // Starlink Maritime tier
 
   const model = {
     crew: {
-      salaries:    { low: salL, mid: salM, high: salH, breakdown },
-      recruitment: recruit,  travel,       accommodation: accom,
-      uniforms:    uniform,  training,     foodBeverage:  crewFood,
-      medical,               dayWorkers:   dayWork,       entertainment: entmt,
+      salaries: { ...sal, breakdown },
+      recruitment: Z, travel: Z, accommodation: Z,
+      uniforms: uniform, training, foodBeverage: crewFood,
+      medical: Z, dayWorkers: Z, entertainment: Z,
     },
-    communications: { phone, satTV: satTv, satcom },
+    communications: { phone, satTV: Z, satcom },
     operations: {
-      agency, audioVisual: av, auto: auto_v, bridge, computer, deck,
-      dockExpress: dockExp, engineering: eng, fuels: fuel, galley,
-      interior, launches,  mailFreight: mail, office, dockage: dock,
-      safetyMedical: safety, security, survey, warehousing: ware,
+      agency: Z, audioVisual: Z, auto: Z, bridge, computer: Z, deck,
+      dockExpress: Z, engineering: eng, fuels: fuel, galley, interior,
+      launches, mailFreight: Z, office: Z, dockage: dock,
+      safetyMedical: safety, security: Z, survey, warehousing: haulStore,
     },
     insurance: { hull: hm, pi, crewHealth: crewH },
-    administrative: { professionalFees: profFees, bankCharges: bankCh, managementFee: mgmt, managementTravel: mgmtTrav },
-    capital: { av: capAv, engineeringDeck: capEng, interior: capInt, paint, tendersToys: capTend, other: capOther },
+    administrative: { professionalFees: Z, bankCharges: Z, managementFee: Z, managementTravel: Z },
+    capital: { av: Z, engineeringDeck: capEng, interior: Z, paint, tendersToys: capTend, other: capOther },
   };
 
-  return {
-    lm, lft, yr, am, cc, hv,
-    salL, salM, salH, breakdown,
-    grandTotal: { l: preMgmt.l + mgmt.l, m: preMgmt.m + mgmt.m, h: preMgmt.h + mgmt.h },
-    model,
+  // Grand total = sum of every mid/low/high across the model.
+  const all: Scenario[] = [
+    model.crew.salaries, model.crew.uniforms, model.crew.training, model.crew.foodBeverage,
+    model.communications.phone, model.communications.satcom,
+    model.operations.bridge, model.operations.deck, model.operations.engineering,
+    model.operations.fuels, model.operations.galley, model.operations.interior,
+    model.operations.launches, model.operations.dockage, model.operations.safetyMedical,
+    model.operations.survey, model.operations.warehousing,
+    model.insurance.hull, model.insurance.pi, model.insurance.crewHealth,
+    model.capital.engineeringDeck, model.capital.paint, model.capital.tendersToys, model.capital.other,
+  ];
+  const grandTotal = {
+    l: all.reduce((a, b) => a + b.low, 0),
+    m: all.reduce((a, b) => a + b.mid, 0),
+    h: all.reduce((a, b) => a + b.high, 0),
   };
+
+  return { lm, lft, yr, am, cc, hv, salL, salM, salH, breakdown, model, grandTotal };
+}
+
+type Scenario = { low: number; mid: number; high: number };
+
+/* Normalize any cost object to {low,mid,high}. buildBudget emits {l,m,h};
+   buildSmallBudget emits {low,mid,high}. The frontend CostModel expects
+   {low,mid,high} everywhere, so we convert the whole model tree here. */
+function toScenario(o: unknown): unknown {
+  if (o && typeof o === "object" && !Array.isArray(o)) {
+    const r = o as Record<string, unknown>;
+    if ("l" in r && "m" in r && "h" in r && typeof r.l === "number") {
+      return { low: r.l as number, mid: r.m as number, high: r.h as number };
+    }
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(r)) out[k] = toScenario(r[k]);
+    return out;
+  }
+  if (Array.isArray(o)) return o.map(toScenario);
+  return o;
 }
 
 /* ─── Route handler ─────────────────────────────────────────────────────────── */
 export async function POST(req: NextRequest) {
   try {
-    const { vessel, url, annualHours, charterWeeks, homePort, vesselStyle } = await req.json();
+    const { vessel, url, annualHours, charterWeeks, homePort, vesselStyle, segment, crewMode } = await req.json();
     if (!vessel && !url) return NextResponse.json({ ok: false, error: "vessel data required" }, { status: 400 });
 
-    const v     = (vessel || {}) as Record<string, string>;
+    const v     = vessel || {} as Record<string,string>;
     const hrs   = annualHours  || 800;
     const port  = homePort     || "Florida / US East Coast";
     const style = vesselStyle  || "Luxury / Full Fairing & Paint";
     const charter = charterWeeks || 0;
+    const seg   = segment === "small" ? "small" : "super";
+    const cMode: SmallOpts["crewMode"] =
+      crewMode === "owner" || crewMode === "captain_mate" ? crewMode : "captain";
 
-    const budget = buildBudget(v, port, style, hrs);
-    const gt     = budget.grandTotal;
+    // ── Step 1: compute every number in TypeScript ────────────────────────
+    const budget = seg === "small"
+      ? buildSmallBudget(v, port, style, hrs, { crewMode: cMode })
+      : buildBudget(v, port, style, hrs);
+    const gt = budget.grandTotal;
+    // Normalize cost tree to {low,mid,high} for the frontend + prompt below.
+    const nModel = toScenario(budget.model) as {
+      insurance: { hull: Scenario };
+      operations: { engineering: Scenario; dockage: Scenario; fuels: Scenario };
+      crew: { salaries: { breakdown: { role: string; mid: number }[] } };
+    };
 
-    /* ── Ask Claude only for narrative text ─────────────────────────────── */
+    // ── Step 2: ask Claude only for the 5 narrative text fields ──────────
     const vesselDesc = [
-      `${v.name || "Vessel"} — ${v.builder || ""} ${v.year || ""}, ${v.loa || ""}, ${budget.cc} crew`,
-      `Engines: ${v.engines || "Unknown"}  |  Hull: ${v.hullMaterial || "Unknown"}`,
+      `${v.name || "Unknown"} — ${v.builder || ""} ${v.year || ""}, ${v.loa || ""}, ${v.crew || budget.cc} crew`,
+      `Engines: ${v.engines || "Unknown"}  Hull: ${v.hullMaterial || "Unknown"}`,
       `${(v.description || "").slice(0, 350)}`,
     ].join("\n");
 
-    const narrativePrompt = `You are a senior yacht management advisor writing the narrative section of an annual ownership cost analysis. Return ONLY a JSON object with exactly these 5 string fields — no other text.
+    const narrativePrompt = `You are a senior yacht management advisor writing the narrative section of an annual ownership cost analysis.
 
 VESSEL: ${vesselDesc}
 URL: ${url || ""}
-PROFILE: ${hrs} hrs/yr | ${port} | ${style}${charter > 0 ? ` | ${charter} charter weeks` : ""}
+OPERATING PROFILE: ${hrs} hrs/yr | ${port} | ${style}${charter > 0 ? ` | ${charter} charter weeks` : ""}
+SEGMENT: ${seg === "small"
+  ? `40–80 ft class — ${cMode === "owner" ? "owner-operated, no paid crew" : cMode === "captain_mate" ? "full-time captain and mate" : "single day-rate captain"}. This is a privately run vessel: no yacht-management company, no flag-state/ISM overhead, agreed-value hull insurance, dry-stack or per-foot wet-slip dockage. Write in terms an owner-operator understands; do not reference professional crew structures that do not apply.`
+  : `Superyacht class — professionally crewed and managed.`}
 
-COMPUTED BUDGET (reference these exact numbers in your narrative):
-• Crew (${budget.cc} positions): $${budget.salM.toLocaleString()} salaries mid
-• H&M Insurance (agreed hull $${(budget.hv / 1_000_000).toFixed(0)}M): $${budget.model.insurance.hull.mid.toLocaleString()} mid
-• Engineering (age adj. ×${budget.am.toFixed(2)}): $${budget.model.operations.engineering.mid.toLocaleString()} mid
-• Dockage: $${budget.model.operations.dockage.mid.toLocaleString()} mid
-• Fuel (${hrs} hrs): $${budget.model.operations.fuels.mid.toLocaleString()} mid
-• Grand total — LOW $${gt.l.toLocaleString()} | MID $${gt.m.toLocaleString()} | HIGH $${gt.h.toLocaleString()}
+COMPUTED BUDGET SUMMARY (do not invent different numbers — refer to these in your narrative):
+• Crew salaries (${budget.cc} crew): $${budget.salM.toLocaleString()} mid
+• H&M Insurance (${(budget.hv/1_000_000).toFixed(1)}M insured value): $${nModel.insurance.hull.mid.toLocaleString()} mid
+• Engineering (age-adjusted ${budget.am.toFixed(1)}x): $${nModel.operations.engineering.mid.toLocaleString()} mid
+• Dockage (${port}): $${nModel.operations.dockage.mid.toLocaleString()} mid
+• Fuel: $${nModel.operations.fuels.mid.toLocaleString()} mid
+• Grand total: LOW $${gt.l.toLocaleString()} | MID $${gt.m.toLocaleString()} | HIGH $${gt.h.toLocaleString()}
+
+Write ONLY a JSON object with exactly these 5 string fields. No other text.
 
 {
-  "assumptions": "2-3 sentences: crew count, insured value rationale, age multiplier applied.",
-  "rangeExplanation": "2-3 sentences: what drives low vs high for this specific vessel.",
-  "categoryBreakdown": "3-4 sentences: top 4 cost categories with dollar amounts and % of grand total.",
-  "crewStructureNote": "2-3 sentences: each position with mid salary, total, and savings from removing one crew.",
-  "keyDrivers": "Top 4 cost drivers — one sentence each on why it matters for this vessel."
+  "assumptions": "2-3 sentences: state the crew count and why, the insured hull value used and how it was calculated, and the age adjustment applied to engineering.",
+  "rangeExplanation": "2-3 sentences: what specifically drives the low vs high gap for this vessel — dockage region, crew tier, capex pace.",
+  "categoryBreakdown": "3-4 sentences: name the top 4 cost categories by dollar amount, state approximate mid totals, and note what % of the grand total each represents.",
+  "crewStructureNote": "2-3 sentences: list every crew position with their mid annual salary, state the total crew cost, and note what removing one crew member would save.",
+  "keyDrivers": "List the 4 biggest cost drivers for this specific vessel, one sentence each explaining why it is so significant here."
 }`;
 
-    let narrative = {
-      assumptions:       `Mid scenario assumes ${budget.cc} crew, ${port} home port at ${hrs} hours/year, hull insured at $${(budget.hv / 1_000_000).toFixed(0)}M agreed value, with a ×${budget.am.toFixed(2)} age multiplier applied to engineering on this ${2026 - budget.yr}-year-old vessel.`,
-      rangeExplanation:  `Low-to-high spread is driven by dockage location and marina tier, crew compensation level, fuel hours, and the pace of capital expenditure on paint and engineering reserves.`,
-      categoryBreakdown: `Crew salaries ($${budget.salM.toLocaleString()} mid) are the largest single category. H&M insurance ($${budget.model.insurance.hull.mid.toLocaleString()} mid) reflects the $${(budget.hv / 1_000_000).toFixed(0)}M agreed hull value. Engineering ($${budget.model.operations.engineering.mid.toLocaleString()} mid) is age-adjusted. Dockage, fuel, and annualised capital reserves account for the remainder of the budget.`,
-      crewStructureNote: `Mid scenario staffs ${budget.cc} crew: Captain $${budget.breakdown[0]?.mid.toLocaleString()}, Chief Engineer $${budget.breakdown[1]?.mid.toLocaleString()}, Chef $${budget.breakdown[2]?.mid.toLocaleString()}, Chief Stewardess $${budget.breakdown[3]?.mid.toLocaleString()}, plus ${Math.max(0, budget.cc - 4)} additional crew. Total mid salaries: $${budget.salM.toLocaleString()}.`,
-      keyDrivers:        `Crew payroll is the dominant cost at roughly 30% of the annual budget. H&M insurance at 1.18% of the $${(budget.hv / 1_000_000).toFixed(0)}M agreed hull value is the second-largest fixed cost. Engineering maintenance is elevated by the vessel's age. Dockage and fuel scale directly with usage intensity and home port selection.`,
-    };
-
+    let narrativeText = "";
     try {
       const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -284,34 +459,63 @@ COMPUTED BUDGET (reference these exact numbers in your narrative):
           "x-api-key": process.env.ANTHROPIC_API_KEY || "",
           "anthropic-version": "2023-06-01",
         },
-        signal: AbortSignal.timeout(40_000),
+        signal: AbortSignal.timeout(45000),
         body: JSON.stringify({
           model: "claude-opus-4-6",
-          max_tokens: 1800,
+          max_tokens: 2048,
           messages: [{ role: "user", content: narrativePrompt }],
         }),
       });
       if (aiRes.ok) {
         const aiData = await aiRes.json() as { content?: { type: string; text?: string }[] };
-        const raw = aiData.content?.find(b => b.type === "text")?.text || "";
-        const s = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-        const js = s.indexOf("{"), je = s.lastIndexOf("}");
-        if (js !== -1 && je > js) {
-          const p = JSON.parse(s.slice(js, je + 1));
-          if (p.assumptions)       narrative.assumptions       = p.assumptions;
-          if (p.rangeExplanation)  narrative.rangeExplanation  = p.rangeExplanation;
-          if (p.categoryBreakdown) narrative.categoryBreakdown = p.categoryBreakdown;
-          if (p.crewStructureNote) narrative.crewStructureNote = p.crewStructureNote;
-          if (p.keyDrivers)        narrative.keyDrivers        = p.keyDrivers;
-        }
+        narrativeText = aiData.content?.find(b => b.type === "text")?.text || "";
       }
-    } catch { /* narrative failure non-fatal — defaults used */ }
+    } catch { /* narrative failure is non-fatal */ }
 
+    // Parse narrative JSON (fall back to defaults if Claude fails)
+    const bd = nModel.crew.salaries.breakdown || [];
+    const crewLine = seg === "small"
+      ? (cMode === "owner"
+          ? `This vessel is owner-operated with no paid crew, so crew payroll is $0. The owner absorbs captaining and routine maintenance directly.`
+          : `Crew is ${bd.map(r => `${r.role} ($${(r.mid||0).toLocaleString()})`).join(" and ")}, total $${budget.salM.toLocaleString()} mid — engaged on a day-rate rather than full-time salaried basis.`)
+      : `Mid scenario staffs ${budget.cc} crew including Captain ($${(bd[0]?.mid||0).toLocaleString()}), Chief Engineer ($${(bd[1]?.mid||0).toLocaleString()}), Chef ($${(bd[2]?.mid||0).toLocaleString()}), and Chief Stewardess ($${(bd[3]?.mid||0).toLocaleString()}), with additional crew rounding out the complement. Total salaries mid: $${budget.salM.toLocaleString()}.`;
+    const valueLabel = seg === "small" ? "agreed hull value" : "insured replacement value";
+    let narrative = {
+      assumptions: `Mid scenario assumes ${seg === "small" && cMode === "owner" ? "no paid crew (owner-operated)" : `${budget.cc} paid crew`}, ${port} home port, ${hrs} hours/year cruising, hull insured at $${(budget.hv/1_000_000).toFixed(1)}M ${valueLabel}, and a ${budget.am.toFixed(1)}x age multiplier applied to engineering on this ${2026 - budget.yr}-year-old vessel.`,
+      rangeExplanation: `The low-to-high spread is driven primarily by dockage location, ${seg === "small" ? "haul-out and yard scope" : "crew quality tier"}, fuel hours, and the pace of capital expenditure on paint and engineering reserves.`,
+      categoryBreakdown: `Hull & Machinery insurance ($${nModel.insurance.hull.mid.toLocaleString()} mid) reflects the $${(budget.hv/1_000_000).toFixed(1)}M ${valueLabel}. Engineering ($${nModel.operations.engineering.mid.toLocaleString()} mid) is adjusted for the vessel's age. Dockage ($${nModel.operations.dockage.mid.toLocaleString()} mid), fuel, and capital reserves account for the remainder.`,
+      crewStructureNote: crewLine,
+      keyDrivers: `${seg === "small" && cMode !== "owner" ? "Day-rate captain engagement" : seg === "small" ? "Dockage and storage" : "Crew payroll"} is among the largest annual costs. Hull & Machinery insurance is a significant fixed cost tied to the $${(budget.hv/1_000_000).toFixed(1)}M ${valueLabel}. Engineering maintenance is shaped by a ${budget.am.toFixed(1)}x age multiplier reflecting ${2026 - budget.yr} years of service. Dockage and fuel together represent variable cost tied to how intensively and where the vessel is run.`,
+    };
+
+    if (narrativeText) {
+      const stripped = narrativeText.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+      const jStart = stripped.indexOf("{");
+      const jEnd   = stripped.lastIndexOf("}");
+      if (jStart !== -1 && jEnd > jStart) {
+        try {
+          const parsed = JSON.parse(stripped.slice(jStart, jEnd + 1));
+          if (parsed.assumptions)      narrative.assumptions      = parsed.assumptions;
+          if (parsed.rangeExplanation) narrative.rangeExplanation = parsed.rangeExplanation;
+          if (parsed.categoryBreakdown)narrative.categoryBreakdown= parsed.categoryBreakdown;
+          if (parsed.crewStructureNote)narrative.crewStructureNote= parsed.crewStructureNote;
+          if (parsed.keyDrivers)       narrative.keyDrivers       = parsed.keyDrivers;
+        } catch { /* keep defaults */ }
+      }
+    }
+
+    // ── Step 3: assemble final model ─────────────────────────────────────
     const model = {
       vesselName: v.name || "Vessel",
       vesselUrl:  url || v.url || "",
-      ...budget.model,
-      ...narrative,
+      segment:    seg,
+      crewMode:   seg === "small" ? cMode : undefined,
+      ...(nModel as object),
+      assumptions:       narrative.assumptions,
+      rangeExplanation:  narrative.rangeExplanation,
+      categoryBreakdown: narrative.categoryBreakdown,
+      crewStructureNote: narrative.crewStructureNote,
+      keyDrivers:        narrative.keyDrivers,
     };
 
     return NextResponse.json({ ok: true, model });
