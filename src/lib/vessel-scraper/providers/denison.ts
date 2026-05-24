@@ -241,10 +241,11 @@ function parseDenison(url: string, html: string): VesselData {
   // ── 8. MACHINERY section — engines, engine hours, stabilisers, bow thruster
   const machSection = bodyText.match(/MACHINERY\s*\n([\s\S]+?)(?:\n[A-Z][A-Z\s&\/]{4,}\n|\n\n[A-Z]{3})/)?.[1] || flat;
 
-  if (!vessel.engines) {
-    // "2x Caterpillar C32 ACERT" or "Twin Caterpillar C18" etc.
+  if (!vessel.engines || /^\d+$/.test(vessel.engines.trim())) {
+    // "2x Caterpillar C32 ACERT" / "Twin Caterpillar C18" / "twin Caterpillar 3508B"
     const em = machSection.match(/(?:Diesel\s+engines?|Main\s+engines?)[:\s]+(\d+x\s*[A-Za-z][A-Za-z0-9\s]+?)(?:\.|\n|ME Port)/i) ||
-               machSection.match(/(\d+\s*[Xx×]\s*[A-Z][a-zA-Z]+\s+[A-Z0-9\-]+(?:\s+[A-Z]+)?)\s+(?:diesel|engine|\d+)/i);
+               machSection.match(/(\d+\s*[Xx×]\s*[A-Z][a-zA-Z]+\s+[A-Z0-9\-]+(?:\s+[A-Z]+)?)\s+(?:diesel|engine|\d+)/i) ||
+               bodyText.match(/\b((?:[Tt]win|[Tt]wo|[Tt]riple|[Tt]hree|[Qq]uad)\s+[A-Z][a-zA-Z]+\s+[A-Z0-9][A-Z0-9\-]*(?:\s+[A-Z]+)?)\s+(?:diesel|engine)/);
     if (em) vessel.engines = clean(em[1]);
   }
 
@@ -286,7 +287,8 @@ function parseDenison(url: string, html: string): VesselData {
     vessel.zeroSpeedStabilisers = "Yes";
 
   if (!vessel.range) {
-    const rm = machSection.match(/[Rr]ange[:\s]+([\d,]+)\s*(?:nautical\s*)?(?:miles?|nm)/i);
+    const rm = machSection.match(/[Rr]ange[:\s]+([\d,]+\+?)\s*(?:nautical\s*)?(?:miles?|nm)/i)
+            || bodyText.match(/([\d,]{3,}\+?)\s*(?:nautical\s*miles?|nm)\b\s*(?:range|cruising)?/i);
     if (rm) vessel.range = `${rm[1]} nm`;
   }
 

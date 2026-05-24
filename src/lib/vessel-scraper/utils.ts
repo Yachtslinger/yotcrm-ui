@@ -709,7 +709,7 @@ export async function aiExtractSpecs(vessel: VesselData, text: string): Promise<
     { field: "lastDrydock",          hint: "date of last dry dock or haul-out" },
     { field: "maxSpeed",             hint: "maximum speed in knots e.g. '17 kn'" },
     { field: "cruiseSpeed",          hint: "cruising speed e.g. '12 kn'" },
-    { field: "range",                hint: "cruising range e.g. '4,000 nm at 10 kn'" },
+    { field: "range",                hint: "cruising range in NAUTICAL MILES exactly as stated — never convert to statute miles, never add decimals e.g. '4,000 nm' or '9,000+ nm'" },
     { field: "fuelTank",             hint: "total fuel capacity e.g. '30,000 lt / 7,925 gal'" },
     { field: "freshWater",           hint: "fresh water capacity e.g. '8,000 lt / 2,113 gal'" },
     { field: "waterMaker",           hint: "watermaker brand and capacity e.g. 'Spectra 1,200 lt/day'" },
