@@ -83,6 +83,20 @@ function parseTank(raw: string): string {
   return `${total.toLocaleString()} lt / ${Math.round(total / 3.78541).toLocaleString()} gal`;
 }
 
+/**
+ * A structured `engines` value is "weak" — too thin for a brochure — when it's
+ * empty, a bare count ("2"), or a single bare word ("Caterpillar"). A proper
+ * designation has a make AND a model ("Twin Caterpillar 3508B"). Weak values
+ * are treated as not-yet-filled so prose extraction / AI can supply the real one.
+ */
+function isWeakEngines(v: string | undefined): boolean {
+  const s = (v || "").trim();
+  if (!s) return true;
+  if (/^\d+$/.test(s)) return true;                    // bare count e.g. "2"
+  if (/^[A-Za-z][A-Za-z'.\-]*$/.test(s)) return true;  // single bare word e.g. "Caterpillar"
+  return false;
+}
+
 function parseDenison(url: string, html: string): VesselData {
   const $ = cheerio.load(html);
   const vessel = emptyVessel(url);
@@ -144,7 +158,15 @@ function parseDenison(url: string, html: string): VesselData {
       const props = Array.isArray(node.additionalProperty)
         ? (node.additionalProperty as { name?: string; value?: string }[]) : [];
       for (const prop of props) {
-        if (prop.name && prop.value) assignSpec(vessel, prop.name, String(prop.value));
+        if (!prop.name || !prop.value) continue;
+        // BoatsGroup's JSON-LD carries two properties we must NOT trust:
+        //  • "Range" is pre-converted to statute miles ("10,357.02 mi") — the
+        //    visible listing text states the real nautical-mile figure, so we
+        //    skip this and let the section-8 text regex win.
+        //  • "Number of Engines" is a count ("2"), not a make/model — it would
+        //    otherwise land in `engines` via the loose "engines" SPEC_MAP pattern.
+        if (/^(range|number of engines)$/i.test(prop.name.trim())) continue;
+        assignSpec(vessel, prop.name, String(prop.value));
       }
     }
   });
@@ -241,11 +263,18 @@ function parseDenison(url: string, html: string): VesselData {
   // ── 8. MACHINERY section — engines, engine hours, stabilisers, bow thruster
   const machSection = bodyText.match(/MACHINERY\s*\n([\s\S]+?)(?:\n[A-Z][A-Z\s&\/]{4,}\n|\n\n[A-Z]{3})/)?.[1] || flat;
 
-  if (!vessel.engines) {
-    // "2x Caterpillar C32 ACERT" or "Twin Caterpillar C18" etc.
+  if (isWeakEngines(vessel.engines)) {
+    // "Main engines: 2x Caterpillar C32 ACERT" — label-anchored form.
     const em = machSection.match(/(?:Diesel\s+engines?|Main\s+engines?)[:\s]+(\d+x\s*[A-Za-z][A-Za-z0-9\s]+?)(?:\.|\n|ME Port)/i) ||
-               machSection.match(/(\d+\s*[Xx×]\s*[A-Z][a-zA-Z]+\s+[A-Z0-9\-]+(?:\s+[A-Z]+)?)\s+(?:diesel|engine|\d+)/i);
-    if (em) vessel.engines = clean(em[1]);
+               // "(twin|triple|2x…) <Make> [<Make2>] <Model> [main] engine(s)".
+               // The model token MUST contain a digit and the phrase MUST be
+               // followed by the literal word "engine" — so appliance prose
+               // ("2 x Miele Washers") cannot match. No /i flag: keeps the
+               // make/model token uppercase-anchored.
+               flat.match(/\b((?:[Tt]win|[Tt]riple|[Tt]wo|[Tt]hree|[Qq]uad|\d\s*[Xx×])\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?\s+[A-Z0-9][A-Za-z0-9\-]*\d[A-Za-z0-9\-]*)\s+(?:[Rr]ated\s+)?(?:[Mm]ain\s+)?[Ee]ngines?\b/);
+    // Replace the weak value with the full designation; if nothing matched,
+    // clear it so AI extraction (layer 3) can supply the make/model.
+    vessel.engines = em ? clean(em[1]).replace(/^[a-z]/, c => c.toUpperCase()) : "";
   }
 
   if (!vessel.engineHours) {
