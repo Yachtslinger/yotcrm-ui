@@ -56,8 +56,9 @@ function safeParseArray<T = unknown>(s: string | null | undefined, fb: T[] = [])
   try { const v = JSON.parse(s); return Array.isArray(v) ? v : fb; } catch { return fb; }
 }
 
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
-  const leadId = parseInt(params.id);
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const leadId = parseInt(id);
   if (!leadId) return NextResponse.json({ ok: false, error: "invalid lead id" }, { status: 400 });
 
   const db = new Database(DB_PATH);

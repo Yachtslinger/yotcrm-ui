@@ -12,8 +12,9 @@ export const runtime = "nodejs";
 const DB_PATH = process.env.DB_PATH || "/app/data/yotcrm.db";
 
 // PATCH — edit one or more extracted fields
-export async function PATCH(req: NextRequest, { params }: { params: { extractionId: string } }) {
-  const id = parseInt(params.extractionId);
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ extractionId: string }> }) {
+  const { extractionId } = await params;
+  const id = parseInt(extractionId);
   const extraction = getExtraction(id);
   if (!extraction) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
   const body = await req.json().catch(() => ({}));
@@ -25,8 +26,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { extraction
 }
 
 // POST — bulk update fields (for review form submission)
-export async function POST(req: NextRequest, { params }: { params: { extractionId: string } }) {
-  const id = parseInt(params.extractionId);
+export async function POST(req: NextRequest, { params }: { params: Promise<{ extractionId: string }> }) {
+  const { extractionId } = await params;
+  const id = parseInt(extractionId);
   const extraction = getExtraction(id);
   if (!extraction) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
   const body = await req.json().catch(() => ({}));

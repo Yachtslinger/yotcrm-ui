@@ -10,9 +10,10 @@ const BROCHURES_DIR =
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { slug: string } }
+  { params }: { params: Promise<{ slug: string }> }
 ) {
-  const slug = params.slug.replace(/[^a-zA-Z0-9._-]/g, ""); // sanitize
+  const { slug: rawSlug } = await params;
+  const slug = rawSlug.replace(/[^a-zA-Z0-9._-]/g, ""); // sanitize
   const filePath = path.join(BROCHURES_DIR, slug.endsWith(".html") ? slug : `${slug}.html`);
 
   if (!fs.existsSync(filePath)) {

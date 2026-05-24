@@ -3,8 +3,9 @@ import { getMessage, createExtraction, getLatestExtraction } from "@/lib/comms/s
 import { runExtraction } from "@/lib/comms/extractor";
 export const runtime = "nodejs";
 export const maxDuration = 120;
-export async function POST(_req: NextRequest, { params }: { params: { messageId: string } }) {
-  const msgId = parseInt(params.messageId);
+export async function POST(_req: NextRequest, { params }: { params: Promise<{ messageId: string }> }) {
+  const { messageId } = await params;
+  const msgId = parseInt(messageId);
   const msg = getMessage(msgId);
   if (!msg) return NextResponse.json({ ok: false, error: "Message not found" }, { status: 404 });
   // Create fresh extraction record

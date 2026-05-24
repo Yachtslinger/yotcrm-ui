@@ -19,9 +19,10 @@ export const dynamic = "force-dynamic";
 export async function generateMetadata({
   params,
 }: {
-  params: { slug: string };
+  params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
-  const safeSlug = params.slug.replace(/[^a-zA-Z0-9._-]/g, "");
+  const { slug } = await params;
+  const safeSlug = slug.replace(/[^a-zA-Z0-9._-]/g, "");
   const row = getBrochure(safeSlug);
   if (!row) return { title: "Yacht Brochure" };
 
@@ -59,12 +60,13 @@ export default async function BrochureSlugPage({
   params,
   searchParams,
 }: {
-  params: { slug: string };
-  searchParams: { internal?: string };
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ internal?: string }>;
 }) {
-  const { slug } = params;
+  const { slug } = await params;
+  const sp = await searchParams;
   const safeSlug = slug.replace(/[^a-zA-Z0-9._-]/g, "");
-  const isInternal = searchParams?.internal === "1";
+  const isInternal = sp?.internal === "1";
 
   let html = "";
   let vesselName = "";
