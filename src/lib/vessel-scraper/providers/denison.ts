@@ -77,7 +77,7 @@ function extract(text: string, pattern: RegExp, maxLen = 120): string {
 /** Format tank value "N x QTY|unit" → "QTY unit / QTY unit" */
 function parseTank(raw: string): string {
   const m = raw.match(/^(\d+)\s*x\s*([\d,]+)\s*\|?\s*(gallon|gal|lt|litre|liter)/i);
-  if (!m) return raw;
+  if (!m) return ""; // unparseable — return empty, never pass raw text through
   const total = parseInt(m[1]) * parseInt(m[2].replace(/,/g, ""));
   if (/gal/i.test(m[3])) return `${total.toLocaleString()} gal / ${Math.round(total * 3.78541).toLocaleString()} lt`;
   return `${total.toLocaleString()} lt / ${Math.round(total / 3.78541).toLocaleString()} gal`;
@@ -226,15 +226,15 @@ function parseDenison(url: string, html: string): VesselData {
 
   // Tanks
   if (!vessel.fuelTank) {
-    const r = specGet(/Fuel\s*Tank[:\s]+([\dx\s\d,|a-z]+)/i);
+    const r = specGet(/Fuel\s*Tank:\s*(\d+\s*x\s*[\d,]+\s*\|?\s*(?:gallon|gal|litre|liter|lt)s?)/i);
     if (r) vessel.fuelTank = parseTank(r);
   }
   if (!vessel.freshWater) {
-    const r = specGet(/Fresh\s*Water[:\s]+([\dx\s\d,|a-z]+)/i);
+    const r = specGet(/Fresh\s*Water:\s*(\d+\s*x\s*[\d,]+\s*\|?\s*(?:gallon|gal|litre|liter|lt)s?)/i);
     if (r) vessel.freshWater = parseTank(r);
   }
   if (!vessel.holdingTank) {
-    const r = specGet(/Holding[:\s]+([\dx\s\d,|a-z]+)/i);
+    const r = specGet(/Holding:\s*(\d+\s*x\s*[\d,]+\s*\|?\s*(?:gallon|gal|litre|liter|lt)s?)/i);
     if (r) vessel.holdingTank = parseTank(r);
   }
 
@@ -250,8 +250,11 @@ function parseDenison(url: string, html: string): VesselData {
 
   if (!vessel.engineHours) {
     // "ME Port - 1819hrs | ME Stbd - 1824hrs"
-    const ph = machSection.match(/ME\s+Port\s*[-–]\s*([\d,]+)\s*hrs?/i);
-    const sh = machSection.match(/ME\s+St(?:ar)?bd?\s*[-–]\s*([\d,]+)\s*hrs?/i);
+    let ph = machSection.match(/ME\s+Port\s*[-–]\s*([\d,]+)\s*hrs?/i);
+    let sh = machSection.match(/ME\s+St(?:ar)?bd?\s*[-–]\s*([\d,]+)\s*hrs?/i);
+    // Also: "Port CAT 3508B – 9,318 hrs." / "Starboard CAT 3508B – 9,339 hrs."
+    if (!ph) ph = bodyText.match(/Port\s+[A-Z][\w\s\-]*?[–-]\s*([\d,]+)\s*hrs?/i);
+    if (!sh) sh = bodyText.match(/St(?:ar)?b(?:oar)?d\s+[A-Z][\w\s\-]*?[–-]\s*([\d,]+)\s*hrs?/i);
     if (ph && sh) vessel.engineHours = `Port: ${ph[1]} hrs / Stbd: ${sh[1]} hrs`;
     else if (ph) vessel.engineHours = `${ph[1]} hrs`;
     else {

@@ -749,7 +749,7 @@ Fields to find:
 ${fieldList}
 
 Listing text:
-${text.slice(0, 4000)}
+${text.slice(0, 18000)}
 
 JSON:`;
 
@@ -763,10 +763,10 @@ JSON:`;
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 1000,
+        max_tokens: 2000,
         messages: [{ role: "user", content: prompt }],
       }),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(30000),
     });
 
     if (!res.ok) return;
