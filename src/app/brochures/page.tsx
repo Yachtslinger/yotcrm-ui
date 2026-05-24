@@ -236,6 +236,8 @@ export default function BrochuresPage() {
   const [loading, setLoading]     = React.useState(true);
   const [toast, setToast]         = React.useState<{ msg: string; type: "success" | "error" } | null>(null);
   const [deleting, setDeleting]   = React.useState<number | null>(null);
+  const [rescrapingId, setRescrapingId] = React.useState<number | null>(null);
+  const [rescrapeUrl, setRescrapeUrl]   = React.useState("");
   const [newSlug, setNewSlug]     = React.useState<string | null>(null);
   const [showDropbox, setShowDropbox] = React.useState(false);
   const [buildStatus, setBuildStatus] = React.useState("");
@@ -933,6 +935,66 @@ export default function BrochuresPage() {
     } catch (err) { showToast(`Could not load brochure: ${err instanceof Error ? err.message : "unknown"}`, "error"); }
   }
 
+  /* ── Re-scrape an existing brochure from its stored source URL ──
+     Pulls fresh specs from the live listing (so improvements to the scraper
+     reach already-saved brochures), preserving curated content. The result
+     is loaded into the editor for review — nothing is saved until the user
+     clicks "Update Brochure". */
+  async function rescrapeBrochure(b: Brochure) {
+    if (!b.id) return;
+    setRescrapingId(b.id);
+    try {
+      // 1. Load the stored brochure — we need its sourceUrl + curated content
+      const r1 = await fetch(`/api/brochures/render?id=${b.id}`);
+      const d1 = await r1.json();
+      if (!d1.ok) throw new Error(d1.error || "Could not load brochure");
+      const stored = d1.vessel as VesselData;
+      const src = (stored.sourceUrl || "").trim();
+      if (!src) {
+        showToast("No source URL stored for this brochure — re-scrape unavailable. Use Edit to fix fields manually.", "error");
+        return;
+      }
+
+      // 2. Fresh scrape from the stored source URL
+      setRescrapeUrl(src);
+      setStep("scraping");
+      const r2 = await fetch("/api/brochures/preview", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: src }),
+      });
+      const d2 = await r2.json();
+      if (!r2.ok) throw new Error(d2.error || "Scrape failed");
+      const fresh = d2.vessel as VesselData;
+
+      // 3. Merge: fresh spec fields win; preserve curated content from the
+      //    stored brochure (images, write-up, intro, custom fields, PDF, videos).
+      const merged: VesselData = {
+        ...fresh,
+        images:       (stored.images?.length)   ? stored.images   : (fresh.images || []),
+        gaImages:     (stored.gaImages?.length)  ? stored.gaImages  : fresh.gaImages,
+        videos:       (stored.videos?.length)    ? stored.videos    : fresh.videos,
+        customIntro:  stored.customIntro || fresh.customIntro || "",
+        customFields: (stored.customFields?.length) ? stored.customFields : (fresh.customFields || []),
+        description:  stored.description?.trim() ? stored.description : (fresh.description || ""),
+        pdfUrl:       stored.pdfUrl || fresh.pdfUrl || "",
+      };
+
+      // 4. Load into the editor for review — user reviews + clicks Update to save
+      setVessel(prepVessel(merged));
+      setEditingId(b.id);
+      setIsPocket(b.is_pocket_listing === 1);
+      setHiddenFields(new Set());
+      setStep("preview");
+      showToast(`Re-scraped "${fresh.name || b.title}" — review the changes, then click Update Brochure to save.`, "success");
+    } catch (err) {
+      showToast(`Re-scrape failed: ${err instanceof Error ? err.message : "unknown"}`, "error");
+      setStep("list");
+    } finally {
+      setRescrapingId(null);
+      setRescrapeUrl("");
+    }
+  }
+
   /* ── Update existing brochure ── */
   const allBrokers = [
     { name:"Will Noftsinger", title:"Yacht Broker · Build Consultant of The Americas", email:"WN@DenisonYachting.com", mobile:"850.461.3342", office:"Denison Yachting · Fort Lauderdale, FL", photo:"https://cdn.denisonyachtsales.com/images/denison-update/users/photos/69af22d913e91.jpg", instagram:"@yachtslinger" },
@@ -1594,7 +1656,7 @@ export default function BrochuresPage() {
             <div className="w-10 h-10 border-2 border-[var(--brass-400)] border-t-transparent rounded-full animate-spin mx-auto mb-6" />
             <p className="text-lg font-semibold mb-2" style={{ color: "var(--foreground)" }}>Scraping Listing</p>
             <p className="text-sm mb-4" style={{ color: "var(--navy-400)" }}>Extracting specs and images — typically 20–40 seconds.</p>
-            <p className="text-xs font-mono break-all" style={{ color: "var(--navy-300)" }}>{url}</p>
+            <p className="text-xs font-mono break-all" style={{ color: "var(--navy-300)" }}>{rescrapeUrl || url}</p>
           </div>
         </div>
       )}
@@ -1852,6 +1914,16 @@ export default function BrochuresPage() {
                       <button onClick={() => loadForEdit(b)} className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-semibold"
                         style={{ background: "transparent", border: "1px solid var(--brass-400)", color: "var(--brass-400)" }} title="Edit brochure">
                         ✏️ Edit
+                      </button>
+                    )}
+                    {isDb && b.id && (
+                      <button onClick={() => rescrapeBrochure(b)} disabled={rescrapingId !== null}
+                        className="flex items-center justify-center px-3 py-2.5 rounded-xl text-sm"
+                        style={{ background: "transparent", border: "1px solid var(--border)", color: "var(--navy-400)", opacity: rescrapingId !== null && rescrapingId !== b.id ? 0.4 : 1 }}
+                        title="Re-scrape from source — pull fresh specs from the live listing, then review before saving">
+                        {rescrapingId === b.id
+                          ? <div className="w-4 h-4 border-2 border-[var(--brass-400)] border-t-transparent rounded-full animate-spin" />
+                          : <RefreshCw className="w-4 h-4" />}
                       </button>
                     )}
                     {isDb && (
