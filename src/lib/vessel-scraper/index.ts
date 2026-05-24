@@ -74,10 +74,14 @@ export async function scrapeVessel(url: string): Promise<VesselData> {
   // Also mine the features list as a secondary text source
   if (result.features?.length) mineFromText(result, result.features.join(". "));
 
-  // Layer 3: AI extraction — fills whatever regex couldn't catch from prose
-  // Runs on combined description + features text for maximum coverage
-  // Requires ANTHROPIC_API_KEY env var; fails silently if not set
-  const aiText = [result.description, result.features?.join(". ")].filter(Boolean).join("\n\n");
+  // Layer 3: AI extraction — fills whatever regex couldn't catch.
+  // Feed the AI the FULL page text (not just the scraper's captured prose),
+  // so it can recover fields the structured scraper missed entirely.
+  // Falls back to description+features if the page fetch fails.
+  let aiText = await fetchPageText(normalised);
+  if (aiText.length < 200) {
+    aiText = [result.description, result.features?.join(". ")].filter(Boolean).join("\n\n");
+  }
   await aiExtractSpecs(result, aiText);
 
   return result;
@@ -121,7 +125,7 @@ export function vesselToCampaignDraft(v: VesselData) {
 // ─── Generic fallback ────────────────────────────────────────────────────────
 
 import * as cheerio from "cheerio";
-import { assignSpec, cleanHeadline, clean, dedupeImages, mineFromText, aiExtractSpecs } from "./utils";
+import { assignSpec, cleanHeadline, clean, dedupeImages, mineFromText, aiExtractSpecs, fetchPageText } from "./utils";
 
 async function genericScrape(url: string): Promise<VesselData> {
   const res = await fetch(url, {

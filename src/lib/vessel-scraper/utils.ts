@@ -1,4 +1,5 @@
 import type { VesselData, VesselImage } from "./types";
+import { load as cheerioLoad } from "cheerio";
 
 /** Remove excessive whitespace, trim */
 export function clean(s?: string | null): string {
@@ -324,6 +325,10 @@ export function assignSpec(vessel: VesselData, label: string, value: string): vo
       } else if (Array.isArray(vessel[field])) {
         // skip
       } else if (!(vessel[field] as string)) {
+        // Sanity guard: short-fact fields must stay short. A value running
+        // longer than a phrase is almost certainly a mis-grabbed sentence
+        // fragment. Prose fields (refitDetails) are exempt.
+        if (field !== "refitDetails" && (v.length > 120 || v.split(/\s+/).length > 16)) continue;
         let v2 = DUAL_MEASURE_FIELDS.has(field) ? dualMeasure(enrichedValue) : enrichedValue;
 
         // ── Engine HP extraction ─────────────────────────────────────────
@@ -725,6 +730,7 @@ export async function aiExtractSpecs(vessel: VesselData, text: string): Promise<
     { field: "displacement",         hint: "displacement in tonnes" },
     { field: "grossTonnage",         hint: "gross tonnage (GT) number" },
     { field: "location",             hint: "current location where vessel is lying or berthed" },
+    { field: "description",          hint: "a flowing 2-4 paragraph marketing description of the vessel, drawn from the listing's own descriptive prose — do NOT invent details, only rephrase/condense what the listing states" },
   ];
 
   const needed = EXTRACTABLE.filter(({ field }) => {
@@ -784,6 +790,14 @@ JSON:`;
       const vLow = value.toLowerCase().trim();
       if (/^not\s+(mentioned|found|specified|available|provided|stated|indicated|given|listed|noted|included|discussed|detailed)|^unknown$|^n\/a$|^none$|^unspecified$|^unclear$/i.test(vLow)) continue;
       const field = key as keyof VesselData;
+      // Sanity guard: short-fact fields must stay short. Rejects sentence
+      // fragments that brittle parsing (or a confused AI) may produce —
+      // e.g. a paragraph landing in "fuelTank". Prose fields are exempt.
+      const PROSE_FIELDS = new Set(["description", "refitDetails", "toys"]);
+      if (!PROSE_FIELDS.has(field as string)) {
+        const val = (value as string).trim();
+        if (val.length > 120 || val.split(/\s+/).length > 16) continue;
+      }
       const current = (vessel as Record<string, unknown>)[field as string];
       if (current === undefined || current === null || (typeof current === "string" && current.trim() === "")) {
         (vessel as Record<string, unknown>)[field as string] = (value as string).trim();
@@ -792,5 +806,36 @@ JSON:`;
     vessel.aiExtracted = true;
   } catch {
     // Network error, timeout, parse failure — fail silently, L1+L2 stand
+  }
+}
+
+
+/**
+ * fetchPageText — fetch a listing URL and return its clean, visible text.
+ *
+ * Used to give aiExtractSpecs the FULL page content, not just whatever
+ * prose the structured scraper happened to capture. Strips scripts,
+ * styles, nav, header, and footer so the AI sees the listing body.
+ * Fails silently (returns "") on any network/parse error.
+ */
+export async function fetchPageText(url: string): Promise<string> {
+  try {
+    const res = await fetch(url, {
+      cache: "no-store",
+      headers: {
+        "user-agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return "";
+    const html = await res.text();
+    const $ = cheerioLoad(html);
+    // Drop everything that isn't listing content.
+    $("script, style, noscript, nav, header, footer, svg, iframe, form").remove();
+    const text = $("body").text();
+    return text.replace(/[ \t]+/g, " ").replace(/\n\s*\n\s*\n+/g, "\n\n").trim().slice(0, 30000);
+  } catch {
+    return "";
   }
 }
