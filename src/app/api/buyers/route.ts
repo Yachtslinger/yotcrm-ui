@@ -33,8 +33,8 @@ export async function GET(req: Request) {
 
     if (yearMin)   { boatConds.push("CAST(b.year  AS INTEGER) >= ?"); boatParams.push(Number(yearMin)); }
     if (yearMax)   { boatConds.push("CAST(b.year  AS INTEGER) <= ?"); boatParams.push(Number(yearMax)); }
-    if (lengthMin) { boatConds.push("CAST(REPLACE(REPLACE(b.length,'ft',''),\"'\",'') AS REAL) >= ?"); boatParams.push(Number(lengthMin)); }
-    if (lengthMax) { boatConds.push("CAST(REPLACE(REPLACE(b.length,'ft',''),\"'\",'') AS REAL) <= ?"); boatParams.push(Number(lengthMax)); }
+    if (lengthMin) { boatConds.push("CAST(REPLACE(REPLACE(b.length,'ft',''),'''','') AS REAL) >= ?"); boatParams.push(Number(lengthMin)); }
+    if (lengthMax) { boatConds.push("CAST(REPLACE(REPLACE(b.length,'ft',''),'''','') AS REAL) <= ?"); boatParams.push(Number(lengthMax)); }
     if (priceMin)  { boatConds.push("CAST(REPLACE(REPLACE(REPLACE(b.price,'$',''),',',''),'USD','') AS REAL) >= ?"); boatParams.push(Number(priceMin)); }
     if (priceMax)  { boatConds.push("CAST(REPLACE(REPLACE(REPLACE(b.price,'$',''),',',''),'USD','') AS REAL) <= ?"); boatParams.push(Number(priceMax)); }
     if (make)      { boatConds.push("LOWER(b.make) LIKE ?"); boatParams.push(`%${make.toLowerCase()}%`); }
@@ -133,13 +133,13 @@ export async function GET(req: Request) {
     const lengthSegs = db.prepare(`
       SELECT
         CASE
-          WHEN CAST(REPLACE(REPLACE(length,'ft',''),"'",'') AS REAL) <  40 THEN 'Under 40'''
-          WHEN CAST(REPLACE(REPLACE(length,'ft',''),"'",'') AS REAL) <  50 THEN '40'' – 50'''
-          WHEN CAST(REPLACE(REPLACE(length,'ft',''),"'",'') AS REAL) <  60 THEN '50'' – 60'''
-          WHEN CAST(REPLACE(REPLACE(length,'ft',''),"'",'') AS REAL) <  80 THEN '60'' – 80'''
-          WHEN CAST(REPLACE(REPLACE(length,'ft',''),"'",'') AS REAL) < 100 THEN '80'' – 100'''
-          WHEN CAST(REPLACE(REPLACE(length,'ft',''),"'",'') AS REAL) < 130 THEN '100'' – 130'''
-          ELSE '130''+'
+          WHEN CAST(REPLACE(REPLACE(length,'ft',''),'''','') AS REAL) <  40 THEN 'Under 40 ft'
+          WHEN CAST(REPLACE(REPLACE(length,'ft',''),'''','') AS REAL) <  50 THEN '40 – 50 ft'
+          WHEN CAST(REPLACE(REPLACE(length,'ft',''),'''','') AS REAL) <  60 THEN '50 – 60 ft'
+          WHEN CAST(REPLACE(REPLACE(length,'ft',''),'''','') AS REAL) <  80 THEN '60 – 80 ft'
+          WHEN CAST(REPLACE(REPLACE(length,'ft',''),'''','') AS REAL) < 100 THEN '80 – 100 ft'
+          WHEN CAST(REPLACE(REPLACE(length,'ft',''),'''','') AS REAL) < 130 THEN '100 – 130 ft'
+          ELSE '130 ft+'
         END AS label,
         COUNT(*) AS count
       FROM boats WHERE length != '' AND length IS NOT NULL
