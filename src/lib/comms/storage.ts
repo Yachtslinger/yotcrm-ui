@@ -232,7 +232,7 @@ export function getMessage(id: number): CommsMessage | null {
 }
 export function getThreadMessages(threadId: number): CommsMessage[] {
   initCommsTables(); const db = getDb();
-  try { return db.prepare("SELECT * FROM comms_messages WHERE thread_id = ? ORDER BY sent_at ASC").all(threadId).map((r: Record<string, unknown>) => toMsg(r as Record<string, unknown>)); }
+  try { return db.prepare("SELECT * FROM comms_messages WHERE thread_id = ? ORDER BY sent_at ASC").all(threadId).map((r: unknown) => toMsg(r as Record<string, unknown>)); }
   finally { db.close(); }
 }
 

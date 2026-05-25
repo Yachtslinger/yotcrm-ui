@@ -134,6 +134,20 @@ export type ContactFlat = Contact & {
   additional_properties?: string;
   reverify_status?: string;
   broker_notes?: string;
+  // Buyer-search / ISO preference fields
+  budget_min?: string;
+  budget_max?: string;
+  loa_min?: string;
+  loa_max?: string;
+  year_min?: string;
+  year_max?: string;
+  make_preference?: string;
+  preferred_location?: string;
+  vessel_type_pref?: string;
+  flybridge_pref?: string;
+  stabilizers_pref?: string;
+  min_cabins?: string;
+  engine_type_pref?: string;
 };
 
 const STATUS_TAGS = new Set(["hot", "warm", "cold", "other", "new", "nurture"]);
@@ -471,7 +485,7 @@ export async function readContact(id: string): Promise<ContactFlat | null> {
 
 // ─── Write ──────────────────────────────────────────────────────────
 
-export async function updateContact(id: string, updates: Partial<ContactRecord>): Promise<ContactFlat | null> {
+export async function updateContact(id: string, updates: Partial<ContactFlat>): Promise<ContactFlat | null> {
   const db = getDb();
   try {
     const fields: string[] = [];

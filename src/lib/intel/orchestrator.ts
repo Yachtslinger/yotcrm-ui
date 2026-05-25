@@ -60,7 +60,12 @@ export async function enrichLead(leadId: number): Promise<EnrichmentResult> {
   const result: EnrichmentResult = {
     profileId: 0,
     leadId,
-    score: { score: 50, band: "unverified", breakdown: [], flags: [] },
+    score: {
+      score: 50, band: "unverified",
+      identity_score: 0, capital_score: 0, risk_score: 0,
+      digital_score: 0, engagement_score: 0,
+      breakdown: [], flags: [],
+    },
     providers: {
       ofac: { success: false, matches: 0 },
       edgar: { success: false, filings: 0 },

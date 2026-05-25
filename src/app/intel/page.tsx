@@ -240,7 +240,7 @@ export default function LighthousePage() {
             <button key={s.band}
               onClick={() => setFilter(filter === s.band ? "all" : s.band)}
               className={`card-elevated p-4 text-left transition-all ${filter === s.band ? "ring-2" : ""}`}
-              style={{ borderColor: filter === s.band ? style.text : undefined, ringColor: style.text }}>
+              style={{ borderColor: filter === s.band ? style.text : undefined, ["--tw-ring-color" as string]: style.text } as React.CSSProperties}>
               <div className="flex items-center gap-2 mb-1">
                 <Icon className="w-4 h-4" style={{ color: style.text }} />
                 <span className="text-2xl font-bold" style={{ color: style.text }}>{s.count}</span>
