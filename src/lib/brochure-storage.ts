@@ -3,6 +3,9 @@
 // Follows the same patterns as src/lib/listings/storage.ts
 
 import Database from "better-sqlite3";
+// VesselData is defined canonically in the scraper layer; storage re-exports
+// it (below) so scraper, storage and brochure-editor layers share one shape.
+import type { VesselData } from "@/lib/vessel-scraper/types";
 
 const DB_PATH = process.env.DB_PATH || "/app/data/yotcrm.db";
 
@@ -12,149 +15,10 @@ function getDb() {
   return db;
 }
 
-export type VesselData = {
-  // ── Identity ──────────────────────────────────────────────────────────────
-  name: string;
-  builder: string;
-  year: number | null;
-  refitYear?: string;
-  refitDetails?: string;
-  location: string;
-  price?: string;
-  askingPriceEUR?: string;
-  vatStatus?: string;         // "Paid" / "Not paid" / "Partial"
-  stockNumber: string;
-  imoNumber?: string;
-  mmsiNumber?: string;
-  hullNumber?: string;
-  registryPort?: string;
-  flagState?: string;
-  navClass?: string;          // navigation class e.g. "Unrestricted"
-  classification: string;
-  grossTonnage: string;
-  sourceUrl: string;
-
-  // ── Dimensions ────────────────────────────────────────────────────────────
-  loa: string;
-  lwl: string;
-  beam: string;
-  beamMax?: string;
-  draft: string;
-  draftMin?: string;
-  airDraft?: string;
-  freeboard?: string;
-  displacement: string;
-  deckCount?: string;
-
-  // ── Hull & Construction ───────────────────────────────────────────────────
-  hullForm: string;
-  hullMaterial: string;
-  deckMaterial?: string;
-  superstructure: string;
-  paintSystem?: string;
-  windowGlazing?: string;
-  keelType?: string;
-
-  // ── Design ────────────────────────────────────────────────────────────────
-  exteriorDesign: string;
-  interiorDesign: string;
-  navalArchitect: string;
-  interiorStyle?: string;     // e.g. "Contemporary / Open plan"
-  colorScheme?: string;
-
-  // ── Propulsion ───────────────────────────────────────────────────────────
-  engines: string;
-  power: string;
-  engineHours?: string;
-  gearbox: string;
-  propulsion: string;
-  shaftCount?: string;
-  propellers: string;
-  bowThruster?: string;
-  sternThruster?: string;
-  stabilisers?: string;
-  stabilisersMake?: string;
-  zeroSpeedStabilisers?: string;
-
-  // ── Performance ──────────────────────────────────────────────────────────
-  maxSpeed: string;
-  cruiseSpeed: string;
-  economySpeed?: string;
-  range: string;
-  transitRange?: string;      // range at economy speed
-
-  // ── Electrical / Generators ──────────────────────────────────────────────
-  gensets: string;
-  generatorKW?: string;
-  shorepower?: string;
-  voltageSystem?: string;
-  emergencyGenerator?: string;
-  airCon: string;
-  airConMake?: string;
-
-  // ── Tanks ─────────────────────────────────────────────────────────────────
-  fuelTank: string;
-  fuelType?: string;
-  freshWater: string;
-  holdingTank: string;
-  greyWater?: string;
-  lubeOil?: string;
-  sewageTreatment?: string;
-  waterMaker?: string;
-  waterMakerCapacity?: string;
-
-  // ── Accommodation ────────────────────────────────────────────────────────
-  guests: string;
-  staterooms: string;
-  ownersCabin?: string;
-  guestCabins?: string;
-  crew: string;
-  crewCabins: string;
-  crewMess?: string;
-  livingSpace: string;
-
-  // ── Amenities & Deck ─────────────────────────────────────────────────────
-  flybridge?: string;
-  beachClub?: string;
-  swimmingPlatform?: string;
-  jacuzzi?: string;
-  gym?: string;
-  cinema?: string;
-  tender: string;
-  tenderCount?: string;
-  toys?: string;
-  garage?: string;
-
-  // ── Navigation ───────────────────────────────────────────────────────────
-  navigation: string;
-  radar?: string;
-  chartPlotter?: string;
-  autopilot?: string;
-  satcom?: string;
-  aisSystem?: string;
-  anchoring?: string;
-  windlass?: string;
-
-  // ── Safety ───────────────────────────────────────────────────────────────
-  fireSuppression?: string;
-  lifeRafts?: string;
-  mobSystem?: string;
-  helideck?: string;
-
-  // ── Condition ────────────────────────────────────────────────────────────
-  lastSurvey?: string;
-  lastDrydock?: string;
-  lastService?: string;
-  notes?: string;
-
-  // ── Media ────────────────────────────────────────────────────────────────
-  description: string;
-  features?: string[];
-  images: { src: string; alt: string }[];
-  gaImages?: { src: string; alt: string }[];
-  pdfUrl?: string;
-  videos?: { url: string; thumbnail?: string; title?: string; type: string }[];
-};
+// VesselData is defined canonically in the scraper layer. Brochure storage
+// re-exports it so the scraper, storage and brochure-editor layers all share
+// one shape (the type formerly duplicated here drifted out of sync).
+export type { VesselData };
 
 export type BrokerInfo = {
   name: string;

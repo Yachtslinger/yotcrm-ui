@@ -69,65 +69,9 @@ type Brochure = {
   heroSrc?: string; is_pocket_listing?: number; isPocket?: boolean;
 };
 
-type VesselData = {
-  // Identity
-  name: string; builder: string; year: number | null; location: string;
-  price: string; askingPriceEUR: string; vatStatus: string;
-  stockNumber: string; imoNumber: string; mmsiNumber: string; hullNumber: string;
-  registryPort: string; flagState: string; navClass: string;
-  classification: string; grossTonnage: string; sourceUrl: string;
-  refitYear: string; refitDetails: string;
-  // Dimensions
-  loa: string; lwl: string; beam: string; beamMax: string;
-  draft: string; draftMin: string; airDraft: string; freeboard: string;
-  displacement: string; deckCount: string;
-  // Hull & Construction
-  hullForm: string; hullMaterial: string; deckMaterial: string;
-  superstructure: string; paintSystem: string; windowGlazing: string; keelType: string;
-  // Design
-  exteriorDesign: string; interiorDesign: string; navalArchitect: string;
-  interiorStyle: string; colorScheme: string;
-  // Propulsion
-  engines: string; power: string; engineHours: string; gearbox: string;
-  propulsion: string; shaftCount: string; propellers: string;
-  bowThruster: string; sternThruster: string;
-  stabilisers: string; stabilisersMake: string; zeroSpeedStabilisers: string;
-  // Performance
-  maxSpeed: string; cruiseSpeed: string; economySpeed: string;
-  range: string; transitRange: string;
-  // Electrical
-  gensets: string; generatorKW: string; shorepower: string;
-  voltageSystem: string; emergencyGenerator: string;
-  airCon: string; airConMake: string;
-  // Tanks
-  fuelTank: string; fuelType: string; freshWater: string;
-  holdingTank: string; greyWater: string; lubeOil: string;
-  sewageTreatment: string; waterMaker: string; waterMakerCapacity: string;
-  // Accommodation
-  guests: string; staterooms: string; ownersCabin: string; guestCabins: string;
-  crew: string; crewCabins: string; crewMess: string; livingSpace: string;
-  // Amenities
-  flybridge: string; beachClub: string; swimmingPlatform: string;
-  jacuzzi: string; gym: string; cinema: string;
-  tender: string; tenderCount: string; toys: string; garage: string;
-  // Navigation
-  navigation: string; radar: string; chartPlotter: string;
-  autopilot: string; satcom: string; aisSystem: string;
-  anchoring: string; windlass: string;
-  // Safety
-  fireSuppression: string; lifeRafts: string; mobSystem: string; helideck: string;
-  // Condition
-  lastSurvey: string; lastDrydock: string; lastService: string; notes: string;
-  // Custom
-  customIntro: string;
-  customFields: { key: string; value: string }[];
-  // Media
-  pdfUrl: string;
-  gaImages?: { src: string; alt: string }[];
-  videos?: { url: string; thumbnail?: string; title?: string; type: string }[];
-  description: string; images: { src: string; alt: string }[];
-  features?: string[];
-};
+// VesselData is the canonical scraper/storage shape, re-used here.
+// (A divergent local copy formerly lived in this file.)
+type VesselData = import("@/lib/vessel-scraper/types").VesselData;
 
 const FIELD_GROUPS: { label: string; fields: { key: keyof VesselData; label: string }[] }[] = [
   { label: "Identity", fields: [
@@ -364,8 +308,8 @@ export default function BrochuresPage() {
     const skipKeys = new Set(["images", "pdfUrl"]);
     for (const k of Object.keys(b) as (keyof VesselData)[]) {
       if (skipKeys.has(k as string)) continue;
-      const av = (a as Record<string,unknown>)[k as string];
-      const bv = (b as Record<string,unknown>)[k as string];
+      const av = (a as unknown as Record<string,unknown>)[k as string];
+      const bv = (b as unknown as Record<string,unknown>)[k as string];
       const isEmpty = av === null || av === undefined || av === "" || av === 0;
       if (isEmpty && bv) (merged as Record<string,unknown>)[k as string] = bv;
     }
@@ -521,7 +465,7 @@ export default function BrochuresPage() {
           if (w[key]) { (update as Record<string, unknown>)[key] = w[key]; populated.add(key); }
         }
         for (const key of fill) {
-          if (w[key] && !(v as Record<string, unknown>)[key]) { (update as Record<string, unknown>)[key] = w[key]; populated.add(key); }
+          if (w[key] && !(v as unknown as Record<string, unknown>)[key]) { (update as Record<string, unknown>)[key] = w[key]; populated.add(key); }
         }
         return { ...v, ...update };
       });
@@ -807,9 +751,9 @@ export default function BrochuresPage() {
     const merged: VesselData = { ...base };
     for (const [k, val] of Object.entries(v)) {
       if (k === "images") continue;
-      const existing = (merged as Record<string,unknown>)[k];
+      const existing = (merged as unknown as Record<string,unknown>)[k];
       if (!existing || existing === "" || existing === null || existing === 0)
-        (merged as Record<string,unknown>)[k] = val;
+        (merged as unknown as Record<string,unknown>)[k] = val;
     }
     if (images.length) {
       const existingSrcs = new Set(merged.images.map(i => i.src));
@@ -1062,9 +1006,12 @@ export default function BrochuresPage() {
   }
 
   function setImageCategory(idx: number, category: string) {
+    // category originates from the fixed category-key set or "" — narrow to
+    // VesselImage["category"] so the spread satisfies the image type.
+    const cat = category as NonNullable<VesselData["images"][number]["category"]>;
     setVessel(v => {
       if (!v) return v;
-      const imgs = v.images.map((img, i) => i === idx ? { ...img, category } : img);
+      const imgs = v.images.map((img, i) => i === idx ? { ...img, category: cat } : img);
       return { ...v, images: imgs };
     });
   }
@@ -1478,7 +1425,7 @@ export default function BrochuresPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
                 {visibleFields.map(f => {
                   const isTank = TANK_KEYS.has(f.key as string);
-                  const rawVal = String((vessel as Record<string,unknown>)[f.key as string] || "");
+                  const rawVal = String((vessel as unknown as Record<string,unknown>)[f.key as string] || "");
                   const converted = isTank ? formatCapacityClient(rawVal) : "";
                   const showHint = isTank && converted && converted !== rawVal && rawVal.length > 0;
                   return (

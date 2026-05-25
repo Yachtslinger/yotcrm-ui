@@ -181,6 +181,15 @@ export interface VesselData {
   features:       string[];
   images:         VesselImage[];
   videos?:        VesselVideo[];
+
+  // ── Brochure-editor fields ────────────────────────────────────────────────
+  // Not produced by scrapers — populated/edited in the brochure UI and
+  // persisted in brochure-storage. Declared here so VesselData is the single
+  // canonical shape shared by the scraper, storage and brochure layers.
+  notes?:         string;
+  pdfUrl?:        string;
+  customIntro?:   string;
+  customFields?:  { key: string; value: string }[];
 }
 
 export function emptyVessel(sourceUrl = ""): VesselData {
