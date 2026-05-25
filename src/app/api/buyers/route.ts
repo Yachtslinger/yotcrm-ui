@@ -87,8 +87,12 @@ export async function GET(req: Request) {
       LIMIT ? OFFSET ?
     `;
 
+    // listSql binds boatParams ONCE — boatWhere appears only inside the
+    // correlated subquery; the main JOIN's ON clause has no boatWhere.
+    // Param order must mirror placeholder order in the SQL:
+    // subquery boatWhere → leadWhere → LIMIT → OFFSET.
     const rows = db.prepare(listSql).all(
-      ...boatParams, ...boatParams, ...leadParams, pageSize, offset
+      ...boatParams, ...leadParams, pageSize, offset
     ) as any[];
 
     const buyers = rows.map(r => ({
