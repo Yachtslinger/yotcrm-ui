@@ -70,6 +70,34 @@ export function initMatchTables() {
         FOREIGN KEY (batch_id) REFERENCES email_batches(id) ON DELETE CASCADE
       );
 
+      -- buyer_searches (ISOs) is also created by market/storage.ts and the
+      -- sync route, but listMatchesForPage()/getMatchDetail() LEFT JOIN it.
+      -- If the matches page is hit before either of those has ever run, the
+      -- JOIN throws "no such table". Creating it here (IF NOT EXISTS) makes
+      -- initMatchTables() self-sufficient. Schema mirrors market/storage.ts.
+      CREATE TABLE IF NOT EXISTS buyer_searches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        buyer_name TEXT DEFAULT '',
+        buyer_email TEXT DEFAULT '',
+        buyer_phone TEXT DEFAULT '',
+        make TEXT DEFAULT '',
+        model TEXT DEFAULT '',
+        year_min TEXT DEFAULT '',
+        year_max TEXT DEFAULT '',
+        length_min TEXT DEFAULT '',
+        length_max TEXT DEFAULT '',
+        budget_min TEXT DEFAULT '',
+        budget_max TEXT DEFAULT '',
+        preferred_location TEXT DEFAULT '',
+        description TEXT DEFAULT '',
+        status TEXT DEFAULT 'active',
+        notes TEXT DEFAULT '',
+        lead_id INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE SET NULL
+      );
+
       CREATE TABLE IF NOT EXISTS match_notifications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         batch_id INTEGER NOT NULL,
