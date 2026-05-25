@@ -5,10 +5,28 @@
 import Database from "better-sqlite3";
 import type { VesselData } from "@/lib/vessel-scraper/types";
 
+/**
+ * Structural subset of VesselData — only the fields this sync actually reads.
+ * Declared standalone (not Pick<VesselData>) so callers can pass either
+ * VesselData variant: brochure-storage's and vessel-scraper's are nominally
+ * distinct and differ in minor field types (e.g. the images element type),
+ * but both satisfy this loose shape. Avoids a forced type unification.
+ */
+type SyncableVessel = {
+  name: string;
+  builder: string;
+  year: number | null;
+  location: string;
+  price?: string;
+  loa: string;
+  description: string;
+  images: { src: string; alt: string }[];
+};
+
 const DB_PATH = process.env.DB_PATH || "/app/data/yotcrm.db";
 
 export function syncPocketListingFromBrochure(opts: {
-  vessel: VesselData;
+  vessel: SyncableVessel;
   slug: string;
   brochureUrl: string;
   pdfUrl: string;

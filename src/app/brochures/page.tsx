@@ -66,7 +66,7 @@ function formatCapacityClient(raw: string): string {
 type Brochure = {
   slug: string; title: string; subtitle: string; builder: string;
   year: string; tag: string; updatedAt: string; source: "file" | "db"; id?: number;
-  heroSrc?: string; is_pocket_listing?: number;
+  heroSrc?: string; is_pocket_listing?: number; isPocket?: boolean;
 };
 
 type VesselData = {
@@ -126,6 +126,7 @@ type VesselData = {
   gaImages?: { src: string; alt: string }[];
   videos?: { url: string; thumbnail?: string; title?: string; type: string }[];
   description: string; images: { src: string; alt: string }[];
+  features?: string[];
 };
 
 const FIELD_GROUPS: { label: string; fields: { key: keyof VesselData; label: string }[] }[] = [

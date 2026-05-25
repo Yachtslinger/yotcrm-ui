@@ -1,12 +1,10 @@
 // src/app/api/brochures/generate/route.ts
-// One-shot: scrape a vessel URL → save to DB → return the complete brochure HTML.
+// One-shot: scrape a vessel URL → save to DB → return the brochure slug.
 // No edit form required. POST { url, brokers? }
-// This mirrors exactly how the Explorer 34M was originally built —
-// fetch the URL, read the data, generate the full luxury HTML immediately.
+// The brochure itself renders on-demand from the stored vessel_data.
 
 import { NextRequest, NextResponse } from "next/server";
 import { scrapeVessel } from "@/lib/vessel-scraper";
-import { generateBrochureHTML } from "@/lib/brochure-template";
 import { saveBrochure } from "@/lib/brochure-storage";
 import type { BrokerInfo } from "@/lib/brochure-storage";
 
@@ -42,12 +40,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Generate the full luxury brochure HTML
+    // 2. Save to SQLite — brochures render on-demand from vessel_data,
+    //    so no pre-generated HTML is stored.
     const useBrokers: BrokerInfo[] = brokers?.length ? brokers : DEFAULT_BROKERS;
-    const html = generateBrochureHTML(vessel, useBrokers);
-
-    // 3. Save to SQLite
-    const saved = saveBrochure(vessel, useBrokers, html);
+    const saved = saveBrochure(vessel, useBrokers);
 
     return NextResponse.json({
       ok: true,
