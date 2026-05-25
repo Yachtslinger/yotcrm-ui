@@ -250,13 +250,14 @@ function extractFromNextData(vessel: VesselData, listing: Record<string, unknown
         src = img;
       } else if (img && typeof img === "object") {
         // BoatTrader image object: { url, full, original, thumbnail, sizes: {...} }
+        const o = img as Record<string, unknown>;
         src =
-          (img as Record<string,string>).original ||
-          (img as Record<string,string>).full ||
-          (img as Record<string,string>).url ||
-          (img as Record<string,string>).large || "";
+          (typeof o.original === "string" && o.original) ||
+          (typeof o.full === "string" && o.full) ||
+          (typeof o.url === "string" && o.url) ||
+          (typeof o.large === "string" && o.large) || "";
         // Prefer the largest size from the sizes object
-        const sizes = (img as Record<string, Record<string, string>>).sizes;
+        const sizes = o.sizes as Record<string, { url?: string }> | undefined;
         if (sizes) {
           src = sizes.large?.url || sizes.medium?.url || sizes.small?.url || src;
         }

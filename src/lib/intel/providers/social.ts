@@ -73,6 +73,8 @@ export async function discoverSocial(
     const now = new Date().toISOString();
     const sourceBatch: Parameters<typeof addSources>[0] = [];
 
+    // linkedin/facebook carry profile objects; wiki/news are handled separately below.
+    const probes = [{ result: linkedin }, { result: facebook }];
     for (const probe of probes) {
       if (probe.result.status === "fulfilled" && probe.result.value) {
         const p = probe.result.value;

@@ -8,7 +8,7 @@ import { useToast } from "../../components/ToastProvider";
 import {
   Shield, RefreshCw, CheckCircle, AlertTriangle, HelpCircle, XCircle,
   Building2, Ship, Plane, Globe, Linkedin, ExternalLink,
-  Briefcase, DollarSign, Activity,
+  Briefcase, DollarSign, Activity, User,
 } from "lucide-react";
 import Dossier from "../Dossier";
 import ClientNotesPanel from "../ClientNotesPanel";
@@ -790,20 +790,20 @@ function LeadDetailPageClient({ id }: { id: string }) {
                       <p className="text-gray-900 dark:text-gray-100 font-semibold">{lead.estimated_net_worth || "—"}</p>
                     )}
                   </div>
-                  {lead.identity_confidence > 0 && !editing && (
+                  {(() => { const idConf = lead.identity_confidence ?? 0; return idConf > 0 && !editing && (
                     <div>
                       <label className="text-xs text-gray-500 dark:text-gray-400">Identity Confidence</label>
                       <div className="flex items-center gap-2 mt-1">
                         <div className="flex-1 h-2 rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700">
                           <div className="h-full rounded-full transition-all duration-500"
-                            style={{ width: `${lead.identity_confidence}%`, background: lead.identity_confidence >= 70 ? "#059669" : lead.identity_confidence >= 40 ? "#d97706" : "#ef4444" }} />
+                            style={{ width: `${idConf}%`, background: idConf >= 70 ? "#059669" : idConf >= 40 ? "#d97706" : "#ef4444" }} />
                         </div>
-                        <span className="text-xs font-bold" style={{ color: lead.identity_confidence >= 70 ? "#059669" : lead.identity_confidence >= 40 ? "#d97706" : "#ef4444" }}>
-                          {lead.identity_confidence}%
+                        <span className="text-xs font-bold" style={{ color: idConf >= 70 ? "#059669" : idConf >= 40 ? "#d97706" : "#ef4444" }}>
+                          {idConf}%
                         </span>
                       </div>
                     </div>
-                  )}
+                  ); })()}
                   {/* Court Records */}
                   {lead.court_records && !editing && (() => {
                     try { const cr = JSON.parse(lead.court_records); if (!Array.isArray(cr) || cr.length === 0) return null;
