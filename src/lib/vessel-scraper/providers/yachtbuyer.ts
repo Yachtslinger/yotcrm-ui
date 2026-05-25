@@ -225,10 +225,10 @@ function mapSpec(vessel: VesselData, rawLabel: string, rawValue: string): void {
   const value = DUAL_FIELDS.has(label) ? dualMeasure(rawVal) : rawVal;
 
   const set = (field: keyof VesselData) => {
-    if (!(vessel as Record<string, unknown>)[field as string]) (vessel as unknown as Record<string, unknown>)[field as string] = value;
+    if (!(vessel as unknown as Record<string, unknown>)[field as string]) (vessel as unknown as Record<string, unknown>)[field as string] = value;
   };
   const setNum = (field: keyof VesselData) => {
-    if (!(vessel as Record<string, unknown>)[field as string]) {
+    if (!(vessel as unknown as Record<string, unknown>)[field as string]) {
       const m = value.replace(/,/g, "").match(/[\d.]+/);
       if (m) (vessel as unknown as Record<string, unknown>)[field as string] = parseFloat(m[0]);
     }

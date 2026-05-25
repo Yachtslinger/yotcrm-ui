@@ -54,7 +54,7 @@ function parseFGI(url: string, html: string): VesselData {
           if (ym) vessel.year = parseInt(ym[0]);
           if (/\//.test(value)) {
             const parts = value.split('/');
-            if (parts[1]) (vessel as Record<string,unknown>).refitYear = parts[1].trim();
+            if (parts[1]) (vessel as unknown as Record<string,unknown>).refitYear = parts[1].trim();
           }
         }
       } else {

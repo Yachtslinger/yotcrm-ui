@@ -60,7 +60,7 @@ function parseEdmiston(url: string, html: string): VesselData {
             else if (l === 'interior design' || l === 'interior designer') { if (!vessel.interiorDesign) vessel.interiorDesign = value; }
             else if (l === 'hull material') { if (!vessel.hullMaterial) vessel.hullMaterial = value; }
             else if (l === 'superstructure material') { if (!vessel.superstructure) vessel.superstructure = value; }
-            else if (l === 'deck material') { if (!(vessel as Record<string,unknown>).deckMaterial) (vessel as Record<string,unknown>).deckMaterial = value; }
+            else if (l === 'deck material') { if (!(vessel as unknown as Record<string,unknown>).deckMaterial) (vessel as unknown as Record<string,unknown>).deckMaterial = value; }
             else { assignSpec(vessel, label, value); }
           }
         }

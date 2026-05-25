@@ -331,9 +331,8 @@ function parseDenison(url: string, html: string): VesselData {
     // Generator hours: "Port - 3068hrs | Stbd - 3078hrs"
     const gpH = genSection.match(/Port\s*[-–]\s*([\d,]+)\s*hrs?/i);
     const gsH = genSection.match(/St(?:ar)?bd?\s*[-–]\s*([\d,]+)\s*hrs?/i);
-    if (gpH && gsH && vessel.notes !== undefined) {
-      const genHrsNote = `Generator hours — Port: ${gpH[1]} hrs / Stbd: ${gsH[1]} hrs`;
-      vessel.notes = vessel.notes ? `${vessel.notes}; ${genHrsNote}` : genHrsNote;
+    if (gpH && gsH && !vessel.generatorHours) {
+      vessel.generatorHours = `Port: ${gpH[1]} hrs / Stbd: ${gsH[1]} hrs`;
     }
   }
 
@@ -577,9 +576,9 @@ function parseDenison(url: string, html: string): VesselData {
   // Sanitize: if any string field contains more than 2000 chars or looks like CSS/JS, wipe it
   const CSS_HINT = /\{\s*display\s*:|@media\s|\.navbar|font-family\s*:|\.menu_|<script|function\s+\w+\s*\(/;
   for (const k of Object.keys(vessel) as (keyof typeof vessel)[]) {
-    const v = (vessel as Record<string, unknown>)[k as string];
+    const v = (vessel as unknown as Record<string, unknown>)[k as string];
     if (typeof v === "string" && (v.length > 3000 || CSS_HINT.test(v))) {
-      (vessel as Record<string, unknown>)[k as string] = "";
+      (vessel as unknown as Record<string, unknown>)[k as string] = "";
     }
   }
   // Also cap description at 3000 chars

@@ -108,12 +108,12 @@ export function mergeVessel(base: VesselData, patch: Partial<VesselData>): Vesse
     if (v === undefined || v === null) continue;
     if (Array.isArray(v)) {
       if ((result[key] as unknown[]).length === 0) {
-        (result as Record<string, unknown>)[key] = v;
+        (result as unknown as Record<string, unknown>)[key] = v;
       }
     } else if (typeof v === "string" && !(result[key] as string)) {
-      (result as Record<string, unknown>)[key] = v;
+      (result as unknown as Record<string, unknown>)[key] = v;
     } else if (typeof v === "number" && result[key] === null) {
-      (result as Record<string, unknown>)[key] = v;
+      (result as unknown as Record<string, unknown>)[key] = v;
     }
   }
   return result;
@@ -365,12 +365,12 @@ export function mineFromText(vessel: VesselData, raw: string): void {
 
   // Helper: set field only if currently empty
   const set = (field: keyof VesselData, value: string) => {
-    if (value && !(vessel as Record<string, unknown>)[field as string])
-      (vessel as Record<string, unknown>)[field as string] = value.trim();
+    if (value && !(vessel as unknown as Record<string, unknown>)[field as string])
+      (vessel as unknown as Record<string, unknown>)[field as string] = value.trim();
   };
   const setNum = (field: keyof VesselData, value: number) => {
-    if (!(vessel as Record<string, unknown>)[field as string])
-      (vessel as Record<string, unknown>)[field as string] = value;
+    if (!(vessel as unknown as Record<string, unknown>)[field as string])
+      (vessel as unknown as Record<string, unknown>)[field as string] = value;
   };
   const grab = (p: RegExp): string => {
     const m = t.match(p);
@@ -734,7 +734,7 @@ export async function aiExtractSpecs(vessel: VesselData, text: string): Promise<
   ];
 
   const needed = EXTRACTABLE.filter(({ field }) => {
-    const v = (vessel as Record<string, unknown>)[field as string];
+    const v = (vessel as unknown as Record<string, unknown>)[field as string];
     return v === undefined || v === null || (typeof v === "string" && v.trim() === "");
   });
   if (needed.length === 0) return;
@@ -798,9 +798,9 @@ JSON:`;
         const val = (value as string).trim();
         if (val.length > 120 || val.split(/\s+/).length > 16) continue;
       }
-      const current = (vessel as Record<string, unknown>)[field as string];
+      const current = (vessel as unknown as Record<string, unknown>)[field as string];
       if (current === undefined || current === null || (typeof current === "string" && current.trim() === "")) {
-        (vessel as Record<string, unknown>)[field as string] = (value as string).trim();
+        (vessel as unknown as Record<string, unknown>)[field as string] = (value as string).trim();
       }
     }
     vessel.aiExtracted = true;

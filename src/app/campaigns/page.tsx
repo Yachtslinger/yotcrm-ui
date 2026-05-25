@@ -19,6 +19,45 @@ type Mode = "New Listing" | "Price Drop" | "Boat Show" | "Open House" | "Newslet
 type Contact    = { id: number; name: string; email: string; company: string; source: string; location: string };
 type SendStatus = "idle" | "testing" | "sending" | "done";
 
+/**
+ * Shape of a saved campaign draft (localStorage / saved templates). Every
+ * field is optional — older drafts may lack newer fields — and each is typed
+ * to match its corresponding setState target, so loadDraftData() needs no
+ * per-field casts. Untrusted JSON is narrowed to this via `as CampaignDraft`
+ * at the parse boundary; loadDraftData still guards each field with `if`.
+ */
+type CampaignDraft = {
+  mode?: Mode;
+  subject?: string;
+  heroUrl?: string; heroLink?: string;
+  heroSize?: "100%" | "75%" | "50%" | "33%";
+  heroPosition?: "top" | "after-specs" | "after-desc";
+  hero2Url?: string; hero2Link?: string;
+  hero2Size?: "100%" | "75%" | "50%" | "33%";
+  hero2Position?: "top" | "after-specs" | "after-desc" | "after-gallery" | "bottom";
+  galleryText?: string; galleryLink?: string;
+  galleryColumns?: 1 | 2 | 3;
+  galleryPosition?: "after-hero" | "after-specs" | "after-desc";
+  bannerTag?: string; headline?: string; location?: string;
+  ctaText?: string; ctaHref?: string; intro?: string;
+  specs?: Spec[]; featuresText?: string;
+  price?: string; wasPrice?: string;
+  showName?: string; showDates?: string; showVenue?: string; showBooth?: string;
+  showAddress?: string; showDesc?: string; showCta?: string; showCtaUrl?: string;
+  showVesselName?: string; showVesselSpecs?: Spec[]; showVesselDesc?: string;
+  showVesselCtaUrl?: string;
+  ohVessel?: string; ohDate?: string; ohTime?: string; ohMarina?: string;
+  ohAddress?: string; ohDesc?: string; ohRsvp?: string;
+  nlTitle?: string; nlSubtitle?: string; nlIntro?: string;
+  nlSections?: NLSection[]; nlFeatured?: NLFeatured[];
+  showcaseTitle?: string; showcaseSubtitle?: string; showcaseIntro?: string;
+  showcaseHeroUrl?: string;
+  boats?: BoatCard[];
+  agents?: { email: string; enabled: boolean }[];
+  extraButtons?: CtaButton[];
+  savedAt?: string;
+};
+
 const NAVY      = "#1a2b4a";
 const ORANGE    = "#e57b2e";
 const DARK_BLUE = "#002f6c";
@@ -499,7 +538,7 @@ export default function CampaignsPage(): React.ReactElement {
     } catch { toast("Could not save draft","error"); }
   }
 
-  function loadDraftData(d: Record<string, unknown>) {
+  function loadDraftData(d: CampaignDraft) {
       const sanitizeUrl = (u: unknown) => typeof u === "string" && u.startsWith("/api/listings/files/") ? "" : u;
       const sanitizeText = (t: unknown) => typeof t === "string" ? t.split("\n").map((l:string)=>l.trim()).filter((l:string)=>l && !l.startsWith("/api/listings/files/")).join("\n") : t;
       if (d.mode) selectTemplate(d.mode as Mode);
@@ -555,10 +594,13 @@ export default function CampaignsPage(): React.ReactElement {
       if (d.showcaseIntro) setShowcaseIntro(d.showcaseIntro);
       if (d.showcaseHeroUrl) setShowcaseHeroUrl(d.showcaseHeroUrl);
       if (d.boats) setBoats(d.boats);
-      if (d.agents) setAgents(prev => prev.map(a => {
-        const saved = d.agents.find((s: {email:string;enabled:boolean}) => s.email === a.email);
-        return saved ? { ...a, enabled: saved.enabled } : a;
-      }));
+      if (d.agents) {
+        const savedAgents = d.agents;   // local const so it narrows inside the closure
+        setAgents(prev => prev.map(a => {
+          const saved = savedAgents.find(s => s.email === a.email);
+          return saved ? { ...a, enabled: saved.enabled } : a;
+        }));
+      }
       if (d.extraButtons) setExtraButtons(d.extraButtons as typeof extraButtons);
   }
 
