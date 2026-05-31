@@ -289,7 +289,11 @@ const LABEL_UNIT_NORM: Record<string, string> = {
 
 /** Assign a label:value pair to the correct VesselData field */
 export function assignSpec(vessel: VesselData, label: string, value: string): void {
-  let l = label.toLowerCase().trim();
+  // Strip trailing punctuation (colon, semicolon, period, comma) and whitespace
+  // BEFORE pattern matching. Many DOM labels arrive as "Length:" / "Price:" /
+  // "Builder:" which previously broke exact-match patterns like "^length$" and
+  // "^price$" and forced substring patterns to do extra work.
+  let l = label.toLowerCase().trim().replace(/[:;.]+$/, "").trim();
   const v = clean(value);
   if (!v || v === "—" || v === "-" || v === "n/a" || l.length < 2) return;
 

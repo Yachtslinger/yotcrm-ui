@@ -274,14 +274,49 @@ async function genericScrape(url: string): Promise<VesselData> {
 
   // DOM specs
   $("dt").each((_, el) => assignSpec(vessel, $(el).text(), $(el).next("dd").text()));
+
+  // Table rows — skip leading empty/icon-only cells so layouts like
+  // <tr><td><img></td><td>LOA:</td><td>77.7m</td></tr> still resolve to
+  // label="LOA:" value="77.7m" (Yacht-Zoo pattern).
   $("table tr").each((_, row) => {
     const cells = $(row).find("th, td");
-    if (cells.length >= 2) assignSpec(vessel, cells.eq(0).text(), cells.eq(1).text());
+    if (cells.length < 2) return;
+    // Find first non-empty cell (treats img-only / whitespace cells as empty)
+    let i = 0;
+    while (i < cells.length && !cells.eq(i).text().trim()) i++;
+    if (i + 1 >= cells.length) return;
+    assignSpec(vessel, cells.eq(i).text(), cells.eq(i + 1).text());
   });
-  // key-specs pattern: <div><strong>LOA</strong><span>34.13m</span></div>
-  $(".key-specs div, .specs-grid div, .vessel-specs div").each((_, el) => {
-    const label = $(el).find("strong, b, .label, .spec-label").first().text();
-    const value = $(el).find("span, .value, .spec-value").first().text();
+
+  // Schema.org microdata — <li itemtype="...PropertyValue">
+  // Pattern used by SYS (yw-spec) and many BoatsGroup-style sites.
+  $("[itemtype*='PropertyValue']").each((_, el) => {
+    const $el = $(el);
+    const label = $el.find("[itemprop='name']").first().text();
+    const value = $el.find("[itemprop='value']").first().text();
+    if (label && value) assignSpec(vessel, label, value);
+  });
+
+  // Class-based label/value sibling containers — covers a broad set of
+  // brokerage layouts that don't use semantic <dl> or <table>:
+  //   <li><span class="description">Beam</span><span class="value">11.8m</span></li>   (SuperYachts Monaco)
+  //   <div class="yachtSPEC"><span class="label">Beam</span><div class="result">11.55m</div></div>   (Bluewater)
+  //   <div class="spec-grid__item"><span class="spec-title">Builder</span><p class="spec">Sanlorenzo</p></div>   (Cecil Wright)
+  $(
+    ".key-specs div, .specs-grid div, .vessel-specs div, " +
+    ".spec-grid__item, .spec-item, .yachtSPEC, .yacht-spec, " +
+    ".specifications li, .specifications > div, " +
+    "ul.specs li, ol.specs li, .specs > li, .specs > div"
+  ).each((_, el) => {
+    const $el = $(el);
+    const label = $el
+      .find("strong, b, .label, .spec-label, .spec-title, .title, .caps, .description")
+      .first()
+      .text();
+    const value = $el
+      .find(".value, .result, .spec-value, .spec-data, p.spec, .spec")
+      .first()
+      .text();
     if (label && value) assignSpec(vessel, label, value);
   });
   // strong+br pattern: <p><strong>Label</strong><br/>Value<br/>...</p>
