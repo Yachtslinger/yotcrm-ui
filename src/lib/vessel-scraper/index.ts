@@ -163,31 +163,114 @@ async function genericScrape(url: string): Promise<VesselData> {
       : ogDesc;
   }
 
-  // JSON-LD
+  // JSON-LD — flatten across nested @graph wrappers, then walk every node.
+  // Covers: name, image, additionalProperty, offers (formatted), manufacturer,
+  // brand, productionDate, speed (QV), weight (QV).
+  const jsonLdNodes: Record<string, unknown>[] = [];
+  const collect = (raw: unknown): void => {
+    if (!raw) return;
+    if (Array.isArray(raw)) { for (const x of raw) collect(x); return; }
+    if (typeof raw !== "object") return;
+    const obj = raw as Record<string, unknown>;
+    if (obj["@graph"]) collect(obj["@graph"]);
+    else jsonLdNodes.push(obj);
+  };
   $('script[type="application/ld+json"]').each((_, el) => {
-    try {
-      const json = JSON.parse($(el).text());
-      const nodes = Array.isArray(json) ? json : [json];
-      for (const node of nodes) {
-        if (!node) continue;
-        if (node.name && !vessel.name) vessel.name = cleanHeadline(String(node.name)) || "";
-        if (node.image) {
-          const imgs = Array.isArray(node.image) ? node.image : [node.image];
-          for (const img of imgs) {
-            const src = typeof img === "string" ? img : (img as Record<string, string>)?.url || "";
-            if (src && /^https?:\/\//i.test(src)) vessel.images.push({ src, alt: "" });
-          }
-        }
-        const props = Array.isArray(node.additionalProperty)
-          ? (node.additionalProperty as { name?: string; value?: string }[]) : [];
-        for (const p of props) {
-          if (p.name && p.value) assignSpec(vessel, p.name, String(p.value));
-        }
-        const offers = (node.offers as Record<string, unknown>) || {};
-        if (offers.price && !vessel.price) vessel.price = String(offers.price);
-      }
-    } catch { /* skip */ }
+    try { collect(JSON.parse($(el).text())); } catch { /* skip */ }
   });
+
+  // Read a name from either a string or an Organization/Brand-like object.
+  const orgName = (v: unknown): string => {
+    if (typeof v === "string") return v;
+    if (v && typeof v === "object") {
+      const n = (v as Record<string, unknown>).name;
+      if (typeof n === "string") return n;
+    }
+    return "";
+  };
+  // Format JSON-LD offer price into a display string with currency symbol.
+  const formatPrice = (price: unknown, currency: unknown): string => {
+    if (price == null || price === "") return "";
+    const num = typeof price === "number"
+      ? price
+      : parseFloat(String(price).replace(/[^\d.]/g, ""));
+    if (!isFinite(num) || num <= 0) return "";
+    const cur = typeof currency === "string" ? currency.toUpperCase() : "";
+    const sym: Record<string, string> = { USD: "$", EUR: "€", GBP: "£" };
+    const prefix = sym[cur] || (cur ? `${cur} ` : "$");
+    return `${prefix}${num.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+  };
+
+  for (const node of jsonLdNodes) {
+    // Name
+    if (node.name && !vessel.name && typeof node.name === "string") {
+      vessel.name = cleanHeadline(node.name) || "";
+    }
+    // Images (string | ImageObject | array)
+    if (node.image) {
+      const imgs = Array.isArray(node.image) ? node.image : [node.image];
+      for (const img of imgs) {
+        const src = typeof img === "string"
+          ? img
+          : (img as Record<string, string>)?.url
+            || (img as Record<string, string>)?.contentUrl
+            || "";
+        if (src && /^https?:\/\//i.test(src)) vessel.images.push({ src, alt: "" });
+      }
+    }
+    // additionalProperty (PropertyValue[])
+    const props = Array.isArray(node.additionalProperty)
+      ? (node.additionalProperty as { name?: string; value?: unknown }[]) : [];
+    for (const p of props) {
+      if (p.name && p.value != null && p.value !== "") {
+        assignSpec(vessel, p.name, String(p.value));
+      }
+    }
+    // offers (Offer | Offer[])
+    if (node.offers) {
+      const offerNodes = Array.isArray(node.offers) ? node.offers : [node.offers];
+      for (const o of offerNodes) {
+        if (!o || typeof o !== "object") continue;
+        const offer = o as Record<string, unknown>;
+        if (!vessel.price && offer.price != null) {
+          const formatted = formatPrice(offer.price, offer.priceCurrency);
+          if (formatted) vessel.price = formatted;
+        }
+      }
+    }
+    // builder — manufacturer first, then brand fallback
+    if (!vessel.builder) {
+      const b = orgName(node.manufacturer) || orgName(node.brand);
+      if (b) vessel.builder = b;
+    }
+    // year — productionDate / vehicleModelDate / modelDate
+    if (!vessel.year) {
+      const dateStr = String(node.productionDate || node.vehicleModelDate || node.modelDate || "");
+      const yMatch = dateStr.match(/\b(19|20)\d{2}\b/);
+      if (yMatch) {
+        const y = parseInt(yMatch[0], 10);
+        if (y > 1900 && y <= new Date().getFullYear() + 10) vessel.year = y;
+      }
+    }
+    // speed — QuantitativeValue or array; route by name through assignSpec
+    if (node.speed) {
+      const speeds = Array.isArray(node.speed) ? node.speed : [node.speed];
+      for (const s of speeds) {
+        if (!s || typeof s !== "object") continue;
+        const qv = s as Record<string, unknown>;
+        const n = typeof qv.name === "string" ? qv.name : "";
+        const v = qv.value != null ? String(qv.value) : "";
+        if (n && v) assignSpec(vessel, n, v);
+      }
+    }
+    // weight — QuantitativeValue (typically Gross Tonnage)
+    if (node.weight && typeof node.weight === "object") {
+      const wv = node.weight as Record<string, unknown>;
+      const n = typeof wv.name === "string" ? wv.name : "Gross Tonnage";
+      const v = wv.value != null ? String(wv.value) : "";
+      if (v) assignSpec(vessel, n, v);
+    }
+  }
 
   // DOM specs
   $("dt").each((_, el) => assignSpec(vessel, $(el).text(), $(el).next("dd").text()));
