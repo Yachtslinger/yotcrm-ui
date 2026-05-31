@@ -1,6 +1,94 @@
 # YotCRM (YotBot) — Session Handoff
 
-_Last updated: 2026-05-25_
+_Last updated: 2026-05-31_
+
+---
+
+## ▶ THIS SESSION (2026-05-31) — test pass results + revised plan
+
+### Test pass — 23 URLs through prod `/api/brochures/preview`
+
+Pipeline exercised all 3 layers (structured parse → mineFromText → aiExtractSpecs).
+URLs scored 0/1/2 across 6 fields = /12. PASS ≥9 · PARTIAL 5–8 · FAIL <5.
+
+| Group | n | PASS | PARTIAL | FAIL | avg |
+|------:|---:|---:|---:|---:|---:|
+| Dedicated (baseline)  | 7  | 4 | 1 | 2 | 7.3/12 |
+| Generic fallback      | 16 | 1 | 9 | 6 | 4.6/12 |
+
+Results JSON: `/tmp/scraper_testpass_results.json` (not in repo; regen with the
+runner used this session).
+
+**The one PASS on generic (Royal Yacht International, 11/12)** proves the thesis
+— when sites publish complete JSON-LD, the existing fallback nails them.
+
+### Site-list changes vs the prior 33-site table
+
+Removed (5 sites, user decision this session — not in regular use after all):
+HMY (was already CF-flagged), David Seal Yachts, Yacht Broker House, G-Yachts,
+Arcon Yachts.
+
+**Newly-confirmed Cloudflare-blocked (drop, same precedent as YachtWorld/HMY):**
+Galati Yacht Sales, Boats.com, Ocean Independence, Merle Wood.
+
+Net target list shrinks from 33 → ~24, of which the generic-fallback set is now:
+Y.CO, Italian Yacht Group, SuperYachts Monaco, YPI, Cecil Wright, Royal Yacht
+International, Gilman, Yacht-Zoo, Bluewater, YATCO, Boats.com (CF), Moran, SYS,
+TWW Yachts (not tested), Yachtbuyer (provider-thin).
+
+### Diagnostic finding — JSON-LD parsing has 6 fixable bugs
+
+Probing raw HTML for the PARTIAL sites surfaced one dominant pattern: most have
+**rich, complete JSON-LD** that the current `genericScrape()` mishandles. Fixes:
+
+1. **Unwrap `@graph`** — common JSON-LD pattern (Y.CO, IYG, YATCO wrap their
+   `Product`/`Vehicle` node inside `@graph`). Current code never recurses, so
+   walks past the data entirely.
+2. **Format JSON-LD price** — `offers.price` lands in `vessel.price` as a raw
+   number like `"74000000"` with no currency. Should use `priceCurrency` to
+   format as `"€74,000,000"`.
+3. **Read `manufacturer` / `brand`** → `vessel.builder` (currently ignored;
+   Y.CO, Moran, IYG all expose this).
+4. **Read `productionDate`** → `vessel.year` (currently ignored).
+5. **Read `speed` QuantitativeValue** → max/cruising speed.
+6. **Read `weight` QuantitativeValue** → gross tonnage.
+
+A single PR fixing these likely lifts **Y.CO, Moran, Italian Yacht Group, YATCO**
+into PASS — four sites, one file, no per-site providers.
+
+### Dedicated-provider regressions surfaced
+
+- **SuperYachtTimes** — used to scrape; now 403s from Railway. Anti-bot
+  upgrade on their side.
+- **BoatInternational** — provider returns name+desc+1 image, no price/LOA/specs.
+  Page format likely changed; provider needs a look.
+- **Fraser** — Axioma URL stale (listing sold). Provider correctly errors with
+  "no yacht found" — not a bug, but confirms dedicated providers reject unknown
+  listings rather than returning garbage.
+
+### Coverage-table corrections (vs the table further down this doc)
+
+The "12 wired / 20 untested" tally in the locked-plan section is **stale**.
+Reality: 19 providers wired in `vessel-scraper/index.ts` (boattrader, oceanking,
+ruyachts, superyachtfan, vandervalk, yachtslinger are also wired but not listed).
+The 20-untested set is correct — those are the ones falling through to
+`genericScrape()`.
+
+`yachtworld.ts` is **already de-wired from the router** — the file exists but is
+not imported. Step 4 of the locked plan is just deleting the orphan file + the
+stale router comment (which still names Burgess/Fraser/N&J as "fall through" even
+though they now have providers).
+
+### Revised priority order
+
+1. **Generic JSON-LD hardening PR** (this session, in progress) — fixes the 6
+   bugs above. Re-test after deploy to confirm uplift.
+2. **DOM-pattern hardening** for Group B sites (no JSON-LD: Gilman, Yacht-Zoo,
+   SuperYachts Monaco, Cecil Wright, SYS) — broader spec-row selectors.
+3. **Dedicated providers** only for sites that survive (1) and (2) still thin.
+4. **Fix BoatInternational + SuperYachtTimes provider regressions.**
+5. **Retire YachtWorld file + clean router comment** (formerly Step 4).
+6. **Audit `campaign/providers` vs `vessel-scraper/providers`** drift.
 
 ---
 
