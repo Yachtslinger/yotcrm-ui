@@ -1,94 +1,125 @@
 # YotCRM (YotBot) — Session Handoff
 
-_Last updated: 2026-05-31_
+_Last updated: 2026-05-31 (Round 3)_
 
 ---
 
-## ▶ THIS SESSION (2026-05-31) — test pass results + revised plan
+## ▶ THIS SESSION (2026-05-31) — three rounds, two scraper PRs shipped
 
-### Test pass — 23 URLs through prod `/api/brochures/preview`
+### Net outcome — generic fallback PASS rate went up 8×
 
-Pipeline exercised all 3 layers (structured parse → mineFromText → aiExtractSpecs).
-URLs scored 0/1/2 across 6 fields = /12. PASS ≥9 · PARTIAL 5–8 · FAIL <5.
-
-| Group | n | PASS | PARTIAL | FAIL | avg |
+| Round | n  | PASS | PARTIAL | FAIL | avg /12 |
 |------:|---:|---:|---:|---:|---:|
-| Dedicated (baseline)  | 7  | 4 | 1 | 2 | 7.3/12 |
-| Generic fallback      | 16 | 1 | 9 | 6 | 4.6/12 |
+| R1 baseline (`a9f1711`)            | 16 | **1** | 9 | 6 | 4.6 |
+| R2 after JSON-LD fix (`e03b613`)   | 16 | **5** | 5 | 6 | 5.8 |
+| R3 after DOM fix    (`a675d3a`)    | 16 | **8** | 3 | 5 | 7.0 |
 
-Results JSON: `/tmp/scraper_testpass_results.json` (not in repo; regen with the
-runner used this session).
+Of the 11 generic sites that respond with 200 (i.e. not Cloudflare-blocked):
+**8 PASS + 3 PARTIAL + 1 FAIL (YPI)**. Two PRs, ~150 lines of code, no new
+providers, no new dependencies. The remaining FAILs are entirely Cloudflare
+blocks + the YPI text-only case.
 
-**The one PASS on generic (Royal Yacht International, 11/12)** proves the thesis
-— when sites publish complete JSON-LD, the existing fallback nails them.
+### Per-site movement, all 23 URLs
 
-### Site-list changes vs the prior 33-site table
+```
+Denison                R1=12 → R2=12 → R3=12  PASS  (dedicated baseline)
+Edmiston               R1=12 → R2=12 → R3=12  PASS
+Fraser                 R1= 0 → R2= 0 → R3= 0  FAIL  (Axioma sold — stale URL)
+Burgess                R1=12 → R2=12 → R3=12  PASS
+IYC                    R1=10 → R2=10 → R3=10  PASS
+SuperYachtTimes        R1= 0 → R2= 0 → R3= 0  FAIL  (provider 403 — Cloudflare upgraded)
+BoatInternational      R1= 5 → R2= 6 → R3= 5  PARTIAL (provider regression)
+Y.CO                   R1= 6 → R2=11 → R3=11  PASS   (+5)
+ItalianYachtGroup      R1= 6 → R2=12 → R3=12  PASS   (+6) ⭐ perfect
+Galati                 R1= 0 → R2= 0 → R3= 0  FAIL   Cloudflare block
+SuperYachtsMonaco      R1= 5 → R2= 5 → R3= 5  PARTIAL (no JSON-LD; SPM uses an
+                                                       unrecognised <li> container)
+YPI                    R1= 4 → R2= 4 → R3= 4  FAIL   text-only specs, needs provider
+CecilWright            R1= 5 → R2= 5 → R3= 7  PARTIAL (+2: LOA, year, builder)
+RoyalYachtIntl         R1=11 → R2=12 → R3=12  PASS   (+1) ⭐ perfect
+Gilman                 R1= 7 → R2= 7 → R3=11  PASS   (+4) — colon-strip alone fixed it
+Yacht-Zoo              R1= 6 → R2= 6 → R3=11  PASS   (+5) — empty-leading-cell fix
+Bluewater              R1= 4 → R2= 4 → R3= 6  PARTIAL (+2: LOA, beam, year, engines)
+YATCO                  R1= 5 → R2=11 → R3=11  PASS   (+6) — JSON-LD fix
+Boats.com              R1= 0 → R2= 0 → R3= 0  FAIL   Cloudflare block
+Moran                  R1= 8 → R2=10 → R3=10  PASS   (+2)
+OceanIndependence      R1= 0 → R2= 0 → R3= 0  FAIL   Cloudflare block
+MerleWood              R1= 0 → R2= 0 → R3= 0  FAIL   Cloudflare block
+SYS                    R1= 6 → R2= 6 → R3= 9  PASS   (+3) — schema.org microdata fix
+```
 
-Removed (5 sites, user decision this session — not in regular use after all):
-HMY (was already CF-flagged), David Seal Yachts, Yacht Broker House, G-Yachts,
-Arcon Yachts.
+### Two scraper PRs landed this session
 
-**Newly-confirmed Cloudflare-blocked (drop, same precedent as YachtWorld/HMY):**
-Galati Yacht Sales, Boats.com, Ocean Independence, Merle Wood.
+**`e03b613` — fix(scraper): harden generic JSON-LD parsing**
+- Unwrap `@graph` recursively (was the #1 root cause; Y.CO, IYG, YATCO all use it).
+- Format `offers.price` with currency from `priceCurrency` (`"74000000"` →
+  `"€74,000,000"`).
+- Handle `offers` as both Offer and Offer[].
+- Read `manufacturer.name` / `brand.name` → builder.
+- Read `productionDate` / `vehicleModelDate` / `modelDate` → year.
+- Read `speed` QuantitativeValue (object or array) → routed via assignSpec
+  by name → maxSpeed / cruiseSpeed.
+- Read `weight` QuantitativeValue → typically grossTonnage.
+- Read ImageObject `contentUrl` as well as `url`.
 
-Net target list shrinks from 33 → ~24, of which the generic-fallback set is now:
-Y.CO, Italian Yacht Group, SuperYachts Monaco, YPI, Cecil Wright, Royal Yacht
-International, Gilman, Yacht-Zoo, Bluewater, YATCO, Boats.com (CF), Moran, SYS,
-TWW Yachts (not tested), Yachtbuyer (provider-thin).
+**`a675d3a` — fix(scraper): harden DOM spec extraction for non-JSON-LD sites**
+- **`assignSpec`: strip trailing punctuation (`:` `;` `.`) from labels.** This
+  is the highest-leverage one-line fix in the codebase — it lifted Gilman from
+  PARTIAL 7 to PASS 11 by itself. Patterns like `"^length$"` and `"^price$"`
+  were silently failing whenever DOM labels arrived as `"Length:"` / `"Price:"`.
+- Table-row scanner: skip leading empty/icon-only cells (Yacht-Zoo pattern).
+- Schema.org microdata loop: walk `[itemtype*='PropertyValue']` with
+  `[itemprop='name']` / `[itemprop='value']` children (SYS, BoatsGroup-style).
+- Broader DOM label/value selectors:
+  added `.spec-grid__item` (Cecil Wright), `.yachtSPEC` (Bluewater),
+  `.specifications li/div`, `ul.specs li`, `ol.specs li`, `.specs > *`.
+  Broadened label-side children to include `.spec-title / .caps / .description`
+  and value-side to include `.result / .spec-data / p.spec`.
 
-### Diagnostic finding — JSON-LD parsing has 6 fixable bugs
+### Cloudflare-blocked sites — final drop list (joining YachtWorld/HMY)
 
-Probing raw HTML for the PARTIAL sites surfaced one dominant pattern: most have
-**rich, complete JSON-LD** that the current `genericScrape()` mishandles. Fixes:
+After this session: **Galati, Boats.com, Ocean Independence, Merle Wood** —
+all confirmed 403 from Railway. Combined with YachtWorld and HMY, these 6 sites
+are out of server-side coverage. Same precedent: treat as known gap, not a bug.
 
-1. **Unwrap `@graph`** — common JSON-LD pattern (Y.CO, IYG, YATCO wrap their
-   `Product`/`Vehicle` node inside `@graph`). Current code never recurses, so
-   walks past the data entirely.
-2. **Format JSON-LD price** — `offers.price` lands in `vessel.price` as a raw
-   number like `"74000000"` with no currency. Should use `priceCurrency` to
-   format as `"€74,000,000"`.
-3. **Read `manufacturer` / `brand`** → `vessel.builder` (currently ignored;
-   Y.CO, Moran, IYG all expose this).
-4. **Read `productionDate`** → `vessel.year` (currently ignored).
-5. **Read `speed` QuantitativeValue** → max/cruising speed.
-6. **Read `weight` QuantitativeValue** → gross tonnage.
+### Remaining work for next session (in priority order)
 
-A single PR fixing these likely lifts **Y.CO, Moran, Italian Yacht Group, YATCO**
-into PASS — four sites, one file, no per-site providers.
+1. **SuperYachts Monaco residual.** Still 0 specs after the DOM fix. Their
+   `<li>` containers are likely missing the `.specifications`/`.specs` parent
+   that my broadened selector targets. Probe `[class*='spec']` containers and
+   add the actual class. Should be a one-line selector addition.
+2. **Bluewater residual.** R3 picked up LOA/beam/year/engines but still no
+   price, no builder, no images. Worth a 10-minute look at what container the
+   builder lives in.
+3. **CecilWright residual.** R3 picked up LOA/year/builder but still no beam,
+   no price, no images. Same kind of polish.
+4. **BoatInternational provider regression.** Already had a dedicated provider,
+   but it returns only name/desc/1 image now (5/12, was 8/12-ish before).
+   Page format probably changed since the provider was written.
+5. **SuperYachtTimes provider regression.** Now 403s from Railway. Either an
+   anti-bot upgrade on their end or a stale UA/header on ours. Probably needs
+   the same kind of "looks-like-browser" header set Burgess uses.
+6. **YPI custom provider.** Specs are in unstructured running text on YPI;
+   no DOM container holds them. Would need either a YPI-specific provider with
+   text-mining regex, or improvements to the `mineFromText` layer in
+   `utils.ts`. Lower priority — single site, niche brokerage.
+7. **Retire YachtWorld file + clean stale router comment** (still pending
+   from the original locked plan).
+8. **Audit `campaign/providers/` vs `vessel-scraper/providers/` drift** (still
+   pending from the original locked plan).
 
-### Dedicated-provider regressions surfaced
+### Files touched this session
+- `src/lib/vessel-scraper/index.ts` — JSON-LD walker + DOM selectors (~150 lines)
+- `src/lib/vessel-scraper/utils.ts` — colon-strip in `assignSpec` (~1 line)
+- `SESSION_HANDOFF.md` — this file
 
-- **SuperYachtTimes** — used to scrape; now 403s from Railway. Anti-bot
-  upgrade on their side.
-- **BoatInternational** — provider returns name+desc+1 image, no price/LOA/specs.
-  Page format likely changed; provider needs a look.
-- **Fraser** — Axioma URL stale (listing sold). Provider correctly errors with
-  "no yacht found" — not a bug, but confirms dedicated providers reject unknown
-  listings rather than returning garbage.
-
-### Coverage-table corrections (vs the table further down this doc)
-
-The "12 wired / 20 untested" tally in the locked-plan section is **stale**.
-Reality: 19 providers wired in `vessel-scraper/index.ts` (boattrader, oceanking,
-ruyachts, superyachtfan, vandervalk, yachtslinger are also wired but not listed).
-The 20-untested set is correct — those are the ones falling through to
-`genericScrape()`.
-
-`yachtworld.ts` is **already de-wired from the router** — the file exists but is
-not imported. Step 4 of the locked plan is just deleting the orphan file + the
-stale router comment (which still names Burgess/Fraser/N&J as "fall through" even
-though they now have providers).
-
-### Revised priority order
-
-1. **Generic JSON-LD hardening PR** (this session, in progress) — fixes the 6
-   bugs above. Re-test after deploy to confirm uplift.
-2. **DOM-pattern hardening** for Group B sites (no JSON-LD: Gilman, Yacht-Zoo,
-   SuperYachts Monaco, Cecil Wright, SYS) — broader spec-row selectors.
-3. **Dedicated providers** only for sites that survive (1) and (2) still thin.
-4. **Fix BoatInternational + SuperYachtTimes provider regressions.**
-5. **Retire YachtWorld file + clean router comment** (formerly Step 4).
-6. **Audit `campaign/providers` vs `vessel-scraper/providers`** drift.
+### Test artefacts (NOT in repo; regenerate with the same runner)
+- `/tmp/scraper_testpass_results.json` — Round 1 (baseline)
+- `/tmp/scraper_testpass_results_round2.json` — Round 2 (after JSON-LD fix)
+- `/tmp/scraper_testpass_results_round3.json` — Round 3 (after DOM fix)
+- `/tmp/html_cache.pkl` — cached raw HTML for 12 sites (for offline probing)
+- The runner is in the Python REPL state from this session; reproduce by
+  driving `POST /api/brochures/preview` with the SITES list from the chat.
 
 ---
 
