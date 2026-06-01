@@ -302,11 +302,19 @@ async function genericScrape(url: string): Promise<VesselData> {
   //   <li><span class="description">Beam</span><span class="value">11.8m</span></li>   (SuperYachts Monaco)
   //   <div class="yachtSPEC"><span class="label">Beam</span><div class="result">11.55m</div></div>   (Bluewater)
   //   <div class="spec-grid__item"><span class="spec-title">Builder</span><p class="spec">Sanlorenzo</p></div>   (Cecil Wright)
+  //
+  // Also: structural match on bare <li> / <div> that contains BOTH a label-side
+  // and value-side child. SuperYachts Monaco uses an unclassed <ul><li> for its
+  // spec sheet; a nav <li> won't have both .description and .value as siblings,
+  // so the structural filter is self-protective without needing a parent class.
   $(
     ".key-specs div, .specs-grid div, .vessel-specs div, " +
     ".spec-grid__item, .spec-item, .yachtSPEC, .yacht-spec, " +
     ".specifications li, .specifications > div, " +
-    "ul.specs li, ol.specs li, .specs > li, .specs > div"
+    "ul.specs li, ol.specs li, .specs > li, .specs > div, " +
+    "li:has(> .description):has(> .value), " +
+    "li:has(> .label):has(> .value), " +
+    "div:has(> .description):has(> .value)"
   ).each((_, el) => {
     const $el = $(el);
     const label = $el
