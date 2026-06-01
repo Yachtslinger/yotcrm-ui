@@ -299,32 +299,48 @@ async function genericScrape(url: string): Promise<VesselData> {
 
   // Class-based label/value sibling containers — covers a broad set of
   // brokerage layouts that don't use semantic <dl> or <table>:
-  //   <li><span class="description">Beam</span><span class="value">11.8m</span></li>   (SuperYachts Monaco)
   //   <div class="yachtSPEC"><span class="label">Beam</span><div class="result">11.55m</div></div>   (Bluewater)
   //   <div class="spec-grid__item"><span class="spec-title">Builder</span><p class="spec">Sanlorenzo</p></div>   (Cecil Wright)
-  //
-  // Also: structural match on bare <li> / <div> that contains BOTH a label-side
-  // and value-side child. SuperYachts Monaco uses an unclassed <ul><li> for its
-  // spec sheet; a nav <li> won't have both .description and .value as siblings,
-  // so the structural filter is self-protective without needing a parent class.
   $(
     ".key-specs div, .specs-grid div, .vessel-specs div, " +
     ".spec-grid__item, .spec-item, .yachtSPEC, .yacht-spec, " +
     ".specifications li, .specifications > div, " +
-    "ul.specs li, ol.specs li, .specs > li, .specs > div, " +
-    "li:has(> .description):has(> .value), " +
-    "li:has(> .label):has(> .value), " +
-    "div:has(> .description):has(> .value)"
+    "ul.specs li, ol.specs li, .specs > li, .specs > div"
   ).each((_, el) => {
     const $el = $(el);
     const label = $el
-      .find("strong, b, .label, .spec-label, .spec-title, .title, .caps, .description")
+      .find("strong, b, .label, .spec-label, .spec-title, .title, .caps")
       .first()
       .text();
     const value = $el
       .find(".value, .result, .spec-value, .spec-data, p.spec, .spec")
       .first()
       .text();
+    if (label && value) assignSpec(vessel, label, value);
+  });
+
+  // Structural label/value pairs — class-agnostic. Covers SuperYachts Monaco's
+  // bare <ul><li> spec sheet where the parent has no spec-y class. Restricted
+  // to DIRECT children only (`.children()` not `.find()`) so a deeply-nested
+  // body container labelled `.description` somewhere in the page doesn't get
+  // grabbed as a label. The `:has()` guard plus direct-child read keeps this
+  // narrow enough not to false-match nav lists.
+  $(
+    "li:has(> .description):has(> .value), " +
+    "div:has(> .description):has(> .value)"
+  ).each((_, el) => {
+    const $el = $(el);
+    const label = $el.children(".description").first().text();
+    const value = $el.children(".value").first().text();
+    if (label && value) assignSpec(vessel, label, value);
+  });
+  $(
+    "li:has(> .label):has(> .value), " +
+    "div:has(> .label):has(> .value)"
+  ).each((_, el) => {
+    const $el = $(el);
+    const label = $el.children(".label").first().text();
+    const value = $el.children(".value").first().text();
     if (label && value) assignSpec(vessel, label, value);
   });
   // strong+br pattern: <p><strong>Label</strong><br/>Value<br/>...</p>
