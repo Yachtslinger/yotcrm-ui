@@ -82,6 +82,47 @@ After this session: **Galati, Boats.com, Ocean Independence, Merle Wood** —
 all confirmed 403 from Railway. Combined with YachtWorld and HMY, these 6 sites
 are out of server-side coverage. Same precedent: treat as known gap, not a bug.
 
+### Test-set changes (later in session)
+
+- **Galati removed** from the test set. It's already in the Cloudflare-block
+  drop list, so this is a cleanup — not a functional change.
+- **Yachtbuyer added** as a DEDICATED baseline (already has a provider that
+  intentionally skips images due to source watermarking).
+- **Two charter sites added** (YachtCharterFleet, CharterWorld) — flagged as
+  `CHARTER` kind, not GENERIC. The brochure scraper was built for sale
+  listings; testing charter URLs through it was a deliberate scope probe to
+  see what the existing fallback already handles.
+
+### Surprise finding — charter sites scrape vessel metadata for free
+
+| Site | Score | What worked | What didn't |
+|---|---|---|---|
+| **YachtCharterFleet** | 9/12 PASS | LOA, beam, draft, year, builder, engines, images, desc | No price (charter is per-week) |
+| **CharterWorld**      | 9/12 PASS | LOA, beam, builder, engines, 66 images, 6000 char desc | No price (same reason), no year |
+
+**Why this matters.** Both charter sites returned essentially complete vessel
+metadata because yacht specs (LOA, builder, etc.) are the same data regardless
+of whether a listing is for sale or for charter. The only "missing" field is
+price — and that's not really missing, charter pricing is a different field
+entirely (weekly rate, currency, charter areas, crew, guest cabins, etc).
+
+**If charter ever moves in-scope**, the path forward is NOT a separate scraper.
+It's adding charter-specific fields to `VesselData` (`charterRatePerWeek`,
+`charterAreas`, `crewCount`, `guestCabins`) and extending the extraction
+layers to populate them. The vessel-side data already lands correctly.
+
+### Yachtbuyer — one real gap surfaced
+
+- **8/12 PARTIAL** under the test rubric, but two of the missing points are
+  scoring artifacts:
+  - N1: my scorer flags "BELLA LUNA Yacht For Sale" as a junk name because
+    the JUNK regex matches the "Yacht For Sale" suffix. Real name extraction
+    is fine; the provider just doesn't strip the SEO suffix.
+  - I0: intentional — provider explicitly skips images (watermarked source).
+- **Real gap:** `builder` returned empty even though the URL slug is
+  `monte-carlo-yachts`. The provider isn't extracting builder from the
+  page (or from the slug). Worth a 5-minute look next session.
+
 ### Remaining work for next session (in priority order)
 
 1. **SuperYachts Monaco residual.** Still 0 specs after the DOM fix. Their
@@ -93,20 +134,30 @@ are out of server-side coverage. Same precedent: treat as known gap, not a bug.
    builder lives in.
 3. **CecilWright residual.** R3 picked up LOA/year/builder but still no beam,
    no price, no images. Same kind of polish.
-4. **BoatInternational provider regression.** Already had a dedicated provider,
+4. **Yachtbuyer provider: extract `builder`.** The slug holds the info
+   (`monte-carlo-yachts/for-sale/bella-luna-…`); the page presumably does
+   too. Also consider stripping " Yacht For Sale" suffix from the title so
+   `vessel.name` is the actual yacht name. Small provider edit.
+5. **Charter scope decision.** YachtCharterFleet + CharterWorld already
+   scrape vessel metadata cleanly through the existing fallback. If charter
+   should be in scope, add `charterRate`, `charterAreas`, `crew`,
+   `guestCabins` to `VesselData` (and update extractors); the vessel-side
+   data is already landing. If charter is out of scope, the existing
+   "incidental" coverage doesn't hurt anything — leave it be.
+6. **BoatInternational provider regression.** Already had a dedicated provider,
    but it returns only name/desc/1 image now (5/12, was 8/12-ish before).
    Page format probably changed since the provider was written.
-5. **SuperYachtTimes provider regression.** Now 403s from Railway. Either an
+7. **SuperYachtTimes provider regression.** Now 403s from Railway. Either an
    anti-bot upgrade on their end or a stale UA/header on ours. Probably needs
    the same kind of "looks-like-browser" header set Burgess uses.
-6. **YPI custom provider.** Specs are in unstructured running text on YPI;
+8. **YPI custom provider.** Specs are in unstructured running text on YPI;
    no DOM container holds them. Would need either a YPI-specific provider with
    text-mining regex, or improvements to the `mineFromText` layer in
    `utils.ts`. Lower priority — single site, niche brokerage.
-7. **Retire YachtWorld file + clean stale router comment** (still pending
+9. **Retire YachtWorld file + clean stale router comment** (still pending
    from the original locked plan).
-8. **Audit `campaign/providers/` vs `vessel-scraper/providers/` drift** (still
-   pending from the original locked plan).
+10. **Audit `campaign/providers/` vs `vessel-scraper/providers/` drift** (still
+    pending from the original locked plan).
 
 ### Files touched this session
 - `src/lib/vessel-scraper/index.ts` — JSON-LD walker + DOM selectors (~150 lines)
