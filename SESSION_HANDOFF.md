@@ -1,6 +1,102 @@
 # YotCRM (YotBot) — Session Handoff
 
-_Last updated: 2026-05-31 (Round 3)_
+_Last updated: 2026-05-31 (Round 4)_
+
+---
+
+## ▶ LATEST UPDATE (2026-05-31, continuation) — Round 4: SPM fix + regression hunt
+
+### What shipped (two more commits, both build-clean)
+
+| SHA | Description |
+|---|---|
+| `79ed9ff` | fix(scraper): structural match for bare `<li>`/`<div>` spec containers |
+| `91fcb83` | fix(scraper): split structural pair matcher to avoid `.description` body false-match |
+
+### Round 4 — what changed vs Round 3
+
+| Site | R3 | R4 | Δ | Status |
+|---|---|---|---:|---|
+| **SuperYachts Monaco** | PARTIAL 5 | **PASS 9**  | +4 | ✓ target hit |
+| BoatInternational | PARTIAL 5 | PARTIAL 6 | +1 | incidental gain |
+| **CharterWorld** | PASS 9 | PARTIAL 7 | -2 | regression — fixed in `91fcb83` |
+| All others (22 sites) | — | — | 0 | unchanged |
+
+### How the regression happened (logged for the pattern)
+
+`79ed9ff` added `.description` to the general label-side `.find()` to support
+SPM's `<span class="description">Beam</span>` markup. But `.description` is
+*also* a common body-text container class on charter and brokerage sites.
+On CharterWorld, the general `.find()` descended into a deep `.description`
+prose container, grabbed the prose as a "label", substring-matched "length"
+somewhere inside it, and routed the adjacent value to the wrong field —
+which blocked the correctly-extracted LOA from staying set.
+
+`91fcb83` splits the structural-pair matching into its own loops that use
+`.children()` (direct children only) instead of `.find()` (any descendant).
+The `:has()` guards still catch SPM's bare `<ul><li>` pattern without
+false-matching on pages where `.description` is a body container deeper
+in the tree.
+
+### Verification status
+
+`91fcb83` is deployed (Railway uptime confirms it). The follow-up test pass
+confirming SPM stays at 9 PASS AND CharterWorld returns to 9 PASS was
+**not run before the chat ended**. It's a 30-second job for next session
+using the same runner.
+
+### Cumulative scoreboard (after 5 scraper commits this session)
+
+Across 25 URLs · 1 baseline of 7 dedicated + 16 generic + 2 charter:
+
+| Round  | Generic PASS | Generic PARTIAL | Generic FAIL | Generic avg |
+|------:|---:|---:|---:|---:|
+| R1 baseline           | 1 | 9 | 6 | 4.6/12 |
+| R2 (JSON-LD fix)      | 5 | 5 | 6 | 5.8/12 |
+| R3 (DOM fix)          | 8 | 3 | 5 | 7.0/12 |
+| R4 (SPM structural fix, regression-corrected) | **9** | 2 | 5 | ~7.4/12 (predicted) |
+
+### Next session first task (5 min)
+
+Run R4-confirm against this 6-site subset:
+SuperYachtsMonaco, CharterWorld, Y.CO, Moran, ItalianYachtGroup, YATCO.
+
+Pass criteria: SPM ≥ 9, CharterWorld ≥ 9, the other 4 unchanged at PASS.
+If clean → mark item #1 done in priority list, move to #2 (Bluewater).
+If not clean → diagnose before continuing down the list.
+
+### Updated priority list
+
+1. ~~**SuperYachts Monaco residual**~~ — fix shipped (`79ed9ff` + `91fcb83`),
+   pending R4-confirm next session.
+2. **Bluewater residual.** R4 still 6/12. Missing price, builder, images.
+   Worth a 10-minute look at what container the builder lives in.
+3. **CecilWright residual.** R4 still 7/12. Missing beam, price, images.
+4. **Yachtbuyer provider: extract `builder`.** Slug exposes it, page
+   presumably does too. Also strip " Yacht For Sale" SEO suffix from
+   `vessel.name`.
+5. **Charter scope decision.** YachtCharterFleet + CharterWorld scrape
+   vessel metadata cleanly. If charter is in-scope, extend `VesselData`
+   with charter-specific fields (`charterRate`, `charterAreas`, `crew`,
+   `guestCabins`). If out-of-scope, leave the incidental coverage.
+6. **BoatInternational provider regression.** Has a dedicated provider but
+   only returns name/desc/1 image (6/12 in R4). Page format likely changed.
+7. **SuperYachtTimes provider regression.** Now 403s from Railway.
+   Anti-bot upgrade on their end OR stale UA/header on ours.
+8. **YPI custom provider.** Specs in unstructured running text; needs
+   either YPI-specific text-mining or improvements to `mineFromText`.
+9. **Retire YachtWorld file + clean stale router comment** (still pending).
+10. **Audit `campaign/providers/` vs `vessel-scraper/providers/` drift**
+    (still pending).
+
+### Test artefacts (in /tmp, not in repo)
+
+- `scraper_testpass_results.json` — Round 1 (baseline)
+- `scraper_testpass_results_round2.json` — Round 2
+- `scraper_testpass_results_round3.json` — Round 3 (includes Yachtbuyer + charter adds)
+- `scraper_testpass_results_round4.json` — Round 4 (with the now-fixed CharterWorld regression)
+- `html_cache.pkl` — cached raw HTML for 12 sites for offline probing
+- `probe_*.py` — diagnostic scripts written this session
 
 ---
 
