@@ -1,6 +1,6 @@
 # YotCRM (YotBot) — Session Handoff
 
-_Last updated: 2026-06-01 (Round 5 — R4-confirm + Bluewater & Cecil Wright providers)_
+_Last updated: 2026-06-01 (Round 5 — R4-confirm + Bluewater, Cecil Wright, YachtBuyer)_
 
 ---
 
@@ -12,12 +12,20 @@ _Last updated: 2026-06-01 (Round 5 — R4-confirm + Bluewater & Cecil Wright pro
 | `1c8a21b` | feat(scraper): dedicated Bluewater provider |
 | `8ee3bb9` | fix(scraper): Bluewater images — bypass shared dedupeImages broker-filter |
 | `9ce5572` | feat(scraper): dedicated Cecil Wright provider |
+| `a423188` | fix(scraper): YachtBuyer builder + name suffix (JSON-LD; markup changed) |
 
 - **Item #1 (SPM) confirmed DONE.** R4-confirm ran clean on prod: SPM PASS 9,
   CharterWorld PASS 9 (that run), Y.CO 11 / Moran 9 / IYG 12 / YATCO 11.
 - **Item #2 (Bluewater) DONE.** 6/12 → **PASS 12/12**. See priority list.
 - **Item #3 (Cecil Wright) DONE.** 7/12 → **PASS 11/12** (ceiling — beam/draft
   not on page). Both new providers verified coexisting on prod.
+- **Item #4 (Yachtbuyer) DONE.** name + builder fixed via schema.org/Vehicle
+  JSON-LD (their `labelCopy` spec markup had changed). 8/12 is the ceiling —
+  images watermarked (excluded), no editorial description published.
+- **Heads-up:** YachtBuyer changing markup is a reminder that CSS-class-based
+  providers are brittle; JSON-LD (`@type` Vehicle/Product) is the durable
+  source where a site emits it. Worth auditing other dedicated providers that
+  rely on bespoke class names if their scores drift.
 
 ### Findings worth carrying forward (NEW)
 1. **`dedupeImages()` has a latent `broker`→`brokerage` false-match.** The
@@ -125,9 +133,19 @@ If not clean → diagnose before continuing down the list.
    58 photos). Specs via `.spec-grid__item`. **Beam/draft/engines are not
    published on the page**, so keyspecs caps at 1 → 11/12 is the ceiling for
    this listing, not a fixable gap. Verified on prod (ALCHEMIST).
-4. **Yachtbuyer provider: extract `builder`.** Slug exposes it, page
-   presumably does too. Also strip " Yacht For Sale" SEO suffix from
-   `vessel.name`.
+4. ~~**Yachtbuyer provider: extract `builder` + strip suffix.**~~ **DONE
+   2026-06-01** (commit `a423188`). Both targets fixed: name now `BELLA LUNA`
+   (SEO " Yacht For Sale" suffix stripped) and builder now `Monte Carlo Yachts`.
+   Root cause was bigger than expected — YachtBuyer **changed their spec
+   markup** (the old `strong.labelCopy` is gone), which had silently broken the
+   whole structured spec list. Fix parses their `schema.org/Vehicle` JSON-LD as
+   the primary source (name/builder/year/price — durable vs CSS churn) and
+   updates the spec selector to `li > span(label) + span.detail`. That also
+   restored beam/draft/engines/guests/staterooms + price €2,950,000.
+   **Score 8/12 is the ceiling here, not a gap:** images excluded by design
+   (watermarked), and YachtBuyer publishes **no editorial description** for
+   listings (it's a comparison/aggregator site — meta desc is SEO boilerplate).
+   Verified on prod (bella-luna-62529fb8).
 5. **Charter scope decision.** YachtCharterFleet + CharterWorld scrape
    vessel metadata cleanly. If charter is in-scope, extend `VesselData`
    with charter-specific fields (`charterRate`, `charterAreas`, `crew`,
