@@ -69,12 +69,12 @@ function dockMonthlyPerFt(port: string): { l: number; m: number; h: number } {
 }
 
 /* ─── Full deterministic budget builder ────────────────────────────────────── */
-// Minimum realistic crew by vessel size — scraper often under-counts (reads crew quarters, misses captain cabin etc.)
+// Minimum realistic crew — only enforced for true superyachts (35m+). Smaller vessels can be owner-operated.
 function minCrewForSize(m: number): number {
-  if (m >= 60) return 11; if (m >= 55) return 9;
-  if (m >= 50) return 8;  if (m >= 43) return 7;  // 140+ ft needs min 7
-  if (m >= 38) return 6;  if (m >= 32) return 5;
-  return 4;
+  if (m >= 60) return 10; if (m >= 55) return 8;
+  if (m >= 50) return 7;  if (m >= 43) return 6;
+  if (m >= 38) return 5;  if (m >= 35) return 4;
+  return 0; // < 35m (115ft): no minimum — owner can run it themselves
 }
 
 function buildBudget(v: Record<string,string>, port: string, style: string, hrs: number) {
@@ -91,19 +91,20 @@ function buildBudget(v: Record<string,string>, port: string, style: string, hrs:
   const hrsH = Math.round(hrs * 1.55);
 
   // ── Salaries ────────────────────────────────────────────────────────
+  // Named positions in priority order — only include up to cc positions
   const capM = captainMid(lm);
   const S = {
     cap:  { l: r5(capM*0.82), m: capM,            h: r5(capM*1.20) },
     eng:  { l: r5(capM*0.74*0.82), m: r5(capM*0.74), h: r5(capM*0.74*1.18) },
     chef: { l: r5(capM*0.62*0.82), m: r5(capM*0.62), h: r5(capM*0.62*1.18) },
     stew: { l: r5(capM*0.55*0.82), m: r5(capM*0.55), h: r5(capM*0.55*1.18) },
-    jr:   { l: 60_000,             m: 72_000,         h: 87_000 },
+    jr:   { l: 58_000,             m: 70_000,         h: 85_000 },
   };
-  const namedCt = Math.min(cc, 4);
-  const jrCt    = Math.max(0, cc - 4);
-  const salL = S.cap.l + S.eng.l + S.chef.l + S.stew.l + jrCt * S.jr.l;
-  const salM = S.cap.m + S.eng.m + S.chef.m + S.stew.m + jrCt * S.jr.m;
-  const salH = S.cap.h + S.eng.h + S.chef.h + S.stew.h + jrCt * S.jr.h;
+  const jrCt = Math.max(0, cc - 4);
+  // Only sum salaries for positions actually included (cc may be < 4)
+  const salL = (cc>=1?S.cap.l:0)+(cc>=2?S.eng.l:0)+(cc>=3?S.chef.l:0)+(cc>=4?S.stew.l:0)+jrCt*S.jr.l;
+  const salM = (cc>=1?S.cap.m:0)+(cc>=2?S.eng.m:0)+(cc>=3?S.chef.m:0)+(cc>=4?S.stew.m:0)+jrCt*S.jr.m;
+  const salH = (cc>=1?S.cap.h:0)+(cc>=2?S.eng.h:0)+(cc>=3?S.chef.h:0)+(cc>=4?S.stew.h:0)+jrCt*S.jr.h;
 
   // ── Other crew ──────────────────────────────────────────────────────
   const foodDailyMid = isLux ? 48 : 36;
@@ -131,7 +132,12 @@ function buildBudget(v: Record<string,string>, port: string, style: string, hrs:
   const fuel = { l: r5(hrsL*fuelGph*4.6), m: r5(hrs*fuelGph*5.0), h: r5(hrsH*fuelGph*5.3) };
   const dr   = dockMonthlyPerFt(port);
   const dock = { l: r5(lft*dr.l*12*1.28), m: r5(lft*dr.m*12*1.28), h: r5(lft*dr.h*12*1.28) };
-  const galley   = { l: r5(Math.max(45_000, lm*950)),  m: r5(Math.max(70_000, lm*1500)), h: r5(Math.max(110_000, lm*2400)) };
+  const galley   = {
+    // Floor scales with vessel size: 92ft private yacht ≠ 150ft charter yacht
+    l: r5(Math.max(18_000, lm * 680)),
+    m: r5(Math.max(28_000, lm * 1_050)),
+    h: r5(Math.max(50_000, lm * 1_800)),
+  };
   const interior = { l: r5(lm*(isLux?600:350)),  m: r5(lm*(isLux?1050:550)),  h: r5(lm*(isLux?1650:850)) };
   const agency   = { l: r1(lm*280),   m: r1(lm*480),   h: r1(lm*850) };
   const av       = { l: r1(lm*80),    m: r1(lm*160),   h: r1(lm*290) };
@@ -196,28 +202,31 @@ function buildBudget(v: Record<string,string>, port: string, style: string, hrs:
   };
   const mgmt = { l: r5(preMgmt.l*0.040), m: r5(preMgmt.m*0.062), h: r5(preMgmt.h*0.085) };
 
-  // ── Salary breakdown array ───────────────────────────────────────────
-  const jrNames = ["2nd Stewardess","Deckhand","2nd Deckhand","3rd Stewardess","Bosun","Additional Crew"];
-  const breakdown = [
+  // ── Salary breakdown array — only named positions actually filled ────
+  const allNamedPositions = [
     { role:"Captain",                     low:S.cap.l,  mid:S.cap.m,  high:S.cap.h  },
     { role:"Chief Engineer / First Mate", low:S.eng.l,  mid:S.eng.m,  high:S.eng.h  },
     { role:"Chef",                        low:S.chef.l, mid:S.chef.m, high:S.chef.h },
     { role:"Chief Stewardess",            low:S.stew.l, mid:S.stew.m, high:S.stew.h },
   ];
+  const jrNames = ["2nd Stewardess","Deckhand","2nd Deckhand","3rd Stewardess","Bosun","Additional Crew"];
+  const breakdown = allNamedPositions.slice(0, Math.min(cc, 4));
   for (let i = 0; i < jrCt; i++) {
     breakdown.push({ role: jrNames[i] || `Crew ${5+i}`, low:S.jr.l, mid:S.jr.m, high:S.jr.h });
   }
 
   return {
     lm, lft, yr, am, cc, hv, salL, salM, salH, breakdown,
-    // Per-crew cost rates passed to page for real-time crew adjustment
+    // Per-crew cost rates for real-time crew adjustment in UI
     perCrew: {
-      salJr:     { low: S.jr.l,  mid: S.jr.m,  high: S.jr.h  },
-      foodDaily: { low: 34,      mid: isLux ? 48 : 36, high: 65 },
-      health:    { low: 4_800,   mid: 6_200,   high: 8_500 },
-      travel:    { low: 3_500,   mid: 5_500,   high: 9_500 },
-      uniform:   { low: 1_100,   mid: 1_700,   high: 2_800 },
-      training:  { low: 1_600,   mid: 2_500,   high: 4_200 },
+      salJr:          { low: S.jr.l,  mid: S.jr.m,  high: S.jr.h  },
+      foodDaily:      { low: 34,      mid: isLux ? 48 : 36, high: 65 },
+      health:         { low: 4_800,   mid: 6_200,   high: 8_500 },
+      travel:         { low: 3_500,   mid: 5_500,   high: 9_500 },
+      uniform:        { low: 1_100,   mid: 1_700,   high: 2_800 },
+      training:       { low: 1_600,   mid: 2_500,   high: 4_200 },
+      // Named positions in removal order (for slider going below base count)
+      namedSalaries:  allNamedPositions,
     },
     model: {
       crew: {

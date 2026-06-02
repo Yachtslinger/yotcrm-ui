@@ -355,7 +355,11 @@ export default function OwnershipPage() {
   // Crew adjustment state
   const [baseCrewCount, setBaseCrewCount] = React.useState(7);
   const [adjustCrewCount, setAdjustCrewCount] = React.useState(7);
-  type PerCrew = { salJr: Scenario; foodDaily: { low: number; mid: number; high: number }; health: Scenario; travel: Scenario; uniform: Scenario; training: Scenario };
+  type PerCrew = {
+    salJr: Scenario; foodDaily: { low: number; mid: number; high: number };
+    health: Scenario; travel: Scenario; uniform: Scenario; training: Scenario;
+    namedSalaries?: { role: string; low: number; mid: number; high: number }[];
+  };
   const [perCrewRates, setPerCrewRates] = React.useState<PerCrew | null>(null);
   // Optional extra positions (each adds to salaries + support costs)
   type ExtraPos = { key: string; label: string; salMid: number; checked: boolean };
@@ -482,26 +486,46 @@ export default function OwnershipPage() {
     }
   }
 
-  // Compute crew cost delta from slider and position toggles
+  // Compute crew cost delta — properly removes named positions when slider goes below base
   const crewDelta: Scenario = React.useMemo(() => {
     if (!perCrewRates) return { low: 0, mid: 0, high: 0 };
     const r5l = (n: number) => Math.round(n / 5000) * 5000;
-    // Slider delta
+
+    const supportPerCrew = {
+      low:  r5l(perCrewRates.foodDaily.low  * 365) + perCrewRates.health.low  + perCrewRates.travel.low  + perCrewRates.uniform.low  + perCrewRates.training.low,
+      mid:  r5l(perCrewRates.foodDaily.mid  * 365) + perCrewRates.health.mid  + perCrewRates.travel.mid  + perCrewRates.uniform.mid  + perCrewRates.training.mid,
+      high: r5l(perCrewRates.foodDaily.high * 365) + perCrewRates.health.high + perCrewRates.travel.high + perCrewRates.uniform.high + perCrewRates.training.high,
+    };
+
     const delta = adjustCrewCount - baseCrewCount;
-    const sliderDelta = {
-      low: delta * (perCrewRates.salJr.low + r5l(perCrewRates.foodDaily.low * 365) + perCrewRates.health.low + perCrewRates.travel.low + perCrewRates.uniform.low + perCrewRates.training.low),
-      mid: delta * (perCrewRates.salJr.mid + r5l(perCrewRates.foodDaily.mid * 365) + perCrewRates.health.mid + perCrewRates.travel.mid + perCrewRates.uniform.mid + perCrewRates.training.mid),
-      high: delta * (perCrewRates.salJr.high + r5l(perCrewRates.foodDaily.high * 365) + perCrewRates.health.high + perCrewRates.travel.high + perCrewRates.uniform.high + perCrewRates.training.high),
-    };
-    // Extra positions delta
-    const extraMid  = extraPositions.filter(p => p.checked).reduce((s, p) => s + p.salMid + r5l(perCrewRates.foodDaily.mid * 365) + perCrewRates.health.mid, 0);
-    const extraLow  = extraPositions.filter(p => p.checked).reduce((s, p) => s + Math.round(p.salMid * 0.82 / 5000) * 5000 + r5l(perCrewRates.foodDaily.low * 365) + perCrewRates.health.low, 0);
-    const extraHigh = extraPositions.filter(p => p.checked).reduce((s, p) => s + Math.round(p.salMid * 1.18 / 5000) * 5000 + r5l(perCrewRates.foodDaily.high * 365) + perCrewRates.health.high, 0);
-    return {
-      low:  sliderDelta.low  + extraLow,
-      mid:  sliderDelta.mid  + extraMid,
-      high: sliderDelta.high + extraHigh,
-    };
+    let d: Scenario = { low: 0, mid: 0, high: 0 };
+
+    if (delta < 0) {
+      // Removing positions — pull from the breakdown bottom-up (remove Chef before Engineer before Captain)
+      const named = perCrewRates.namedSalaries ?? [];
+      for (let i = baseCrewCount - 1; i >= adjustCrewCount; i--) {
+        const pos = named[i] ?? perCrewRates.salJr; // remove jr crew if beyond named positions
+        d.low  -= pos.low  + supportPerCrew.low;
+        d.mid  -= pos.mid  + supportPerCrew.mid;
+        d.high -= pos.high + supportPerCrew.high;
+      }
+    } else if (delta > 0) {
+      // Adding junior crew above base
+      d = {
+        low:  delta * (perCrewRates.salJr.low  + supportPerCrew.low),
+        mid:  delta * (perCrewRates.salJr.mid  + supportPerCrew.mid),
+        high: delta * (perCrewRates.salJr.high + supportPerCrew.high),
+      };
+    }
+
+    // Extra named position toggles
+    extraPositions.filter(p => p.checked).forEach(pos => {
+      d.low  += r5l(pos.salMid * 0.82) + supportPerCrew.low;
+      d.mid  += pos.salMid              + supportPerCrew.mid;
+      d.high += r5l(pos.salMid * 1.18) + supportPerCrew.high;
+    });
+
+    return d;
   }, [adjustCrewCount, baseCrewCount, perCrewRates, extraPositions]);
 
   // Grand totals computed from effective values
@@ -927,12 +951,12 @@ export default function OwnershipPage() {
                           <label className="text-xs" style={{ color: "var(--navy-400)" }}>Total Crew</label>
                           <span className="text-xs font-bold" style={{ color: "var(--foreground)" }}>{adjustCrewCount} crew</span>
                         </div>
-                        <input type="range" min={4} max={14} step={1} value={adjustCrewCount}
+                        <input type="range" min={1} max={14} step={1} value={adjustCrewCount}
                           onChange={e => setAdjustCrewCount(Number(e.target.value))}
                           style={{ width: "100%", accentColor: "#a78bfa" }}
                         />
                         <div style={{ display: "flex", justifyContent: "space-between" }}>
-                          <span style={{ fontSize: 10, color: "var(--navy-400)" }}>4</span>
+                          <span style={{ fontSize: 10, color: "var(--navy-400)" }}>1</span>
                           <span style={{ fontSize: 10, color: "var(--navy-400)" }}>model base: {baseCrewCount} · each add ≈ {fmt(
                             perCrewRates.salJr.mid +
                             Math.round(perCrewRates.foodDaily.mid * 365 / 5000) * 5000 +
