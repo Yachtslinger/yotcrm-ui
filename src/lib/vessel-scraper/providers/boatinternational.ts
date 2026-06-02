@@ -66,6 +66,29 @@ function parseBoatInternational(url: string, html: string): VesselData {
     } catch { /* skip */ }
   });
 
+  // ── 1b. Current markup (2026): BI dropped JSON-LD; specs are now
+  //         <li class="spec-block__list-item"><span class="spec-block__title">
+  //         Label:</span><span class="spec-block__data">value</span></li>.
+  //         This is the primary structured source now. ──────────────────────
+  $("li.spec-block__list-item").each((_, li) => {
+    const label = clean($(li).find(".spec-block__title").first().text()).replace(/:$/, "");
+    const value = clean($(li).find(".spec-block__data").first().text());
+    if (!label || !value) return;
+    if (/^name$/i.test(label)) { if (!vessel.name) vessel.name = value; return; }
+    assignSpec(vessel, label, value);
+  });
+
+  // Title carries name + builder + LOA + year:
+  // "AKULA yacht for sale (Rossinavi, 59.4m, 2024)"
+  const rawTitle = clean($("title").text());
+  const titleM = rawTitle.match(/^(.*?)\s+yacht\s+for\s+sale\s*\(([^,]+),\s*([\d.]+)\s*m,\s*(\d{4})\)/i);
+  if (titleM) {
+    if (!vessel.name) vessel.name = titleM[1].trim();
+    if (!vessel.builder) vessel.builder = titleM[2].trim();
+    if (!vessel.loa) vessel.loa = `${titleM[3]}m`;
+    if (!vessel.year) vessel.year = parseInt(titleM[4]);
+  }
+
   // ── 2. Name ──────────────────────────────────────────────────────────────
   if (!vessel.name) {
     vessel.name =
@@ -157,6 +180,20 @@ function parseBoatInternational(url: string, html: string): VesselData {
     });
 
     vessel.images = Array.from(imgSet.values()).map(src => ({ src, alt: vessel.name }));
+  }
+
+  // Sweep BI's CDN listing images from the raw HTML (gallery is lazy-hydrated,
+  // so <img src> alone misses most). Dedupe by the unique listing-asset id.
+  {
+    const byId = new Map<string, string>();
+    const re = /https:\/\/cdn\.boatinternational\.com\/convert\/listing\/[^\s"'\\)]+?\.(?:jpe?g|webp|png)/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(html)) !== null) {
+      const src = m[0];
+      const id = (src.match(/\/([0-9a-f]{8,}-[0-9a-f-]+)/i) || [src, src])[1];
+      if (!byId.has(id)) byId.set(id, src);
+    }
+    for (const src of byId.values()) vessel.images.push({ src, alt: vessel.name });
   }
 
   vessel.images = dedupeImages(vessel.images).filter(i =>
