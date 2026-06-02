@@ -27,6 +27,8 @@ import { scrapeCamperNicholsons } from "./providers/campernicholsons";
 import { scrapeNorthropJohnson }  from "./providers/northropjohnson";
 import { scrapeBluewater }      from "./providers/bluewater";
 import { scrapeCecilWright }    from "./providers/cecilwright";
+import { scrapeCharterWorld }   from "./providers/charterworld";
+import { scrapeYachtCharterFleet } from "./providers/yachtcharterfleet";
 
 // Provider registry — maps hostname patterns to scraper functions.
 // YachtWorld excluded — Cloudflare anti-bot blocks Railway IPs reliably.
@@ -57,6 +59,8 @@ const PROVIDERS: { pattern: RegExp; fn: Provider }[] = [
   { pattern: /northropandjohnson\.com/i,      fn: scrapeNorthropJohnson },
   { pattern: /bluewateryachting\.com/i,       fn: scrapeBluewater },
   { pattern: /cecilwright\.com/i,             fn: scrapeCecilWright },
+  { pattern: /charterworld\.com/i,            fn: scrapeCharterWorld },
+  { pattern: /yachtcharterfleet\.com/i,       fn: scrapeYachtCharterFleet },
   // Burgess, Ocean Independence, Fraser, Northrop & Johnson, YATCO, etc.
   // fall through to genericScrape() — JSON-LD + OG meta handles them well.
 ];
@@ -87,6 +91,15 @@ export async function scrapeVessel(url: string): Promise<VesselData> {
     aiText = [result.description, result.features?.join(". ")].filter(Boolean).join("\n\n");
   }
   await aiExtractSpecs(result, aiText);
+
+  // Charter normalisation: a charter listing has no asking price, so surface
+  // the per-week charter rate as the displayed price. Done once here so every
+  // downstream consumer (preview, brochure, ingest) shows charter pricing
+  // without per-consumer changes. Vessel specs already populated identically
+  // to a for-sale listing.
+  if (result.isCharter && !result.price && result.charterRate) {
+    result.price = result.charterRate;
+  }
 
   return result;
 }

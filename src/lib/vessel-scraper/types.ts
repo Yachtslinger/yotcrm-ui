@@ -176,6 +176,20 @@ export interface VesselData {
   // ── AI extraction metadata ────────────────────────────────────────────────
   aiExtracted?:    boolean;  // true if Layer 3 ran successfully
 
+  // ── Charter fields ────────────────────────────────────────────────────────
+  // Charter listings carry the same vessel specs as for-sale listings, but
+  // pricing is a different model (per-week rate, not an asking price) plus
+  // cruising areas / season. Populated by the charter providers
+  // (YachtCharterFleet, CharterWorld); empty on for-sale listings.
+  isCharter?:        boolean;  // true → render charter pricing block, not askingprice
+  charterRate?:      string;   // raw rate string as published, e.g. "€350,000 p/week"
+  charterRateLow?:   string;   // low-season / from rate, when a range is given
+  charterRateHigh?:  string;   // high-season / to rate, when a range is given
+  charterCurrency?:  string;   // "EUR" | "USD" | "GBP" | ...
+  charterAreas?:     string;   // cruising grounds, e.g. "W. Mediterranean, Bahamas"
+  charterSeason?:    string;   // e.g. "Summer: Med / Winter: Caribbean"
+  charterType?:      string;   // "Crewed", "Bareboat", etc. when stated
+
   // ── Content ───────────────────────────────────────────────────────────────
   description:    string;
   features:       string[];
@@ -226,6 +240,8 @@ export function emptyVesselFull(sourceUrl = ""): VesselData {
     beamMax: "", draftMin: "", airDraft: "",
     paintSystem: "", windowGlazing: "", interiorStyle: "",
     shorepower: "", voltageSystem: "", transitRange: "",
+    isCharter: false, charterRate: "", charterRateLow: "", charterRateHigh: "",
+    charterCurrency: "", charterAreas: "", charterSeason: "", charterType: "",
     gaImages: [],
   };
 }
