@@ -42,12 +42,11 @@ export function parseCharterWorld(url: string, html: string): VesselData {
   const nameM = rawName.match(/^[\s]*([A-Z0-9][A-Z0-9'’\- ]+?)(?:\s{2,}|\s+[A-Z][a-z])/);
   vessel.name = (nameM ? nameM[1] : rawName).trim();
 
-  // ── Specs — <tr><td>Label:</td><td>value</td></tr> ────────────────────────
+  // ── Specs — rows are <th>Label:</th><td>value</td> (itemprop name/value) ──
   $("tr").each((_, tr) => {
-    const tds = $(tr).find("td");
-    if (tds.length < 2) return;
-    const label = clean($(tds[0]).text()).replace(/:$/, "");
-    const value = clean($(tds[1]).text());
+    const $tr = $(tr);
+    const label = clean($tr.find('th [itemprop="name"], th').first().text()).replace(/:$/, "").trim();
+    const value = clean($tr.find('td [itemprop="value"], td').first().text());
     if (!label || !value || label.length > 28) return;
     if (/type\/year/i.test(label)) {
       // "Heesen /2008" → builder + year
@@ -56,8 +55,8 @@ export function parseCharterWorld(url: string, html: string): VesselData {
       const b = value.split("/")[0].trim();
       if (b && !vessel.builder) vessel.builder = b;
     } else if (/builder\/designer/i.test(label)) {
-      // "Mark Wallace, Heesen" → prefer the builder (last comma part is yard)
-      if (!vessel.builder) vessel.builder = value;
+      // "Mark Wallace, Heesen" → take the last comma part (the yard)
+      if (!vessel.builder) vessel.builder = value.split(",").pop()!.trim() || value;
     } else {
       assignSpec(vessel, label, value);
     }
@@ -68,12 +67,15 @@ export function parseCharterWorld(url: string, html: string): VesselData {
   $(".rates").each((_, el) => { const t = clean($(el).text()); if (t) rates.push(t); });
   setCharterRate(vessel, rates);
 
-  // ── Cruising areas (when present) ─────────────────────────────────────────
+  // ── Cruising areas — only from destination image paths, not gallery alts ──
+  // CharterWorld embeds destinations in image URLs (/user/Image/Destinations/
+  // {Name}/...). Gallery alts are vessel photo captions ("Aft: Yacht X's
+  // Cruising Image"), NOT regions, so we deliberately ignore them here.
   const areas = new Set<string>();
-  $('[alt*="Cruising"], a[href*="cruising"]').each((_, el) => {
-    const t = clean($(el).attr("alt") || $(el).text()).replace(/cruising.*$/i, "").trim();
-    if (t && t.length < 40) areas.add(t);
-  });
+  for (const m of html.matchAll(/\/Destinations\/([A-Za-z][A-Za-z0-9%\- ]{1,30}?)\//g)) {
+    const name = decodeURIComponent(m[1]).replace(/%20/g, " ").trim();
+    if (name && !/image|photo|thumb/i.test(name)) areas.add(name);
+  }
   if (areas.size) vessel.charterAreas = [...areas].slice(0, 6).join(", ");
 
   // ── Description — listing prose ───────────────────────────────────────────
@@ -87,11 +89,12 @@ export function parseCharterWorld(url: string, html: string): VesselData {
   });
   if (paras.length) vessel.description = paras.join("\n\n").slice(0, 6000);
 
-  // ── Images — gallery ──────────────────────────────────────────────────────
+  // ── Images — lazy-loaded gallery (data-src), vessel photos only ───────────
   const imgs: { src: string; alt: string }[] = [];
   $("img").each((_, el) => {
     const src = $(el).attr("data-src") || $(el).attr("src") || "";
-    if (/^https?:/i.test(src) && /charterworld\.com\/images\/yachts/i.test(src)) {
+    if (/^https?:/i.test(src) && /charterworld\.com\/images\/\d+\/yachts/i.test(src)
+        && !/^data:/.test(src) && !/Destinations/i.test(src)) {
       imgs.push({ src, alt: vessel.name });
     }
   });
