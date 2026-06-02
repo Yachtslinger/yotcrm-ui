@@ -1,6 +1,44 @@
 # YotCRM (YotBot) — Session Handoff
 
-_Last updated: 2026-05-31 (Round 4)_
+_Last updated: 2026-06-01 (Round 5 — R4-confirm + Bluewater provider)_
+
+---
+
+## ▶ LATEST UPDATE (2026-06-01) — R4-confirm clean, Bluewater shipped
+
+### Shipped
+| SHA | Description |
+|---|---|
+| `1c8a21b` | feat(scraper): dedicated Bluewater provider |
+| `8ee3bb9` | fix(scraper): Bluewater images — bypass shared dedupeImages broker-filter |
+
+- **Item #1 (SPM) confirmed DONE.** R4-confirm ran clean on prod: SPM PASS 9,
+  CharterWorld PASS 9 (that run), Y.CO 11 / Moran 9 / IYG 12 / YATCO 11.
+- **Item #2 (Bluewater) DONE.** 6/12 → **PASS 12/12**. See priority list.
+
+### Findings worth carrying forward (NEW)
+1. **`dedupeImages()` has a latent `broker`→`brokerage` false-match.** The
+   shared guard `/broker|agent|staff|.../ ` (utils.ts) is meant to drop broker
+   *headshots*, but it also matches the substring "broker" inside any gallery
+   path like `/_uploads/website/brokerage/yachts/...`. On Bluewater this
+   silently zeroed all 15 photos. Worked around inside the provider; the shared
+   util is still wrong for **any** brokerage-pathed site. Proper fix: tighten to
+   `persons?\/broker|broker[-_](photo|headshot|profile)` — but that's a shared
+   util touching all 20 providers, so it needs its own verification pass.
+2. **CharterWorld LOA extraction is FLAKY on live fetches.** Three back-to-back
+   prod runs gave PASS 9 / PARTIAL 7 / PARTIAL 8 — loa present then absent. Not
+   a code regression (Bluewater commit is inert for it; SPM stayed 9). The
+   generic structural/JSON matcher on charterworld.com is non-deterministic
+   against their live markup. The R4-confirm "CharterWorld 9" was a good-side
+   sample. Its PASS is not stable — treat as borderline, not solved.
+3. **DEPLOY DRIFT — `yotcrm-deploy` is STALE (~3 months).** Its
+   `vessel-scraper/index.ts` (2026-03-23) has NONE of the R2–R4 fixes (no
+   `@graph` JSON-LD, no full-page AI text, 0/2 of the `91fcb83` `.children()`
+   matcher). All recent work is committed **directly in `yotcrm-ui`** (git
+   remote `Yachtslinger/yotcrm-ui`, Railway auto-deploys on push to `main`).
+   The old "edit deploy → rsync `--delete` → ui" workflow is ABANDONED and
+   would WIPE everything recent. **Edit `yotcrm-ui` directly.** This supersedes
+   the deploy workflow described further down in this file.
 
 ---
 
@@ -40,10 +78,12 @@ in the tree.
 
 ### Verification status
 
-`91fcb83` is deployed (Railway uptime confirms it). The follow-up test pass
-confirming SPM stays at 9 PASS AND CharterWorld returns to 9 PASS was
-**not run before the chat ended**. It's a 30-second job for next session
-using the same runner.
+`91fcb83` is deployed (Railway uptime confirms it). **R4-confirm RAN CLEAN
+2026-06-01** against prod `/api/brochures/preview`: SPM **PASS 9**,
+CharterWorld **PASS 9** (LOA extracting again — `.children()` fix did not
+re-break it), and Y.CO 11 / Moran 9 / IYG 12 / YATCO 11 all unchanged at PASS.
+Runner persisted at `/tmp/r4_confirm.py`; results at
+`/tmp/scraper_testpass_results_round4_confirm.json`.
 
 ### Cumulative scoreboard (after 5 scraper commits this session)
 
@@ -67,10 +107,15 @@ If not clean → diagnose before continuing down the list.
 
 ### Updated priority list
 
-1. ~~**SuperYachts Monaco residual**~~ — fix shipped (`79ed9ff` + `91fcb83`),
-   pending R4-confirm next session.
-2. **Bluewater residual.** R4 still 6/12. Missing price, builder, images.
-   Worth a 10-minute look at what container the builder lives in.
+1. ~~**SuperYachts Monaco residual**~~ — **DONE.** Fix shipped (`79ed9ff` +
+   `91fcb83`), R4-confirm clean 2026-06-01 (SPM 9, CharterWorld 9, others
+   unchanged). Next start point is **#2 (Bluewater)**.
+2. ~~**Bluewater residual.**~~ **DONE 2026-06-01.** 6/12 → **PASS 12/12**.
+   Dedicated provider `providers/bluewater.ts` (commits `1c8a21b` + `8ee3bb9`):
+   builder from `<title>`, price from `div.yachtprice`, gallery from Cloudinary
+   `background-image` URLs, specs from `.yachtSPEC` + `<li>label: value</li>`.
+   Verified on prod (LOON / icon-134430): name LOON, builder Icon Yachts,
+   €42,950,000, 15 images.
 3. **CecilWright residual.** R4 still 7/12. Missing beam, price, images.
 4. **Yachtbuyer provider: extract `builder`.** Slug exposes it, page
    presumably does too. Also strip " Yacht For Sale" SEO suffix from
