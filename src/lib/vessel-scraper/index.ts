@@ -26,6 +26,7 @@ import { scrapeBurgess }        from "./providers/burgess";
 import { scrapeCamperNicholsons } from "./providers/campernicholsons";
 import { scrapeNorthropJohnson }  from "./providers/northropjohnson";
 import { scrapeBluewater }      from "./providers/bluewater";
+import { scrapeCecilWright }    from "./providers/cecilwright";
 
 // Provider registry — maps hostname patterns to scraper functions.
 // YachtWorld excluded — Cloudflare anti-bot blocks Railway IPs reliably.
@@ -55,6 +56,7 @@ const PROVIDERS: { pattern: RegExp; fn: Provider }[] = [
   { pattern: /camperandnicholsons\.com/i,     fn: scrapeCamperNicholsons },
   { pattern: /northropandjohnson\.com/i,      fn: scrapeNorthropJohnson },
   { pattern: /bluewateryachting\.com/i,       fn: scrapeBluewater },
+  { pattern: /cecilwright\.com/i,             fn: scrapeCecilWright },
   // Burgess, Ocean Independence, Fraser, Northrop & Johnson, YATCO, etc.
   // fall through to genericScrape() — JSON-LD + OG meta handles them well.
 ];
