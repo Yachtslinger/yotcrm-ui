@@ -21,7 +21,7 @@
 import * as cheerio from "cheerio";
 import type { VesselData } from "../types";
 import { emptyVessel } from "../types";
-import { clean, cleanHeadline, dedupeImages, assignSpec } from "../utils";
+import { clean, cleanHeadline, assignSpec } from "../utils";
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -112,7 +112,18 @@ export function parseBluewater(url: string, html: string): VesselData {
   $("img").each((_, el) => consider($(el).attr("data-src") || $(el).attr("src") || ""));
 
   for (const src of byHash.values()) vessel.images.push({ src, alt: vessel.name });
-  vessel.images = dedupeImages(vessel.images).filter(i => !/logo|icon|sprite|flag|\.svg/i.test(i.src));
+  // NOTE: deliberately NOT using the shared dedupeImages() here. Its broker-
+  // headshot guard matches "broker" *inside* Bluewater's gallery path
+  // (/_uploads/website/brokerage/yachts/...), which would drop every photo.
+  // byHash already deduped by photo hash; these are all yacht images, so we
+  // only strip obvious chrome.
+  const seenSrc = new Set<string>();
+  vessel.images = vessel.images.filter(({ src }) => {
+    if (!src || seenSrc.has(src)) return false;
+    if (/\/logo|sprite|flag|\.svg(\?|$)/i.test(src)) return false;
+    seenSrc.add(src);
+    return true;
+  });
 
   return vessel;
 }
