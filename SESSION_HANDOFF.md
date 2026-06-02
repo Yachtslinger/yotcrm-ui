@@ -1,6 +1,6 @@
 # YotCRM (YotBot) — Session Handoff
 
-_Last updated: 2026-06-01 (Round 5 — R4-confirm + Bluewater, Cecil Wright, YachtBuyer)_
+_Last updated: 2026-06-02 (Round 5 — Bluewater, Cecil Wright, YachtBuyer, Charter)_
 
 ---
 
@@ -13,6 +13,9 @@ _Last updated: 2026-06-01 (Round 5 — R4-confirm + Bluewater, Cecil Wright, Yac
 | `8ee3bb9` | fix(scraper): Bluewater images — bypass shared dedupeImages broker-filter |
 | `9ce5572` | feat(scraper): dedicated Cecil Wright provider |
 | `a423188` | fix(scraper): YachtBuyer builder + name suffix (JSON-LD; markup changed) |
+| `7e89464` | feat(scraper): charter first-class — rate/areas fields + 2 providers |
+| `901a6d7` | fix(scraper): CharterWorld data-quality (th/td specs, year, images, areas) |
+| `ad4e1ff` | fix(scraper): CharterWorld LOA — normalise 'L.O.A.' to LOA |
 
 - **Item #1 (SPM) confirmed DONE.** R4-confirm ran clean on prod: SPM PASS 9,
   CharterWorld PASS 9 (that run), Y.CO 11 / Moran 9 / IYG 12 / YATCO 11.
@@ -22,10 +25,14 @@ _Last updated: 2026-06-01 (Round 5 — R4-confirm + Bluewater, Cecil Wright, Yac
 - **Item #4 (Yachtbuyer) DONE.** name + builder fixed via schema.org/Vehicle
   JSON-LD (their `labelCopy` spec markup had changed). 8/12 is the ceiling —
   images watermarked (excluded), no editorial description published.
-- **Heads-up:** YachtBuyer changing markup is a reminder that CSS-class-based
-  providers are brittle; JSON-LD (`@type` Vehicle/Product) is the durable
-  source where a site emits it. Worth auditing other dedicated providers that
-  rely on bespoke class names if their scores drift.
+- **Item #5 (Charter scope) DECIDED + DONE.** Charter is now first-class:
+  charter fields on `VesselData`, 2 dedicated providers, per-week rate surfaced
+  as price. CharterWorld + YachtCharterFleet both **PASS 12/12** on prod.
+- **Heads-up:** YachtBuyer (and CharterWorld's markup quirks) reinforce that
+  CSS-class providers are brittle; JSON-LD (`@type` Vehicle/Product) is the
+  durable source where a site emits it. YachtCharterFleet uses it and was
+  clean first try. Worth auditing other class-based providers if scores drift —
+  **directly relevant to #6 (BoatInternational) and #7 (SuperYachtTimes).**
 
 ### Findings worth carrying forward (NEW)
 1. **`dedupeImages()` has a latent `broker`→`brokerage` false-match.** The
@@ -146,10 +153,15 @@ If not clean → diagnose before continuing down the list.
    (watermarked), and YachtBuyer publishes **no editorial description** for
    listings (it's a comparison/aggregator site — meta desc is SEO boilerplate).
    Verified on prod (bella-luna-62529fb8).
-5. **Charter scope decision.** YachtCharterFleet + CharterWorld scrape
-   vessel metadata cleanly. If charter is in-scope, extend `VesselData`
-   with charter-specific fields (`charterRate`, `charterAreas`, `crew`,
-   `guestCabins`). If out-of-scope, leave the incidental coverage.
+5. ~~**Charter scope decision.**~~ **DECIDED + DONE 2026-06-02 — charter is now
+   first-class.** `VesselData` gained `isCharter`, `charterRate`,
+   `charterRateLow/High`, `charterCurrency`, `charterAreas`, `charterSeason`,
+   `charterType`. Two dedicated providers (`charterworld.ts`,
+   `yachtcharterfleet.ts`); `scrapeVessel()` surfaces the per-week rate as
+   `price` when a charter listing has no asking price, so every downstream
+   consumer shows charter pricing from one place. **Both verified PASS 12/12
+   on prod** (CharterWorld INCEPTION, YachtCharterFleet Maltese Falcon).
+   Commits `7e89464`, `901a6d7`, `ad4e1ff`.
 6. **BoatInternational provider regression.** Has a dedicated provider but
    only returns name/desc/1 image (6/12 in R4). Page format likely changed.
 7. **SuperYachtTimes provider regression.** Now 403s from Railway.
