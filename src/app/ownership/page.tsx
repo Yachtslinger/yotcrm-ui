@@ -352,6 +352,15 @@ export default function OwnershipPage() {
   const [adjustCharterWeeks, setAdjustCharterWeeks] = React.useState(0);
   const [vesselLoaFt, setVesselLoaFt] = React.useState(100);
 
+  // Crew adjustment state
+  const [baseCrewCount, setBaseCrewCount] = React.useState(7);
+  const [adjustCrewCount, setAdjustCrewCount] = React.useState(7);
+  type PerCrew = { salJr: Scenario; foodDaily: { low: number; mid: number; high: number }; health: Scenario; travel: Scenario; uniform: Scenario; training: Scenario };
+  const [perCrewRates, setPerCrewRates] = React.useState<PerCrew | null>(null);
+  // Optional extra positions (each adds to salaries + support costs)
+  type ExtraPos = { key: string; label: string; salMid: number; checked: boolean };
+  const [extraPositions, setExtraPositions] = React.useState<ExtraPos[]>([]);
+
   // Manual override state
   const [overrides, setOverrides] = React.useState<Record<string, number>>({});
 
@@ -452,12 +461,48 @@ export default function OwnershipPage() {
       setBaseHours(annualHours);
       setAdjustHours(annualHours);
       setAdjustCharterWeeks(charterWeeks);
+      // Init crew adjustment from meta
+      const meta = data.model._meta;
+      const cc = meta?.crewCount ?? data.model.crew?.salaries?.breakdown?.length ?? 7;
+      setBaseCrewCount(cc);
+      setAdjustCrewCount(cc);
+      setPerCrewRates(meta?.perCrew ?? null);
+      // Suggest optional positions based on vessel size
+      const lm = meta?.loa_m ?? 40;
+      setExtraPositions([
+        { key: "bosun",      label: "Bosun",               salMid: lm >= 45 ? 82_000 : 72_000,  checked: false },
+        { key: "2nd_eng",    label: "2nd Engineer",         salMid: lm >= 50 ? 105_000 : 92_000, checked: false },
+        { key: "3rd_stew",   label: "3rd Stewardess",       salMid: 65_000,                       checked: false },
+        { key: "chef2",      label: "Sous Chef",            salMid: 78_000,                       checked: false },
+      ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
   }
+
+  // Compute crew cost delta from slider and position toggles
+  const crewDelta: Scenario = React.useMemo(() => {
+    if (!perCrewRates) return { low: 0, mid: 0, high: 0 };
+    const r5l = (n: number) => Math.round(n / 5000) * 5000;
+    // Slider delta
+    const delta = adjustCrewCount - baseCrewCount;
+    const sliderDelta = {
+      low: delta * (perCrewRates.salJr.low + r5l(perCrewRates.foodDaily.low * 365) + perCrewRates.health.low + perCrewRates.travel.low + perCrewRates.uniform.low + perCrewRates.training.low),
+      mid: delta * (perCrewRates.salJr.mid + r5l(perCrewRates.foodDaily.mid * 365) + perCrewRates.health.mid + perCrewRates.travel.mid + perCrewRates.uniform.mid + perCrewRates.training.mid),
+      high: delta * (perCrewRates.salJr.high + r5l(perCrewRates.foodDaily.high * 365) + perCrewRates.health.high + perCrewRates.travel.high + perCrewRates.uniform.high + perCrewRates.training.high),
+    };
+    // Extra positions delta
+    const extraMid  = extraPositions.filter(p => p.checked).reduce((s, p) => s + p.salMid + r5l(perCrewRates.foodDaily.mid * 365) + perCrewRates.health.mid, 0);
+    const extraLow  = extraPositions.filter(p => p.checked).reduce((s, p) => s + Math.round(p.salMid * 0.82 / 5000) * 5000 + r5l(perCrewRates.foodDaily.low * 365) + perCrewRates.health.low, 0);
+    const extraHigh = extraPositions.filter(p => p.checked).reduce((s, p) => s + Math.round(p.salMid * 1.18 / 5000) * 5000 + r5l(perCrewRates.foodDaily.high * 365) + perCrewRates.health.high, 0);
+    return {
+      low:  sliderDelta.low  + extraLow,
+      mid:  sliderDelta.mid  + extraMid,
+      high: sliderDelta.high + extraHigh,
+    };
+  }, [adjustCrewCount, baseCrewCount, perCrewRates, extraPositions]);
 
   // Grand totals computed from effective values
   function grandTotals(m: CostModel): Scenario {
@@ -662,10 +707,16 @@ export default function OwnershipPage() {
         {/* Model output */}
         {model && (() => {
           const gt = grandTotals(model);
+          // Apply crew adjustment delta
+          const gtAdj: Scenario = {
+            low:  gt.low  + crewDelta.low,
+            mid:  gt.mid  + crewDelta.mid,
+            high: gt.high + crewDelta.high,
+          };
           const netCost: Scenario = {
-            low: gt.low - charterRevenue.low,
-            mid: gt.mid - charterRevenue.mid,
-            high: gt.high - charterRevenue.high,
+            low:  gtAdj.low  - charterRevenue.low,
+            mid:  gtAdj.mid  - charterRevenue.mid,
+            high: gtAdj.high - charterRevenue.high,
           };
 
           const effectiveSalaries = model.crew.salaries.breakdown?.length
@@ -789,7 +840,7 @@ export default function OwnershipPage() {
 
               {/* Grand total cards */}
               <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: `repeat(${visibleCount}, 1fr)` }}>
-                {([["low", "LOW", gt.low, netCost.low, "#4ade80"], ["mid", "MID", gt.mid, netCost.mid, "#facc15"], ["high", "HIGH", gt.high, netCost.high, "#f87171"]] as [keyof ShowScenarios, string, number, number, string][])
+                {([["low", "LOW", gtAdj.low, netCost.low, "#4ade80"], ["mid", "MID", gtAdj.mid, netCost.mid, "#facc15"], ["high", "HIGH", gtAdj.high, netCost.high, "#f87171"]] as [keyof ShowScenarios, string, number, number, string][])
                   .filter(([key]) => showScenarios[key])
                   .map(([key, label, val, net, color]) => (
                     <div key={label} className="rounded-xl p-4 text-center" style={{ background: "var(--card)", border: `1px solid ${color}40` }}>
@@ -858,6 +909,70 @@ export default function OwnershipPage() {
                     </div>
                   </div>
                 </div>
+
+                {/* Crew size slider */}
+                {model.segment !== "small" && perCrewRates && (
+                  <div className="mt-4 pt-4" style={{ borderTop: "1px solid rgba(255,255,255,.06)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <span className="text-xs font-bold uppercase tracking-widest" style={{ color: "var(--brass-400)" }}>Crew Configuration</span>
+                      {(adjustCrewCount !== baseCrewCount || extraPositions.some(p => p.checked)) && (
+                        <span className="text-xs" style={{ color: "#fb923c" }}>
+                          +{fmt(crewDelta.mid)}/yr mid vs model
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                          <label className="text-xs" style={{ color: "var(--navy-400)" }}>Total Crew</label>
+                          <span className="text-xs font-bold" style={{ color: "var(--foreground)" }}>{adjustCrewCount} crew</span>
+                        </div>
+                        <input type="range" min={4} max={14} step={1} value={adjustCrewCount}
+                          onChange={e => setAdjustCrewCount(Number(e.target.value))}
+                          style={{ width: "100%", accentColor: "#a78bfa" }}
+                        />
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ fontSize: 10, color: "var(--navy-400)" }}>4</span>
+                          <span style={{ fontSize: 10, color: "var(--navy-400)" }}>model base: {baseCrewCount} · each add ≈ {fmt(
+                            perCrewRates.salJr.mid +
+                            Math.round(perCrewRates.foodDaily.mid * 365 / 5000) * 5000 +
+                            perCrewRates.health.mid
+                          )}/yr</span>
+                          <span style={{ fontSize: 10, color: "var(--navy-400)" }}>14</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Optional position toggles */}
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {extraPositions.map((pos) => (
+                        <button key={pos.key}
+                          onClick={() => setExtraPositions(prev => prev.map(p => p.key === pos.key ? { ...p, checked: !p.checked } : p))}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 6, padding: "5px 10px",
+                            borderRadius: 8, border: `1px solid ${pos.checked ? "#a78bfa60" : "var(--border)"}`,
+                            background: pos.checked ? "#a78bfa15" : "var(--input,#1e293b)",
+                            color: pos.checked ? "#a78bfa" : "var(--navy-400)",
+                            cursor: "pointer", fontSize: 11, fontWeight: pos.checked ? 700 : 400,
+                          }}>
+                          <span style={{
+                            width: 12, height: 12, borderRadius: 3, flexShrink: 0,
+                            border: `1.5px solid ${pos.checked ? "#a78bfa" : "var(--navy-400)"}`,
+                            background: pos.checked ? "#a78bfa" : "transparent",
+                            display: "inline-flex", alignItems: "center", justifyContent: "center",
+                          }}>
+                            {pos.checked && <span style={{ color: "#fff", fontSize: 8, fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                          </span>
+                          {pos.label}
+                          <span style={{ fontSize: 10, opacity: 0.6 }}>+{fmt(pos.salMid)}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs mt-2" style={{ color: "var(--navy-400)" }}>
+                      Position toggles add salary + food + health insurance. Adjust individual salaries in the table.
+                    </p>
+                  </div>
+                )}
                 <div className="mt-3 pt-3" style={{ borderTop: "1px solid rgba(255,255,255,.06)", fontSize: 11, color: "var(--navy-400)" }}>
                   Model generated with: <strong style={{ color: "var(--foreground)" }}>{baseHours} hrs/yr</strong>
                   {" · "}<strong style={{ color: "var(--foreground)" }}>{homePort}</strong>
@@ -952,7 +1067,7 @@ export default function OwnershipPage() {
                         <Row label="TOTAL CAPITAL" path="__capTotal" effective={capTotal} bold show={showScenarios} overrides={overrides} onOverride={handleOverride} onResetRow={resetRow} />
 
                         <tr><td colSpan={colCount(showScenarios)} className="pt-4" /></tr>
-                        <Row label="GRAND TOTAL" path="__gt" effective={gt} bold show={showScenarios} overrides={overrides} onOverride={handleOverride} onResetRow={resetRow} />
+                        <Row label="GRAND TOTAL" path="__gt" effective={gtAdj} bold show={showScenarios} overrides={overrides} onOverride={handleOverride} onResetRow={resetRow} />
 
                         {adjustCharterWeeks > 0 && (
                           <>
@@ -964,6 +1079,13 @@ export default function OwnershipPage() {
                             />
                             <Row label="NET ANNUAL COST" path="__net" effective={netCost} bold show={showScenarios} overrides={overrides} onOverride={handleOverride} onResetRow={resetRow} />
                           </>
+                        )}
+                        {(adjustCrewCount !== baseCrewCount || extraPositions.some(p => p.checked)) && (
+                          <tr>
+                            <td colSpan={colCount(showScenarios)} style={{ paddingTop: 8, fontSize: 11, color: "#a78bfa" }}>
+                              ★ Crew adjusted: {adjustCrewCount} crew{extraPositions.filter(p=>p.checked).map(p=>` + ${p.label}`).join("")} · +{fmt(crewDelta.mid)}/yr mid included in Grand Total above
+                            </td>
+                          </tr>
                         )}
                       </tbody>
                     </table>

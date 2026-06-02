@@ -69,12 +69,21 @@ function dockMonthlyPerFt(port: string): { l: number; m: number; h: number } {
 }
 
 /* ─── Full deterministic budget builder ────────────────────────────────────── */
+// Minimum realistic crew by vessel size — scraper often under-counts (reads crew quarters, misses captain cabin etc.)
+function minCrewForSize(m: number): number {
+  if (m >= 60) return 11; if (m >= 55) return 9;
+  if (m >= 50) return 8;  if (m >= 43) return 7;  // 140+ ft needs min 7
+  if (m >= 38) return 6;  if (m >= 32) return 5;
+  return 4;
+}
+
 function buildBudget(v: Record<string,string>, port: string, style: string, hrs: number) {
   const lm   = parseLoaMeters(v.loa || "");
   const lft  = lm * 3.28084;
   const yr   = parseYear(v.year || "");
   const am   = ageMult(yr);
-  const cc   = parseCrewCount(v.crew || "");
+  // Use the larger of parsed crew count or size-based minimum (scraper often misses captain's cabin)
+  const cc   = Math.max(parseCrewCount(v.crew || ""), minCrewForSize(lm));
   const isLux = !style.toLowerCase().includes("explorer") && !style.toLowerCase().includes("commercial");
   const isExp = !isLux;
 
@@ -115,9 +124,11 @@ function buildBudget(v: Record<string,string>, port: string, style: string, hrs:
 
   // ── Operations ──────────────────────────────────────────────────────
   const eBase = engBaseVal(lm);
-  const eng  = { l: r5(eBase*am*0.70), m: r5(eBase*am),      h: r5(eBase*am*1.55) };
+  // HIGH engineering = 1.28x mid (elevated use year, not a refit year)
+  const eng  = { l: r5(eBase*am*0.70), m: r5(eBase*am), h: r5(eBase*am*1.28) };
   const fuelGph = fuelBurnLph(lm) * 0.264172;
-  const fuel = { l: r5(hrsL*fuelGph*4.8), m: r5(hrs*fuelGph*5.1), h: r5(hrsH*fuelGph*5.6) };
+  // HIGH fuel = more hours + slightly higher fuel price, capped at 1.35x mid
+  const fuel = { l: r5(hrsL*fuelGph*4.6), m: r5(hrs*fuelGph*5.0), h: r5(hrsH*fuelGph*5.3) };
   const dr   = dockMonthlyPerFt(port);
   const dock = { l: r5(lft*dr.l*12*1.28), m: r5(lft*dr.m*12*1.28), h: r5(lft*dr.h*12*1.28) };
   const galley   = { l: r5(Math.max(45_000, lm*950)),  m: r5(Math.max(70_000, lm*1500)), h: r5(Math.max(110_000, lm*2400)) };
@@ -152,7 +163,8 @@ function buildBudget(v: Record<string,string>, port: string, style: string, hrs:
   const paintCycle = isExp ? 3 : 5;
   const paintJob   = isExp ? lft*380 : lft*2100;
   const paint      = { l: r5(paintJob*0.80/paintCycle), m: r5(paintJob/paintCycle), h: r5(paintJob*1.35/paintCycle) };
-  const capEng     = { l: r5(eBase*0.90*am*0.62), m: r5(eBase*0.90*am), h: r5(eBase*0.90*am*1.65) };
+  // Capital: HIGH = 1.25x mid (aggressive maintenance year, NOT a refit/paint year — that would be exceptional)
+  const capEng     = { l: r5(eBase*0.90*am*0.62), m: r5(eBase*0.90*am), h: r5(eBase*0.90*am*1.25) };
   const capAv      = { l: r1(lm*90),  m: r1(lm*200),  h: r1(lm*400) };
   const capInt     = { l: r1(lm*280), m: r1(lm*560),  h: r1(lm*1000) };
   const capTend    = { l: r1(lm*200), m: r1(lm*400),  h: r1(lm*750) };
@@ -198,6 +210,15 @@ function buildBudget(v: Record<string,string>, port: string, style: string, hrs:
 
   return {
     lm, lft, yr, am, cc, hv, salL, salM, salH, breakdown,
+    // Per-crew cost rates passed to page for real-time crew adjustment
+    perCrew: {
+      salJr:     { low: S.jr.l,  mid: S.jr.m,  high: S.jr.h  },
+      foodDaily: { low: 34,      mid: isLux ? 48 : 36, high: 65 },
+      health:    { low: 4_800,   mid: 6_200,   high: 8_500 },
+      travel:    { low: 3_500,   mid: 5_500,   high: 9_500 },
+      uniform:   { low: 1_100,   mid: 1_700,   high: 2_800 },
+      training:  { low: 1_600,   mid: 2_500,   high: 4_200 },
+    },
     model: {
       crew: {
         salaries:    { low:salL, mid:salM, high:salH, breakdown },
@@ -510,6 +531,13 @@ Write ONLY a JSON object with exactly these 5 string fields. No other text.
       vesselUrl:  url || v.url || "",
       segment:    seg,
       crewMode:   seg === "small" ? cMode : undefined,
+      // Meta for real-time crew adjustment in the UI
+      _meta: {
+        crewCount:   budget.cc,
+        loa_m:       budget.lm,
+        buildYear:   budget.yr,
+        perCrew:     (budget as {perCrew?: unknown}).perCrew ?? null,
+      },
       ...(nModel as object),
       assumptions:       narrative.assumptions,
       rangeExplanation:  narrative.rangeExplanation,
