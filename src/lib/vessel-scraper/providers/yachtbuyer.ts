@@ -35,27 +35,77 @@ export async function scrapeYachtBuyer(url: string): Promise<VesselData> {
   const vessel: VesselData = emptyVesselFull(url);
 
   // ── Name ──────────────────────────────────────────────────────────────────
+  // H1 is "BELLA LUNA Yacht For Sale" — strip the SEO suffix so vessel.name is
+  // the actual yacht name (otherwise it reads as a junk/listing-page title).
+  const stripForSale = (s: string) =>
+    clean(s).replace(/\s*[-–|]?\s*yachts?\s+for\s+sale\b.*$/i, "").trim();
   vessel.name =
-    cleanHeadline($("h1.h-bold-xl").first().text()) ||
-    cleanHeadline($("h1").first().text()) ||
+    stripForSale(cleanHeadline($("h1.h-bold-xl").first().text())) ||
+    stripForSale(cleanHeadline($("h1").first().text())) ||
     "";
   // YachtBuyer often has "One Yacht" in h1 but "One" is the real name in spec section
   const currentName = clean($("li span.detail:contains('One')").first().text()) ||
     clean($(".specificationDetails li:has(strong:contains('Current Name')) .detail").text());
   if (currentName && currentName.length < vessel.name.length) vessel.name = currentName;
 
-  // ── Builder / Year from subtitle line ────────────────────────────────────
+  // ── JSON-LD Vehicle node (primary structured source) ──────────────────────
+  // YachtBuyer emits a schema.org/Vehicle block with manufacturer/model/
+  // productionDate/offers. This is far more durable than their CSS classes
+  // (which have changed: the old strong.labelCopy markup is gone). Parse it
+  // first; the DOM passes below backfill anything missing.
+  $('script[type="application/ld+json"]').each((_, el) => {
+    let parsed: unknown;
+    try { parsed = JSON.parse($(el).text()); } catch { return; }
+    const arr = Array.isArray(parsed) ? parsed : [parsed];
+    for (const root of arr) {
+      const nodes = (root && typeof root === "object" && "@graph" in (root as Record<string, unknown>))
+        ? (root as { "@graph": unknown[] })["@graph"]
+        : [root];
+      for (const n of nodes as Record<string, unknown>[]) {
+        if (!n || typeof n !== "object" || n["@type"] !== "Vehicle") continue;
+        if (!vessel.name && typeof n.name === "string") vessel.name = stripForSale(n.name);
+        if (!vessel.builder && typeof n.manufacturer === "string") vessel.builder = clean(n.manufacturer);
+        if (!vessel.year && typeof n.productionDate === "string") {
+          const y = n.productionDate.match(/\b(19|20)\d{2}\b/);
+          if (y) vessel.year = parseInt(y[0]);
+        }
+        const offers = n.offers as Record<string, unknown> | undefined;
+        if (!vessel.price && offers && (offers.price || offers.priceCurrency)) {
+          const cur = String(offers.priceCurrency || "");
+          const amt = String(offers.price || "");
+          if (amt) vessel.price = `${cur === "EUR" ? "€" : cur === "USD" ? "$" : cur + " "}${Number(amt).toLocaleString()}`.trim();
+        }
+      }
+    }
+  });
+
+  // ── Builder / Year from subtitle line (legacy fallback) ───────────────────
   const subtitle = clean($("h1 + p, h1 ~ p").first().text());
   // e.g. "112' Van der Valk | Custom | 2024"
-  const builderM = subtitle.match(/\|\s*([A-Za-z][^\|]+?)\s*\|/);
-  if (builderM) vessel.builder = builderM[1].trim();
-  const yearM = subtitle.match(/\b(19|20)\d{2}\b/);
-  if (yearM) vessel.year = parseInt(yearM[0]);
+  if (!vessel.builder) {
+    const builderM = subtitle.match(/\|\s*([A-Za-z][^\|]+?)\s*\|/);
+    if (builderM) vessel.builder = builderM[1].trim();
+  }
+  if (!vessel.year) {
+    const yearM = subtitle.match(/\b(19|20)\d{2}\b/);
+    if (yearM) vessel.year = parseInt(yearM[0]);
+  }
 
-  // ── Spec list: strong.labelCopy + span.detail ─────────────────────────────
-  $(".specificationDetails li").each((_, li) => {
-    const label = clean($(li).find("strong.labelCopy").text());
-    const value = clean($(li).find("span.detail").text());
+  // ── Spec list ─────────────────────────────────────────────────────────────
+  // Current markup: <li><span class="...uppercase">Label</span>
+  //                     <span class="detail ...">Value</span></li>
+  // (the old <strong class="labelCopy"> is gone — keep it as a fallback).
+  $(".specificationDetails li, li.builder-lists, .vessel-details li").each((_, li) => {
+    const $li = $(li);
+    let label = clean($li.find("strong.labelCopy").text());
+    if (!label) {
+      // first label-ish span that is NOT the .detail value span
+      label = clean(
+        $li.children("span").not(".detail").first().text() ||
+        $li.find("span.uppercase, span.b-light-xs, .h-regular-xxs").first().text()
+      );
+    }
+    const value = clean($li.find("span.detail").first().text());
     if (!label || !value) return;
     mapSpec(vessel, label, value);
   });
