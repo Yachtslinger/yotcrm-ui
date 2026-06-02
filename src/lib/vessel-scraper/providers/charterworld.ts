@@ -45,7 +45,10 @@ export function parseCharterWorld(url: string, html: string): VesselData {
   // ── Specs — rows are <th>Label:</th><td>value</td> (itemprop name/value) ──
   $("tr").each((_, tr) => {
     const $tr = $(tr);
-    const label = clean($tr.find('th [itemprop="name"], th').first().text()).replace(/:$/, "").trim();
+    let label = clean($tr.find('th [itemprop="name"], th').first().text()).replace(/:$/, "").trim();
+    // assignSpec only strips trailing punctuation, so dotted abbreviations like
+    // "L.O.A." don't match its "loa" pattern — collapse internal dots here.
+    label = label.replace(/\bL\.?O\.?A\.?\b/i, "LOA").replace(/\bL\.W\.L\.?\b/i, "LWL");
     const value = clean($tr.find('td [itemprop="value"], td').first().text());
     if (!label || !value || label.length > 28) return;
     if (/type\/year/i.test(label)) {
