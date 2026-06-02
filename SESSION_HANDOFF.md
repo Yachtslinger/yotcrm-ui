@@ -1,20 +1,23 @@
 # YotCRM (YotBot) — Session Handoff
 
-_Last updated: 2026-06-01 (Round 5 — R4-confirm + Bluewater provider)_
+_Last updated: 2026-06-01 (Round 5 — R4-confirm + Bluewater & Cecil Wright providers)_
 
 ---
 
-## ▶ LATEST UPDATE (2026-06-01) — R4-confirm clean, Bluewater shipped
+## ▶ LATEST UPDATE (2026-06-01) — R4-confirm clean, Bluewater + Cecil Wright shipped
 
 ### Shipped
 | SHA | Description |
 |---|---|
 | `1c8a21b` | feat(scraper): dedicated Bluewater provider |
 | `8ee3bb9` | fix(scraper): Bluewater images — bypass shared dedupeImages broker-filter |
+| `9ce5572` | feat(scraper): dedicated Cecil Wright provider |
 
 - **Item #1 (SPM) confirmed DONE.** R4-confirm ran clean on prod: SPM PASS 9,
   CharterWorld PASS 9 (that run), Y.CO 11 / Moran 9 / IYG 12 / YATCO 11.
 - **Item #2 (Bluewater) DONE.** 6/12 → **PASS 12/12**. See priority list.
+- **Item #3 (Cecil Wright) DONE.** 7/12 → **PASS 11/12** (ceiling — beam/draft
+  not on page). Both new providers verified coexisting on prod.
 
 ### Findings worth carrying forward (NEW)
 1. **`dedupeImages()` has a latent `broker`→`brokerage` false-match.** The
@@ -116,7 +119,12 @@ If not clean → diagnose before continuing down the list.
    `background-image` URLs, specs from `.yachtSPEC` + `<li>label: value</li>`.
    Verified on prod (LOON / icon-134430): name LOON, builder Icon Yachts,
    €42,950,000, 15 images.
-3. **CecilWright residual.** R4 still 7/12. Missing beam, price, images.
+3. ~~**CecilWright residual.**~~ **DONE 2026-06-01.** 7/12 → **PASS 11/12**
+   (commit `9ce5572`, `providers/cecilwright.ts`). Added price (`.boat-price__price`,
+   "Purchase For" label) and the S3 gallery (`cecilwright-craft/store/_large`,
+   58 photos). Specs via `.spec-grid__item`. **Beam/draft/engines are not
+   published on the page**, so keyspecs caps at 1 → 11/12 is the ceiling for
+   this listing, not a fixable gap. Verified on prod (ALCHEMIST).
 4. **Yachtbuyer provider: extract `builder`.** Slug exposes it, page
    presumably does too. Also strip " Yacht For Sale" SEO suffix from
    `vessel.name`.
