@@ -1,6 +1,6 @@
 # YotCRM (YotBot) — Session Handoff
 
-_Last updated: 2026-06-02 (Round 5 — Bluewater, Cecil Wright, YachtBuyer, Charter)_
+_Last updated: 2026-06-02 (Round 5 — Bluewater, Cecil Wright, YachtBuyer, Charter, BoatIntl)_
 
 ---
 
@@ -16,6 +16,7 @@ _Last updated: 2026-06-02 (Round 5 — Bluewater, Cecil Wright, YachtBuyer, Char
 | `7e89464` | feat(scraper): charter first-class — rate/areas fields + 2 providers |
 | `901a6d7` | fix(scraper): CharterWorld data-quality (th/td specs, year, images, areas) |
 | `ad4e1ff` | fix(scraper): CharterWorld LOA — normalise 'L.O.A.' to LOA |
+| `5f0c046` | fix(scraper): BoatInternational markup decay (JSON-LD removed) |
 
 - **Item #1 (SPM) confirmed DONE.** R4-confirm ran clean on prod: SPM PASS 9,
   CharterWorld PASS 9 (that run), Y.CO 11 / Moran 9 / IYG 12 / YATCO 11.
@@ -28,6 +29,11 @@ _Last updated: 2026-06-02 (Round 5 — Bluewater, Cecil Wright, YachtBuyer, Char
 - **Item #5 (Charter scope) DECIDED + DONE.** Charter is now first-class:
   charter fields on `VesselData`, 2 dedicated providers, per-week rate surfaced
   as price. CharterWorld + YachtCharterFleet both **PASS 12/12** on prod.
+- **Item #6 (BoatInternational) DONE.** BI removed JSON-LD + renamed spec
+  classes → 6/12. Fixed via current `spec-block` markup + title parse + CDN
+  image sweep. **6/12 → PASS 9/12** on prod (ceiling: no price published, JS-
+  hydrated gallery). Two markup-decay fixes this round (BI, Yachtbuyer) — see
+  heads-up below; **#7 SuperYachtTimes is likely the same family.**
 - **Heads-up:** YachtBuyer (and CharterWorld's markup quirks) reinforce that
   CSS-class providers are brittle; JSON-LD (`@type` Vehicle/Product) is the
   durable source where a site emits it. YachtCharterFleet uses it and was
@@ -162,8 +168,16 @@ If not clean → diagnose before continuing down the list.
    consumer shows charter pricing from one place. **Both verified PASS 12/12
    on prod** (CharterWorld INCEPTION, YachtCharterFleet Maltese Falcon).
    Commits `7e89464`, `901a6d7`, `ad4e1ff`.
-6. **BoatInternational provider regression.** Has a dedicated provider but
-   only returns name/desc/1 image (6/12 in R4). Page format likely changed.
+6. ~~**BoatInternational provider regression.**~~ **DONE 2026-06-02** (commit
+   `5f0c046`). Root cause: BI **removed JSON-LD** (the provider's primary
+   source) and renamed its spec classes, so it fell through to dead selectors
+   → 6/12. Fix reads current markup: `li.spec-block__list-item`
+   (`.spec-block__title`/`.spec-block__data`), title parse for
+   name/builder/loa/year ("NAME yacht for sale (Builder, Xm, YYYY)"), and a
+   `cdn.boatinternational.com` image sweep. **6/12 → PASS 9/12 on prod**
+   (verified ABIDE). Ceiling: BI publishes **no asking price** (price-on-
+   application) and the gallery is JS-hydrated so server HTML carries only a
+   few images — both need JS exec / aren't on the page.
 7. **SuperYachtTimes provider regression.** Now 403s from Railway.
    Anti-bot upgrade on their end OR stale UA/header on ours.
 8. **YPI custom provider.** Specs in unstructured running text; needs
