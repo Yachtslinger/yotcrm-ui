@@ -12,6 +12,7 @@ import {
   isUntracked,
 } from "@/lib/comms/storage";
 import { runExtraction } from "@/lib/comms/extractor";
+import { classifySender } from "@/lib/comms/sender-classifier";
 
 export const runtime = "nodejs";
 
@@ -100,15 +101,30 @@ export async function POST(req: NextRequest) {
   // Create new lead if no match — and the client address is external
   const clientDomain = clientAddress.split("@")[1]?.toLowerCase() ?? "";
   const clientIsInternal = INTERNAL_DOMAINS.some(d => clientDomain === d || clientDomain.endsWith("." + d));
+
+  // Classify the sender BEFORE creating a lead. We always store the message
+  // (over-capture by design); this only gates lead creation so automated /
+  // no-reply / bulk senders never become CRM contacts.
+  const classification = classifySender(emlContent, clientAddress, clientName);
+  let leadSkippedReason: string | null = null;
+
   if (!leadId && clientAddress && !clientIsInternal && !clientAddress.toLowerCase().includes("yotbot")) {
-    leadId = createLeadFromComm({
-      email: clientAddress,
-      first_name: clientNameParts[0] ?? "",
-      last_name: clientNameParts.slice(1).join(" ") ?? "",
-      source: "comms_capture",
-    });
-    matchResult.match_method = "created_new";
-    matchResult.confidence = 1;
+    if (classification.kind === "automated") {
+      // Captured, but deliberately NOT promoted to a lead.
+      leadSkippedReason = classification.reasons.join("; ");
+      matchResult.match_method = "automated_no_lead";
+      matchResult.confidence = 0;
+    } else {
+      leadId = createLeadFromComm({
+        email: clientAddress,
+        first_name: clientNameParts[0] ?? "",
+        last_name: clientNameParts.slice(1).join(" ") ?? "",
+        source: "comms_capture",
+      });
+      // Flag role-address leads so they can be triaged later.
+      matchResult.match_method = classification.kind === "review" ? "created_new_review" : "created_new";
+      matchResult.confidence = classification.kind === "review" ? 0.5 : 1;
+    }
   }
 
   // 5. Store message
@@ -134,19 +150,25 @@ export async function POST(req: NextRequest) {
   // 7. Update thread
   updateThreadActivity(thread.id, leadId);
 
-  // 8. Create extraction record
-  const extraction = createExtraction(message.id);
-
-  // 9. Fire-and-forget extraction (async)
-  runExtraction(message.id).catch(err => console.error("[comms/ingest] extraction error:", err));
+  // 8 & 9. Run AI extraction only when this became a lead — skip automated/no-lead
+  // captures so we don't spend Claude API calls classifying robot mail.
+  let extractionId: number | null = null;
+  if (leadId) {
+    const extraction = createExtraction(message.id);
+    extractionId = extraction.id;
+    runExtraction(message.id).catch(err => console.error("[comms/ingest] extraction error:", err));
+  }
 
   return NextResponse.json({
     ok: true,
-    status: "ingested",
+    status: leadId ? "ingested" : "captured_no_lead",
     messageDbId: message.id,
     threadId: thread.id,
     leadId,
     matchMethod: matchResult.match_method,
-    extractionId: extraction.id,
+    senderKind: classification.kind,
+    senderReasons: classification.reasons,
+    leadSkippedReason,
+    extractionId,
   });
 }

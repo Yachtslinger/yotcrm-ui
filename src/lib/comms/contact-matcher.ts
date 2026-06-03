@@ -15,7 +15,7 @@ function getDb() {
 
 export type MatchResult = {
   lead_id: number | null;
-  match_method: "email_exact" | "phone_exact" | "name_exact" | "created_new" | "no_match";
+  match_method: "email_exact" | "phone_exact" | "name_exact" | "created_new" | "created_new_review" | "automated_no_lead" | "no_match";
   confidence: number;
   lead?: { id: number; first_name: string; last_name: string; email: string; phone: string };
 };
