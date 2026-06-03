@@ -10,7 +10,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Database from "better-sqlite3";
 import { classifySender } from "@/lib/comms/sender-classifier";
-import { deleteContact } from "@/lib/clients/storage";
 
 export const runtime = "nodejs";
 
@@ -60,20 +59,28 @@ export async function POST(req: NextRequest) {
   if (!ids.length) return NextResponse.json({ ok: false, error: "Provide ids: number[]" }, { status: 400 });
 
   const db = getDb();
-  let allowed: number[] = [];
   try {
     const placeholders = ids.map(() => "?").join(",");
+    // Only comms_capture leads are eligible — protects real/manual clients.
     const rows = db.prepare(
       `SELECT id FROM leads WHERE source = 'comms_capture' AND id IN (${placeholders})`
     ).all(...ids) as { id: number }[];
-    allowed = rows.map((r) => r.id);
+    const allowed = rows.map((r) => r.id);
+    const rejected = ids.filter((id) => !allowed.includes(id));
+    const deleted: number[] = [];
+    for (const id of allowed) {
+      // Best-effort child cleanup; ignore tables that don't exist here.
+      for (const stmt of [
+        "DELETE FROM boats WHERE lead_id = ?",
+        "DELETE FROM comms_contact_matches WHERE lead_id = ?",
+      ]) {
+        try { db.prepare(stmt).run(id); } catch { /* table may not exist */ }
+      }
+      const res = db.prepare("DELETE FROM leads WHERE id = ? AND source = 'comms_capture'").run(id);
+      if (res.changes > 0) deleted.push(id);
+    }
+    return NextResponse.json({ ok: true, deleted, rejected_not_comms_capture: rejected });
+  } catch (err) {
+    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
   } finally { db.close(); }
-
-  const rejected = ids.filter((id) => !allowed.includes(id));
-  const deleted: number[] = [];
-  for (const id of allowed) {
-    const ok = await deleteContact(String(id));
-    if (ok) deleted.push(id);
-  }
-  return NextResponse.json({ ok: true, deleted, rejected_not_comms_capture: rejected });
 }
