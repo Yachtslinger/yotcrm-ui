@@ -138,8 +138,10 @@ function Row({ label, path, effective, bold, show, overrides, onOverride, onRese
   function startEdit(sc: keyof Scenario) { if (bold) return; setEditSc(sc); setEditVal(String(Math.round(effective[sc]))); }
   function saveEdit() {
     if (editSc===null) return;
-    const num = parseFloat(editVal.replace(/[$,\s−-]/g,""));
-    if (!isNaN(num)&&num>=0) onOverride(`${path}.${editSc}`,num);
+    // Strip everything except digits and decimal point — no negatives possible
+    const cleaned = editVal.replace(/[^0-9.]/g, "");
+    const num = cleaned ? parseFloat(cleaned) : NaN;
+    if (!isNaN(num) && isFinite(num)) onOverride(`${path}.${editSc}`, Math.round(num));
     setEditSc(null);
   }
   const hasOv = !bold&&(overrides[`${path}.low`]!==undefined||overrides[`${path}.mid`]!==undefined||overrides[`${path}.high`]!==undefined);
@@ -640,6 +642,24 @@ export default function OwnershipPage() {
                       ))}
                     </div>
                     <p className="text-xs mt-2" style={{color:"var(--navy-400)"}}>Drag to 0 for owner-operated / no-crew scenario. Uncheck individual salary rows in the table for finer control.</p>
+                    {/* Removed crew members — show individually so user can restore them */}
+                    {(()=>{
+                      const removed=(model.crew.salaries.breakdown??[]).filter(r=>excludedPaths.has(`crew.salaries.${r.role}`));
+                      if(removed.length===0) return null;
+                      return (
+                        <div className="mt-3 pt-3" style={{borderTop:"1px solid rgba(255,255,255,.06)"}}>
+                          <p className="text-xs mb-2" style={{color:"var(--navy-400)"}}>Removed — click to add back:</p>
+                          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                            {removed.map(r=>(
+                              <button key={r.role} onClick={()=>toggleExclude(`crew.salaries.${r.role}`)}
+                                style={{display:"flex",alignItems:"center",gap:5,padding:"5px 11px",borderRadius:8,border:"1px solid rgba(248,113,113,.35)",background:"rgba(248,113,113,.08)",color:"#f87171",cursor:"pointer",fontSize:11,fontWeight:600}}>
+                                + {r.role.trim()} <span style={{fontSize:10,opacity:0.65,fontWeight:400}}>{fmt(r.mid)}/yr</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
                 <div className="mt-3 pt-3" style={{borderTop:"1px solid rgba(255,255,255,.06)",fontSize:11,color:"var(--navy-400)"}}>
