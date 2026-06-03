@@ -36,6 +36,13 @@ type CostModel = {
   capital: {
     av: Scenario; engineeringDeck: Scenario; interior: Scenario;
     paint: Scenario; tendersToys: Scenario; other: Scenario;
+    haulAntifoul?: Scenario;
+  };
+  capitalEvents?: {
+    paint:    { label: string; totalEst: number; perFt: string; periodYears: number; note: string };
+    engines:  { label: string; costPerEngine: number; numEngines: number; intervalHours: number; yearsAtCurrentUse: number; note: string };
+    systems:  { label: string; totalEst: number; periodYears: number; note: string };
+    interior: { label: string; totalEst: number; periodYears: number; note: string };
   };
   assumptions: string; rangeExplanation: string;
   categoryBreakdown: string; crewStructureNote: string; keyDrivers: string;
@@ -337,6 +344,7 @@ export default function OwnershipPage() {
       getEff("capital.av",m.capital.av), getEff("capital.engineeringDeck",m.capital.engineeringDeck),
       getEff("capital.interior",m.capital.interior), getEff("capital.paint",m.capital.paint),
       getEff("capital.tendersToys",m.capital.tendersToys), getEff("capital.other",m.capital.other),
+      getEff("capital.haulAntifoul", m.capital.haulAntifoul ?? {low:0,mid:0,high:0}),
     ]);
   }
 
@@ -638,9 +646,13 @@ export default function OwnershipPage() {
                         {([["administrative.professionalFees","Professional Fees",model.administrative.professionalFees],["administrative.bankCharges","Bank Charges",model.administrative.bankCharges],["administrative.managementFee","Management Fee",model.administrative.managementFee],["administrative.managementTravel","Management Travel",model.administrative.managementTravel]] as [string,string,Scenario][]).map(([p,l,s])=>(<Row key={p} label={l} path={p} effective={getEff(p,s)} show={showScenarios} overrides={overrides} onOverride={handleOverride} onResetRow={resetRow}/>))}
                         <Row label="TOTAL ADMINISTRATIVE" path="__adm" effective={admTotal} bold show={showScenarios} overrides={overrides} onOverride={handleOverride} onResetRow={resetRow}/>
 
-                        <SectionHeader show={showScenarios} label="CAPITAL IMPROVEMENTS"/>
-                        {([["capital.av","AV / Electronics Upgrade Reserve",model.capital.av],["capital.engineeringDeck","Engine Overhaul Reserve",model.capital.engineeringDeck],["capital.interior","Interior Refresh Reserve",model.capital.interior],["capital.paint","Paint Cycle Reserve",model.capital.paint],["capital.tendersToys","Tenders & Toys Reserve",model.capital.tendersToys],["capital.other","Systems & Contingency Reserve",model.capital.other]] as [string,string,Scenario][]).map(([p,l,s])=>(<Row key={p} label={l} path={p} effective={getEff(p,s)} show={showScenarios} overrides={overrides} onOverride={handleOverride} onResetRow={resetRow}/>))}
-                        <Row label="TOTAL CAPITAL" path="__cap" effective={capTotal} bold show={showScenarios} overrides={overrides} onOverride={handleOverride} onResetRow={resetRow}/>
+                        <SectionHeader show={showScenarios} label="ANNUAL HAUL-OUT & ANTIFOUL"/>
+                        <Row label="Haul-out, Bottom Paint & Antifoul" path="capital.haulAntifoul"
+                          effective={getEff("capital.haulAntifoul", model.capital.haulAntifoul??{low:0,mid:0,high:0})}
+                          show={showScenarios} overrides={overrides} onOverride={handleOverride} onResetRow={resetRow}/>
+                        <Row label="TOTAL HAUL-OUT" path="__haul"
+                          effective={getEff("capital.haulAntifoul", model.capital.haulAntifoul??{low:0,mid:0,high:0})}
+                          bold show={showScenarios} overrides={overrides} onOverride={handleOverride} onResetRow={resetRow}/>
 
                         <tr><td colSpan={colCount(showScenarios)} className="pt-4"/></tr>
                         <Row label="GRAND TOTAL" path="__gt" effective={gtAdj} bold show={showScenarios} overrides={overrides} onOverride={handleOverride} onResetRow={resetRow}/>
@@ -657,6 +669,27 @@ export default function OwnershipPage() {
                       </tbody>
                     </table>
                   </div>
+                  {/* Capital Events footnote — separate from annual total */}
+                  {model.capitalEvents&&(
+                    <div className="rounded-xl mt-4 p-5" style={{background:"var(--card)",border:"1px solid rgba(251,146,60,.25)"}}>
+                      <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{color:"#fb923c"}}>Capital Events — Not Included in Annual Figure Above</p>
+                      <p className="text-xs mb-4" style={{color:"var(--navy-400)"}}>These are major one-time expenditures that occur on multi-year cycles. Plan for them separately — they are not amortised into the running cost above.</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        {[
+                          { key:"paint",   icon:"🎨", e:model.capitalEvents.paint,   val:`${fmt(model.capitalEvents.paint.totalEst)} total · every ${model.capitalEvents.paint.periodYears} yrs` },
+                          { key:"engines", icon:"⚙️", e:model.capitalEvents.engines,  val:`${fmt(model.capitalEvents.engines.costPerEngine)} / engine · ${model.capitalEvents.engines.intervalHours.toLocaleString()}hr interval · ≈ ${model.capitalEvents.engines.yearsAtCurrentUse} yrs` },
+                          { key:"systems", icon:"📡", e:model.capitalEvents.systems,  val:`${fmt(model.capitalEvents.systems.totalEst)} total · every ${model.capitalEvents.systems.periodYears} yrs` },
+                          { key:"interior",icon:"🛋️", e:model.capitalEvents.interior, val:`${fmt(model.capitalEvents.interior.totalEst)} total · every ${model.capitalEvents.interior.periodYears} yrs` },
+                        ].map(({key,icon,e,val})=>(
+                          <div key={key} style={{background:"rgba(251,146,60,.06)",border:"1px solid rgba(251,146,60,.15)",borderRadius:8,padding:"10px 14px"}}>
+                            <div style={{fontSize:12,fontWeight:700,color:"#fb923c",marginBottom:3}}>{icon} {e.label}</div>
+                            <div style={{fontSize:13,fontWeight:700,color:"var(--foreground)",marginBottom:3}}>{val}</div>
+                            <div style={{fontSize:11,color:"var(--navy-400)",lineHeight:1.5}}>{e.note}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <CategoryExamples/>
                 </div>
               )}
