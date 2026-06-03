@@ -38,12 +38,7 @@ type CostModel = {
     paint: Scenario; tendersToys: Scenario; other: Scenario;
     haulAntifoul?: Scenario;
   };
-  capitalEvents?: {
-    paint:    { label: string; totalEst: number; perFt: string; periodYears: number; note: string };
-    engines:  { label: string; costPerEngine: number; numEngines: number; intervalHours: number; yearsAtCurrentUse: number; note: string };
-    systems:  { label: string; totalEst: number; periodYears: number; note: string };
-    interior: { label: string; totalEst: number; periodYears: number; note: string };
-  };
+  capitalEvents?: { disclaimer: string };
   assumptions: string; rangeExplanation: string;
   categoryBreakdown: string; crewStructureNote: string; keyDrivers: string;
 };
@@ -669,25 +664,11 @@ export default function OwnershipPage() {
                       </tbody>
                     </table>
                   </div>
-                  {/* Capital Events footnote — separate from annual total */}
-                  {model.capitalEvents&&(
-                    <div className="rounded-xl mt-4 p-5" style={{background:"var(--card)",border:"1px solid rgba(251,146,60,.25)"}}>
-                      <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{color:"#fb923c"}}>Capital Events — Not Included in Annual Figure Above</p>
-                      <p className="text-xs mb-4" style={{color:"var(--navy-400)"}}>These are major one-time expenditures that occur on multi-year cycles. Plan for them separately — they are not amortised into the running cost above.</p>
-                      <div className="grid grid-cols-2 gap-3">
-                        {[
-                          { key:"paint",   icon:"🎨", e:model.capitalEvents.paint,   val:`${fmt(model.capitalEvents.paint.totalEst)} total · every ${model.capitalEvents.paint.periodYears} yrs` },
-                          { key:"engines", icon:"⚙️", e:model.capitalEvents.engines,  val:`${fmt(model.capitalEvents.engines.costPerEngine)} / engine · ${model.capitalEvents.engines.intervalHours.toLocaleString()}hr interval · ≈ ${model.capitalEvents.engines.yearsAtCurrentUse} yrs` },
-                          { key:"systems", icon:"📡", e:model.capitalEvents.systems,  val:`${fmt(model.capitalEvents.systems.totalEst)} total · every ${model.capitalEvents.systems.periodYears} yrs` },
-                          { key:"interior",icon:"🛋️", e:model.capitalEvents.interior, val:`${fmt(model.capitalEvents.interior.totalEst)} total · every ${model.capitalEvents.interior.periodYears} yrs` },
-                        ].map(({key,icon,e,val})=>(
-                          <div key={key} style={{background:"rgba(251,146,60,.06)",border:"1px solid rgba(251,146,60,.15)",borderRadius:8,padding:"10px 14px"}}>
-                            <div style={{fontSize:12,fontWeight:700,color:"#fb923c",marginBottom:3}}>{icon} {e.label}</div>
-                            <div style={{fontSize:13,fontWeight:700,color:"var(--foreground)",marginBottom:3}}>{val}</div>
-                            <div style={{fontSize:11,color:"var(--navy-400)",lineHeight:1.5}}>{e.note}</div>
-                          </div>
-                        ))}
-                      </div>
+                  {/* Capital events disclaimer */}
+                  {model.capitalEvents?.disclaimer&&(
+                    <div className="rounded-xl mt-4 p-4" style={{background:"rgba(251,146,60,.06)",border:"1px solid rgba(251,146,60,.20)"}}>
+                      <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{color:"#fb923c"}}>Capital Events — Excluded from Annual Figure</p>
+                      <p className="text-sm leading-relaxed" style={{color:"var(--foreground)",opacity:0.82}}>{model.capitalEvents.disclaimer}</p>
                     </div>
                   )}
                   <CategoryExamples/>

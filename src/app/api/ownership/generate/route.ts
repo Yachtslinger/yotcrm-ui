@@ -497,53 +497,10 @@ function buildBudget(opts: {
   // ── 7. Annual haul-out + antifoul (genuinely annual — stays in running cost) ──
   const haul = haulAntifoul(lft, port);
 
-  // ── 7b. Capital events — NOT in annual total, shown as footnotes ─────
-  // Paint
-  const hullMatL = hullMaterial.toLowerCase();
-  const isMetal  = hullMatL.includes("steel") || hullMatL.includes("alum");
-  const paintPfFt = finish === "explorer" ? "$80-120" :
-                    isMetal ? (lft >= 130 ? "$1,200-2,000" : "$400-700") :
-                    (lft >= 130 ? "$1,500-3,000" : "$500-900");
-  const paintJob  = isMetal ? lft * (lft>=130?1600:550) : lft * (lft>=130?2200:700);
-  const paintCycle = finish === "explorer" ? 3 : isMetal ? 4 : lft >= 130 ? 6 : 7;
-  const paintEvent = {
-    label:       "Full Paint Job",
-    totalEst:    Math.round(paintJob / 50000) * 50000,
-    perFt:       paintPfFt,
-    periodYears: paintCycle,
-    note:        `~${paintPfFt}/ft · typically every ${paintCycle} years · not included in annual figure above`,
+  // ── Capital events disclaimer — amounts intentionally excluded ──────
+  const capitalEvents = {
+    disclaimer: `This model covers annual operating costs only. Major capital events — full paint refits, engine overhauls, electronics upgrades, and interior refits — are excluded. These vary enormously by vessel condition, engine hours, and maintenance history and cannot be responsibly estimated without a full pre-purchase survey. Plan for them as a separate budget conversation with your broker and captain.`,
   };
-  // Engine overhaul
-  const hpe = (hpTotal > 0 ? hpTotal : lft * 12) / 2;
-  const ovCostPer = hpe < 300 ? 35_000 : hpe < 600 ? 65_000 : hpe < 1200 ? 120_000 : hpe < 2000 ? 185_000 : 280_000;
-  const ovInterval = hpe >= 1200 ? 17_000 : 13_000;
-  const ovYrs = annualHrs > 0 ? Math.round(ovInterval / annualHrs) : 15;
-  const engineEvent = {
-    label:         "Engine Overhaul (per engine)",
-    costPerEngine: ovCostPer,
-    numEngines:    2,
-    intervalHours: ovInterval,
-    yearsAtCurrentUse: ovYrs,
-    note: `~$${(ovCostPer/1000).toFixed(0)}K per engine · at ${ovInterval.toLocaleString()}hr intervals · approx every ${ovYrs} yrs at ${annualHrs} hrs/yr`,
-  };
-  // Systems / electronics
-  const sysEst = Math.round(lft * (lft >= 150 ? 1200 : lft >= 100 ? 800 : 500) / 10000) * 10000;
-  const systemsEvent = {
-    label:       "Electronics & Systems Refresh",
-    totalEst:    sysEst,
-    periodYears: 8,
-    note:        `~$${(sysEst/1000).toFixed(0)}K · navigation, AV, satcom hardware · typically every 8 years`,
-  };
-  // Interior refit
-  const intEst = Math.round(lft * (lft >= 150 ? 1800 : lft >= 100 ? 1200 : 700) / 10000) * 10000;
-  const interiorEvent = {
-    label:       "Interior Refit / Soft Goods",
-    totalEst:    intEst,
-    periodYears: 10,
-    note:        `~$${(intEst/1000).toFixed(0)}K · upholstery, soft goods, galley — every 8-12 years depending on use`,
-  };
-
-  const capitalEvents = { paint: paintEvent, engines: engineEvent, systems: systemsEvent, interior: interiorEvent };
 
   // ── 8. Sub-total (pre-management) ──────────────────────────────────
   // NOTE: paintCap, engCap, sysCap, addCap are NOT in annual total —
