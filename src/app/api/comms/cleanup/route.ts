@@ -14,7 +14,7 @@ import { classifySender } from "@/lib/comms/sender-classifier";
 export const runtime = "nodejs";
 
 const DB_PATH = process.env.DB_PATH || "/app/data/yotcrm.db";
-function getDb() { const db = new Database(DB_PATH); db.pragma("journal_mode = WAL"); return db; }
+function getDb() { const db = new Database(DB_PATH); db.pragma("journal_mode = WAL"); db.pragma("foreign_keys = OFF"); return db; }
 
 function checkAuth(req: NextRequest): boolean {
   const secret = process.env.INGEST_SECRET;
@@ -73,8 +73,11 @@ export async function POST(req: NextRequest) {
       for (const stmt of [
         "DELETE FROM boats WHERE lead_id = ?",
         "DELETE FROM comms_contact_matches WHERE lead_id = ?",
+        "DELETE FROM sent_emails WHERE lead_id = ?",
+        "UPDATE comms_threads SET lead_id = NULL WHERE lead_id = ?",
+        "UPDATE email_ingest_failures SET resolved_lead_id = NULL WHERE resolved_lead_id = ?",
       ]) {
-        try { db.prepare(stmt).run(id); } catch { /* table may not exist */ }
+        try { db.prepare(stmt).run(id); } catch { /* table/column may not exist here */ }
       }
       const res = db.prepare("DELETE FROM leads WHERE id = ? AND source = 'comms_capture'").run(id);
       if (res.changes > 0) deleted.push(id);
