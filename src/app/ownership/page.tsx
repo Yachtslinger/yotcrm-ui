@@ -424,7 +424,7 @@ export default function OwnershipPage() {
     if(!model) return;
     setPdfLoading(true);
     try{
-      const res=await fetch("/api/ownership/pdf",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model,scenarios:showScenarios})});
+      const res=await fetch("/api/ownership/pdf",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model,scenarios:showScenarios,overrides,excludedPaths:Array.from(excludedPaths)})});
       if(!res.ok) throw new Error("PDF failed");
       const blob=await res.blob();
       const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
