@@ -160,10 +160,9 @@ function Row({ label, path, effective, bold, show, overrides, onOverride, onRese
               {!excluded&&<span style={{color:"#000",fontSize:8,fontWeight:900,lineHeight:1}}>✓</span>}
             </button>
           )}
-          <span style={{paddingLeft:bold?0:0}}>
-            {label}
-          </span>
-          {hasOv&&<button onClick={()=>onResetRow(path)} title="Reset to model values" style={{fontSize:10,color:"#fb923c",background:"none",border:"none",cursor:"pointer",padding:0}}>↺</button>}
+          <span>{label}</span>
+          {hasOv&&<span style={{fontSize:9,fontWeight:700,color:"#fb923c",background:"rgba(251,146,60,.12)",borderRadius:3,padding:"1px 5px",letterSpacing:"0.03em"}}>edited</span>}
+          {hasOv&&<button onClick={()=>onResetRow(path)} title="Reset to model value" style={{fontSize:10,color:"#fb923c",background:"none",border:"none",cursor:"pointer",padding:0}}>↺</button>}
         </span>
       </td>
       {(["low","mid","high"] as (keyof Scenario)[]).map(sc=>{
@@ -177,8 +176,7 @@ function Row({ label, path, effective, bold, show, overrides, onOverride, onRese
                 onBlur={saveEdit} onKeyDown={e=>{if(e.key==="Enter")saveEdit();if(e.key==="Escape")setEditSc(null);}}
                 style={{background:"transparent",border:`1px solid ${color}`,borderRadius:4,color,fontSize:13,textAlign:"right",width:90,padding:"2px 6px",outline:"none"}}/>
             ):(
-              <span style={{fontSize:13,color:bold?color:isOv?"#fb923c":"var(--foreground)",fontWeight:bold?700:400,display:"inline-flex",alignItems:"center",justifyContent:"flex-end",gap:4}}>
-                {isOv&&<span style={{width:5,height:5,borderRadius:"50%",background:"#fb923c",flexShrink:0}}/>}
+              <span style={{fontSize:13,color:bold?color:isOv?"#fb923c":"var(--foreground)",fontWeight:bold?700:400}}>
                 {fmt(effective[sc])}
               </span>
             )}
@@ -300,12 +298,26 @@ export default function OwnershipPage() {
   }
   function restoreAll() { setExcludedPaths(new Set()); }
 
-  // getEff returns zero for excluded paths — all section/grand totals auto-correct
+  // Per-person crew support paths — scale automatically when crew count changes
+  const CREW_PER_PERSON = ["crew.foodBeverage","crew.medical","crew.uniforms",
+    "crew.training","crew.travel","crew.accommodation","crew.entertainment","insurance.crewHealth"];
+
+  // getEff: returns zero for excluded, scales per-person crew items, scales fuel with hours
   function getEff(path:string, s:Scenario): Scenario {
     if (excludedPaths.has(path)) return {low:0,mid:0,high:0};
-    const ratio = baseHours>0 ? adjustHours/baseHours : 1;
-    const base = path==="operations.fuels" ? {low:s.low*ratio,mid:s.mid*ratio,high:s.high*ratio} : {...s};
-    return {low:overrides[`${path}.low`]??base.low,mid:overrides[`${path}.mid`]??base.mid,high:overrides[`${path}.high`]??base.high};
+    const hasOverride = overrides[`${path}.low`]!==undefined || overrides[`${path}.mid`]!==undefined || overrides[`${path}.high`]!==undefined;
+    let base: Scenario;
+    if (!hasOverride && CREW_PER_PERSON.includes(path) && baseCrewCount > 0) {
+      // Scale proportionally with crew count (unless user has manually overridden)
+      const scale = adjustCrewCount / baseCrewCount;
+      base = {low: s.low*scale, mid: s.mid*scale, high: s.high*scale};
+    } else if (path === "operations.fuels") {
+      const ratio = baseHours>0 ? adjustHours/baseHours : 1;
+      base = {low: s.low*ratio, mid: s.mid*ratio, high: s.high*ratio};
+    } else {
+      base = {...s};
+    }
+    return {low:overrides[`${path}.low`]??base.low, mid:overrides[`${path}.mid`]??base.mid, high:overrides[`${path}.high`]??base.high};
   }
 
   const charterRevenue = React.useMemo(():Scenario=>{
@@ -314,10 +326,12 @@ export default function OwnershipPage() {
     return{low:adjustCharterWeeks*wg*0.60,mid:adjustCharterWeeks*wg*0.78,high:adjustCharterWeeks*wg*0.92};
   },[adjustCharterWeeks,vesselLoaFt]);
 
-  // crewDelta — handles adjustCrewCount = 0 (full no-crew scenario)
+  // crewDelta — SALARY ONLY for slider changes; per-person support auto-scales via getEff
+  // Extra position toggles still get full salary+support (those people aren't in the model at all)
   const crewDelta: Scenario = React.useMemo(()=>{
     if (!perCrewRates) return {low:0,mid:0,high:0};
     const r5l=(n:number)=>Math.round(n/5000)*5000;
+    // sp only used for extra position toggles
     const sp={
       low:  r5l(perCrewRates.foodDaily.low *365)+perCrewRates.health.low +perCrewRates.travel.low +perCrewRates.uniform.low +perCrewRates.training.low,
       mid:  r5l(perCrewRates.foodDaily.mid *365)+perCrewRates.health.mid +perCrewRates.travel.mid +perCrewRates.uniform.mid +perCrewRates.training.mid,
@@ -325,18 +339,18 @@ export default function OwnershipPage() {
     };
     const delta=adjustCrewCount-baseCrewCount;
     let d:Scenario={low:0,mid:0,high:0};
-    // Going down (including all the way to 0) — remove named positions bottom-up
+    // Slider: SALARY ONLY — support handled by getEff scaling above
     if (delta<0) {
       const named=perCrewRates.namedSalaries??[];
       for (let i=baseCrewCount-1;i>=Math.max(adjustCrewCount,0);i--) {
         const pos=named[i]??perCrewRates.salJr;
-        d.low-=pos.low+sp.low; d.mid-=pos.mid+sp.mid; d.high-=pos.high+sp.high;
+        d.low-=pos.low; d.mid-=pos.mid; d.high-=pos.high;
       }
     } else if (delta>0) {
-      d={low:delta*(perCrewRates.salJr.low+sp.low),mid:delta*(perCrewRates.salJr.mid+sp.mid),high:delta*(perCrewRates.salJr.high+sp.high)};
+      d={low:delta*perCrewRates.salJr.low, mid:delta*perCrewRates.salJr.mid, high:delta*perCrewRates.salJr.high};
     }
+    // Extra toggles: full cost (not in model base)
     extraPositions.filter(p=>p.checked).forEach(pos=>{
-      const r5=r5l; void r5;
       d.low+=r5l(pos.salMid*0.82)+sp.low; d.mid+=pos.salMid+sp.mid; d.high+=r5l(pos.salMid*1.18)+sp.high;
     });
     return d;
@@ -676,7 +690,8 @@ export default function OwnershipPage() {
                         <span style={{width:12,height:12,borderRadius:3,border:"1.5px solid var(--brass-400)",background:"var(--brass-400)",display:"inline-flex",alignItems:"center",justifyContent:"center"}}><span style={{color:"#000",fontSize:7,fontWeight:900}}>✓</span></span>
                         Uncheck any row to hide it and remove it from the total
                       </span>
-                      · Click a value to edit · ↺ resets to model value
+                      · Click a value to edit · ↺ resets to model value ·{" "}
+                      <span style={{color:"#fb923c",fontWeight:600}}>edited</span>{" "}badge = value has been manually changed
                     </p>
                     <table style={{width:"100%",borderCollapse:"collapse"}}>
                       <thead>
