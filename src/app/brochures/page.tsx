@@ -1062,22 +1062,34 @@ export default function BrochuresPage() {
     setVessel(v => v ? { ...v, videos: (v.videos || []).filter((_, i) => i !== idx) } : v);
   }
 
-  async function uploadImage(file: File, target: "main" | "ga") {
-    if (!file.type.startsWith("image/")) { showToast("Please select an image file", "error"); return; }
+  async function uploadImages(files: File[], target: "main" | "ga") {
+    // Filter to images and send them all in ONE multipart request — the
+    // /api/listings/upload route already iterates formData.getAll("files").
+    const imgs = files.filter(f => f.type.startsWith("image/"));
+    if (!imgs.length) { showToast("Please select image files", "error"); return; }
+    if (imgs.length < files.length) showToast(`Skipped ${files.length - imgs.length} non-image file(s)`, "error");
     try {
       const form = new FormData();
-      form.append("files", file);
+      for (const f of imgs) form.append("files", f);
       const res = await fetch("/api/listings/upload", { method: "POST", body: form });
       const d = await res.json();
-      if (d.ok && d.files?.[0]?.url) {
-        const fullUrl = `https://yotcrm-production.up.railway.app${d.files[0].url}`;
-        if (target === "main") {
-          setVessel(v => v ? { ...v, images: [...v.images, { src: fullUrl, alt: "" }] } : v);
-        } else {
-          setVessel(v => v ? { ...v, gaImages: [...(v.gaImages || []), { src: fullUrl, alt: "General Arrangement" }] } : v);
-        }
-        showToast("Image uploaded");
-      } else throw new Error(d.error || "Upload failed");
+      if (!d.ok || !Array.isArray(d.files) || !d.files.length) {
+        throw new Error(d.error || "Upload failed");
+      }
+      const newItems = d.files
+        .filter((f: { url?: string }) => f.url)
+        .map((f: { url: string }) => ({
+          src: `https://yotcrm-production.up.railway.app${f.url}`,
+          alt: target === "ga" ? "General Arrangement" : "",
+        }));
+      if (!newItems.length) throw new Error("Upload returned no files");
+      // Single state update: append all new items at once.
+      if (target === "main") {
+        setVessel(v => v ? { ...v, images: [...v.images, ...newItems] } : v);
+      } else {
+        setVessel(v => v ? { ...v, gaImages: [...(v.gaImages || []), ...newItems] } : v);
+      }
+      showToast(newItems.length === 1 ? "Image uploaded" : `${newItems.length} images uploaded`);
     } catch (err) { showToast(err instanceof Error ? err.message : "Upload failed", "error"); }
   }
 
@@ -1293,7 +1305,7 @@ export default function BrochuresPage() {
           </div>
           <ImageGrid images={vessel.images} onMove={moveImage} onRemove={removeImage} onCategory={setImageCategory} />
           {/* Add image — URL or upload */}
-          <ImageAdder onUrl={url => addImageUrl(url, "main")} onUpload={f => uploadImage(f, "main")} placeholder="https://example.com/photo.jpg" />
+          <ImageAdder onUrl={url => addImageUrl(url, "main")} onUpload={fs => uploadImages(fs, "main")} placeholder="https://example.com/photo.jpg" multi />
         </div>
 
         {/* GA Images */}
@@ -1317,7 +1329,7 @@ export default function BrochuresPage() {
               ))}
             </div>
           )}
-          <ImageAdder onUrl={url => addImageUrl(url, "ga")} onUpload={f => uploadImage(f, "ga")} placeholder="https://example.com/general-arrangement.jpg" multi />
+          <ImageAdder onUrl={url => addImageUrl(url, "ga")} onUpload={fs => uploadImages(fs, "ga")} placeholder="https://example.com/general-arrangement.jpg" multi />
         </div>
 
         {/* Videos */}
@@ -2101,10 +2113,12 @@ function VideoAdder({ onAdd }: { onAdd: (url: string) => void }) {
   );
 }
 
-/* ── ImageAdder — URL input + file upload in one row ── */
+/* ── ImageAdder — URL input + file upload in one row ──
+ * onUpload receives an array (one or many files) so the parent can batch a
+ * single multi-file request to the upload API — which already supports it. */
 function ImageAdder({ onUrl, onUpload, placeholder, multi = false }: {
   onUrl: (url: string) => void;
-  onUpload: (file: File) => void;
+  onUpload: (files: File[]) => void | Promise<void>;
   placeholder: string;
   multi?: boolean;
 }) {
@@ -2113,9 +2127,10 @@ function ImageAdder({ onUrl, onUpload, placeholder, multi = false }: {
   const [drag, setDrag] = React.useState(false);
   const fileRef = React.useRef<HTMLInputElement>(null);
 
-  async function handleUpload(file: File) {
+  async function handleUpload(files: File[]) {
+    if (!files.length) return;
     setUploading(true);
-    try { await onUpload(file); } finally { setUploading(false); }
+    try { await onUpload(files); } finally { setUploading(false); }
   }
 
   function submit() {
@@ -2147,14 +2162,14 @@ function ImageAdder({ onUrl, onUpload, placeholder, multi = false }: {
           onClick={() => !uploading && fileRef.current?.click()}
           onDragOver={e => { e.preventDefault(); setDrag(true); }}
           onDragLeave={() => setDrag(false)}
-          onDrop={e => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) handleUpload(f); }}
+          onDrop={e => { e.preventDefault(); setDrag(false); const fs = Array.from(e.dataTransfer.files); if (fs.length) handleUpload(fs); }}
           className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed cursor-pointer flex-shrink-0 transition-all px-3"
           style={{ minWidth: 72, minHeight: 44, borderColor: drag ? "var(--brass-400)" : "var(--border)", background: drag ? "rgba(184,147,58,.06)" : "transparent" }}>
           {uploading
             ? <div className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "var(--brass-400)", borderTopColor: "transparent" }} />
             : <><Upload className="w-4 h-4 mb-0.5" style={{ color: "var(--navy-400)" }} /><span className="text-[9px]" style={{ color: "var(--navy-400)" }}>Upload</span></>}
-          <input ref={fileRef} type="file" accept="image/*" className="hidden"
-            onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ""; }} />
+          <input ref={fileRef} type="file" accept="image/*" multiple className="hidden"
+            onChange={e => { const fs = Array.from(e.target.files || []); if (fs.length) handleUpload(fs); e.target.value = ""; }} />
         </div>
       </div>
     </div>
