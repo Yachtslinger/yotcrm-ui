@@ -734,6 +734,23 @@ export async function aiExtractSpecs(vessel: VesselData, text: string): Promise<
     { field: "displacement",         hint: "displacement in tonnes" },
     { field: "grossTonnage",         hint: "gross tonnage (GT) number" },
     { field: "location",             hint: "current location where vessel is lying or berthed" },
+    { field: "homePort",             hint: "home port or port of registry e.g. 'George Town, Cayman Islands'" },
+    // Ground tackle + deck gear.
+    { field: "windlass",             hint: "windlass brand, model and capacity e.g. 'Maxwell 4000 24V', 'Muir VRWC4500'" },
+    { field: "anchoring",            hint: "anchor type, brand and chain e.g. 'Stainless Bruce-style anchor with 300ft chain'" },
+    // Climate + machinery brands the regex pass cannot infer.
+    { field: "airCon",               hint: "air conditioning system type e.g. 'Chilled water', 'Reverse-cycle DX'" },
+    { field: "airConMake",           hint: "air conditioning brand e.g. 'Dometic', 'Marine Air', 'Cruisair'" },
+    { field: "sewageTreatment",      hint: "sewage / blackwater treatment system e.g. 'Type III MSD', 'Headhunter Tidal Wave'" },
+    { field: "paintSystem",          hint: "paint or topside coating system e.g. 'Awlgrip', 'Alexseal', 'Sterling'" },
+    { field: "deckMaterial",         hint: "deck surface material e.g. 'Teak', 'Esthec', 'Non-skid fiberglass'" },
+    { field: "keelType",             hint: "keel type or hull form descriptor e.g. 'Semi-displacement', 'Reinforced'" },
+    // Propulsion components a regex pass typically misses.
+    { field: "propellers",           hint: "propeller count, blade count and material e.g. 'Twin five-blade Nibral'" },
+    { field: "propulsion",           hint: "propulsion type e.g. 'Direct-drive diesel', 'IPS', 'Pod drive', 'Shaft'" },
+    { field: "gearbox",              hint: "transmission / gearbox brand and model e.g. 'ZF 2050-A'" },
+    // Service & survey dates.
+    { field: "lastService",          hint: "date of last major service or refit e.g. 'May 2026'" },
     { field: "description",          hint: "a flowing 2-4 paragraph marketing description of the vessel, drawn from the listing's own descriptive prose — do NOT invent details, only rephrase/condense what the listing states" },
   ];
 
@@ -753,7 +770,7 @@ Fields to find:
 ${fieldList}
 
 Listing text:
-${text.slice(0, 18000)}
+${text.slice(0, 100000)}
 
 JSON:`;
 

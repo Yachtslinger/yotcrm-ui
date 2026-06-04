@@ -174,8 +174,10 @@ export default function BrochuresPage() {
   // Convenience aliases so the rest of the code keeps working
   const url  = urls[0] ?? "";
   const url2 = urls[1] ?? "";
-  const [pendingPdf, setPendingPdf]   = React.useState<File | null>(null);
-  const [pdfFileName, setPdfFileName] = React.useState("");
+  // Multiple PDFs can be staged for a single brochure build — a broker
+  // write-up + a list of works + an inventory get combined into one
+  // extraction pass. Capped at 5 server-side.
+  const [pendingPdfs, setPendingPdfs] = React.useState<File[]>([]);
   const [vessel, setVessel]       = React.useState<VesselData | null>(null);
   const [brochures, setBrochures] = React.useState<Brochure[]>([]);
   const [loading, setLoading]     = React.useState(true);
@@ -212,7 +214,7 @@ export default function BrochuresPage() {
   const gaInputRef  = React.useRef<HTMLInputElement>(null);
 
   const isOceanKing = /oceanking\.it/i.test(url);
-  const hasAnySources = urls.some(u => u.trim()) || !!pendingPdf;
+  const hasAnySources = urls.some(u => u.trim()) || pendingPdfs.length > 0;
 
   function showToast(msg: string, type: "success" | "error" = "success") {
     setToast({ msg, type });
@@ -375,7 +377,7 @@ export default function BrochuresPage() {
     const activeUrls = urls.map(u => u.trim()).filter(Boolean);
     const sourceLabels = [
       ...activeUrls.map((u, i) => `URL ${i + 1}: ${u}`),
-      ...(pendingPdf ? [`PDF: ${pdfFileName}`] : []),
+      ...(pendingPdfs.length ? [pendingPdfs.length === 1 ? `PDF: ${pendingPdfs[0].name}` : `${pendingPdfs.length} PDFs`] : []),
     ];
     setBuildStatus(`Scraping ${sourceLabels.length} source${sourceLabels.length > 1 ? "s" : ""}…`);
 
@@ -391,10 +393,10 @@ export default function BrochuresPage() {
         return d.vessel as VesselData;
       })());
 
-      const pdfPromise = pendingPdf ? (async () => {
-        setBuildStatus("Extracting PDF…");
+      const pdfPromise = pendingPdfs.length ? (async () => {
+        setBuildStatus(pendingPdfs.length === 1 ? "Extracting PDF…" : `Extracting ${pendingPdfs.length} PDFs…`);
         const form = new FormData();
-        form.append("file", pendingPdf);
+        for (const f of pendingPdfs) form.append("files", f);
         const r = await fetch("/api/brochures/scrape-pdf", { method: "POST", body: form });
         const d = await r.json();
         if (!r.ok || !d.ok) throw new Error(d.error || "PDF failed");
@@ -480,9 +482,23 @@ export default function BrochuresPage() {
     }
   }
 
-  function handlePdfSelect(file: File) {
-    setPdfFileName(file.name);
-    showToast(`PDF staged: ${file.name} — click Build Brochure to include it`, "success");
+  function handlePdfsSelect(files: File[]) {
+    if (!files.length) return;
+    const MAX = 5;
+    setPendingPdfs(prev => {
+      const merged = [...prev];
+      for (const f of files) {
+        if (merged.length >= MAX) break;
+        if (!merged.some(m => m.name === f.name && m.size === f.size)) merged.push(f);
+      }
+      return merged;
+    });
+    if (files.length === 1) {
+      showToast(`PDF staged: ${files[0].name} — click Build Brochure to include it`, "success");
+    } else {
+      const capped = Math.min(files.length, MAX - pendingPdfs.length);
+      showToast(`${capped} PDFs staged — click Build Brochure to include them`, "success");
+    }
   }
 
   /* ── Paste import — handles raw HTML (View Source) AND plain text ── */
@@ -1744,40 +1760,52 @@ export default function BrochuresPage() {
                 onDragLeave={() => setPdfDragOver(false)}
                 onDrop={e => {
                   e.preventDefault(); setPdfDragOver(false);
-                  const file = e.dataTransfer.files?.[0];
-                  if (file && file.type === "application/pdf") { setPendingPdf(file); handlePdfSelect(file); }
-                  else showToast("Please drop a PDF file", "error");
+                  const fs = Array.from(e.dataTransfer.files || []).filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"));
+                  if (fs.length) handlePdfsSelect(fs);
+                  else showToast("Please drop PDF files", "error");
                 }}
                 className="flex flex-col items-center justify-center gap-3 rounded-xl cursor-pointer transition-all"
                 style={{
-                  border: `2px dashed ${pdfDragOver ? "var(--brass-400)" : pendingPdf ? "#22c55e" : "var(--border)"}`,
-                  background: pdfDragOver ? "rgba(184,147,58,0.08)" : pendingPdf ? "rgba(34,197,94,0.06)" : "rgba(255,255,255,0.02)",
+                  border: `2px dashed ${pdfDragOver ? "var(--brass-400)" : pendingPdfs.length ? "#22c55e" : "var(--border)"}`,
+                  background: pdfDragOver ? "rgba(184,147,58,0.08)" : pendingPdfs.length ? "rgba(34,197,94,0.06)" : "rgba(255,255,255,0.02)",
                   padding: "32px 20px",
                   minHeight: 140,
                 }}>
-                {pendingPdf ? (
+                {pendingPdfs.length ? (
                   <>
                     <div style={{ fontSize: 32 }}>✅</div>
-                    <div className="text-sm font-semibold" style={{ color: "#22c55e" }}>{pdfFileName}</div>
-                    <button type="button"
-                      onClick={e => { e.stopPropagation(); setPendingPdf(null); setPdfFileName(""); }}
-                      className="text-xs px-3 py-1 rounded-lg mt-1"
-                      style={{ background: "rgba(180,0,0,.15)", color: "#f87171", border: "1px solid rgba(180,0,0,.2)" }}>
-                      Remove PDF
-                    </button>
+                    <div className="w-full flex flex-col gap-1.5">
+                      {pendingPdfs.map((f, i) => (
+                        <div key={i} className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg"
+                          style={{ background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.25)" }}>
+                          <div className="text-sm font-semibold truncate" style={{ color: "#22c55e" }}>{f.name}</div>
+                          <button type="button"
+                            onClick={e => { e.stopPropagation(); setPendingPdfs(prev => prev.filter((_, j) => j !== i)); }}
+                            className="text-xs px-2 py-0.5 rounded shrink-0"
+                            style={{ background: "rgba(180,0,0,.15)", color: "#f87171", border: "1px solid rgba(180,0,0,.2)" }}>
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    {pendingPdfs.length < 5 && (
+                      <div className="text-xs" style={{ color: "var(--navy-400)" }}>
+                        Click or drop to add more — up to 5 PDFs total
+                      </div>
+                    )}
                   </>
                 ) : (
                   <>
                     <div style={{ fontSize: 36 }}>📄</div>
-                    <div className="text-sm font-semibold" style={{ color: "var(--foreground)" }}>Drop PDF here or click to browse</div>
-                    <div className="text-xs" style={{ color: "var(--navy-400)" }}>Builder brochures, spec sheets, listing PDFs</div>
+                    <div className="text-sm font-semibold" style={{ color: "var(--foreground)" }}>Drop PDFs here or click to browse</div>
+                    <div className="text-xs" style={{ color: "var(--navy-400)" }}>Builder brochures, spec sheets, list of works — up to 5</div>
                   </>
                 )}
               </div>
-              <input ref={pdfInputRef} type="file" accept=".pdf,application/pdf" className="hidden"
+              <input ref={pdfInputRef} type="file" accept=".pdf,application/pdf" multiple className="hidden"
                 onChange={e => {
-                  const file = e.target.files?.[0];
-                  if (file) { setPendingPdf(file); handlePdfSelect(file); }
+                  const fs = Array.from(e.target.files || []);
+                  if (fs.length) handlePdfsSelect(fs);
                   e.target.value = "";
                 }} />
             </>

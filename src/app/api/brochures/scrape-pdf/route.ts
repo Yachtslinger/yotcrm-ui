@@ -394,63 +394,112 @@ print(json.dumps(result, ensure_ascii=False))
 export async function POST(req: NextRequest) {
   const tmpDir = os.tmpdir();
   const scriptPath = path.join(tmpDir, "extract_pdf.py");
-  let pdfPath = "";
+  const pdfPaths: string[] = [];
+  const MAX_PDFS = 5;
 
   try {
     fs.writeFileSync(scriptPath, EXTRACT_SCRIPT);
 
+    // Accept multiple PDFs in one upload. Brokers routinely split a listing
+    // into a write-up + a "list of works" + an inventory, and the AI gets
+    // far better results when it sees all of them concatenated in one pass.
     const formData = await req.formData();
-    const file = formData.get("file") as File | null;
-    if (!file) {
+    const filesAll = [
+      ...formData.getAll("files"),
+      ...formData.getAll("file"), // legacy single-file callers
+    ].filter((f): f is File => f instanceof File);
+    if (!filesAll.length) {
       return NextResponse.json({ ok: false, error: "No file provided" }, { status: 400 });
     }
-    if (!file.name.toLowerCase().endsWith(".pdf")) {
-      return NextResponse.json({ ok: false, error: "File must be a PDF" }, { status: 400 });
+    if (filesAll.length > MAX_PDFS) {
+      return NextResponse.json({ ok: false, error: `Maximum ${MAX_PDFS} PDFs per upload` }, { status: 400 });
+    }
+    const pdfs = filesAll.filter(f => f.name.toLowerCase().endsWith(".pdf"));
+    if (!pdfs.length) {
+      return NextResponse.json({ ok: false, error: "Files must be PDFs" }, { status: 400 });
     }
 
+    // Extract each PDF separately, then combine. Doing the Python pass per-
+    // file keeps the extraction itself simple and lets us label each section
+    // when concatenating, which gives the AI useful structural context
+    // ("--- HELIOS - Listing Write Up.pdf ---") rather than a single blob.
     const ts = Date.now();
-    pdfPath = path.join(tmpDir, `brochure_${ts}.pdf`);
-    const buffer = Buffer.from(await file.arrayBuffer());
-    fs.writeFileSync(pdfPath, buffer);
+    const perFile: { name: string; specs: Record<string, string>; description: string; rawText: string; pages: number; pdfName?: string; pdfYear?: number | null }[] = [];
 
-    const { stdout } = await execFileAsync("python3", [scriptPath, pdfPath], {
-      timeout: 45_000,
-      maxBuffer: 5 * 1024 * 1024,
-    });
+    for (let i = 0; i < pdfs.length; i++) {
+      const file = pdfs[i];
+      const pdfPath = path.join(tmpDir, `brochure_${ts}_${i}.pdf`);
+      pdfPaths.push(pdfPath);
+      const buffer = Buffer.from(await file.arrayBuffer());
+      fs.writeFileSync(pdfPath, buffer);
+      const { stdout } = await execFileAsync("python3", [scriptPath, pdfPath], {
+        timeout: 60_000,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      const ex = JSON.parse(stdout.trim());
+      perFile.push({
+        name: file.name,
+        specs: ex.specs || {},
+        description: ex.description || "",
+        rawText: ex.raw_text || "",
+        pages: ex.page_count || 0,
+        pdfName: ex.name,
+        pdfYear: ex.year,
+      });
+    }
 
-    const extracted = JSON.parse(stdout.trim());
+    // Merge specs across all PDFs (first non-empty wins, matching the regex
+    // pass's existing "fill empty" semantics). Merge descriptions by taking
+    // the longest one. Concatenate raw text with file separators.
+    const mergedSpecs: Record<string, string> = {};
+    for (const f of perFile) for (const [k, v] of Object.entries(f.specs)) {
+      if (v && !mergedSpecs[k]) mergedSpecs[k] = v;
+    }
+    const mergedDescription = perFile
+      .map(f => f.description)
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length)[0] || "";
+    const combinedRawText = perFile
+      .map(f => `--- ${f.name} ---\n${f.rawText}`)
+      .join("\n\n");
+    const mergedName = perFile.map(f => f.pdfName).find(Boolean) || undefined;
+    const mergedYear = perFile.map(f => f.pdfYear).find(y => y != null) ?? null;
+    const totalPages = perFile.reduce((s, f) => s + f.pages, 0);
 
     // Layer 1+2: map regex-extracted fields onto a canonical VesselData shape.
     const vessel = mapSpecsToVessel(
-      extracted.specs,
-      extracted.description,
-      extracted.raw_text,
-      extracted.name,
-      extracted.year,
+      mergedSpecs,
+      mergedDescription,
+      combinedRawText,
+      mergedName,
+      mergedYear,
     );
 
     // Layer 3: AI extraction. Mirrors the URL scraper's L3 — Claude fills any
     // fields the regex pass left empty, reading the full extracted PDF text.
     // No-op without ANTHROPIC_API_KEY (so local dev returns L1+L2 only).
-    // This is the single biggest win for prose-heavy broker write-ups where
-    // the spec table is sparse and the real data lives in paragraphs.
-    if (extracted.raw_text && extracted.raw_text.length > 200) {
-      try { await aiExtractSpecs(vessel, extracted.raw_text); }
+    // For multi-PDF builds (write-up + list of works), this is what surfaces
+    // brand-name equipment like windlass, anchor, AC make, paint system —
+    // things the regex pass cannot infer.
+    if (combinedRawText.length > 200) {
+      try { await aiExtractSpecs(vessel, combinedRawText); }
       catch (e) { console.error("[scrape-pdf] aiExtractSpecs failed:", e); }
     }
 
     return NextResponse.json({
       ok: true,
       vessel,
-      rawText: extracted.raw_text,
-      pageCount: extracted.page_count,
+      rawText: combinedRawText,
+      pageCount: totalPages,
+      pdfCount: perFile.length,
+      pdfNames: perFile.map(f => f.name),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "PDF scrape failed";
     console.error("[scrape-pdf]", msg);
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   } finally {
-    if (pdfPath && fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
+    for (const p of pdfPaths) { if (fs.existsSync(p)) fs.unlinkSync(p); }
     if (fs.existsSync(scriptPath)) fs.unlinkSync(scriptPath);
   }
 }
