@@ -404,9 +404,9 @@ export default function NavShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function fetchCommsPending() {
       try {
-        const r = await fetch("/api/comms/threads?status=pending&limit=1");
+        const r = await fetch("/api/comms/review-summary");
         const d = await r.json();
-        if (d.ok) setCommsPending(d.total ?? 0);
+        if (d.ok) setCommsPending(d.needs_attention ?? 0);
       } catch { /* ignore */ }
     }
     fetchCommsPending();

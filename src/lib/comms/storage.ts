@@ -191,10 +191,42 @@ export function listThreads(opts: { status?: string; limit?: number; offset?: nu
       SELECT t.*,
         (SELECT e.status FROM comms_extractions e JOIN comms_messages m ON e.message_id=m.id WHERE m.thread_id=t.id ORDER BY e.id DESC LIMIT 1) as extraction_status,
         (SELECT m.from_address FROM comms_messages m WHERE m.thread_id=t.id ORDER BY m.id ASC LIMIT 1) as from_address,
-        (SELECT m.from_name FROM comms_messages m WHERE m.thread_id=t.id ORDER BY m.id ASC LIMIT 1) as from_name
+        (SELECT m.from_name FROM comms_messages m WHERE m.thread_id=t.id ORDER BY m.id ASC LIMIT 1) as from_name,
+        (SELECT cm.match_method FROM comms_contact_matches cm JOIN comms_messages m ON cm.message_id=m.id WHERE m.thread_id=t.id ORDER BY cm.id DESC LIMIT 1) as match_method,
+        (SELECT cm.confidence FROM comms_contact_matches cm JOIN comms_messages m ON cm.message_id=m.id WHERE m.thread_id=t.id ORDER BY cm.id DESC LIMIT 1) as match_confidence
       FROM comms_threads t ${where} ORDER BY t.last_activity DESC LIMIT ? OFFSET ?
     `).all(...params, opts.limit ?? 50, opts.offset ?? 0);
-    return { threads: rows as (CommsThread & { extraction_status?: string; from_address?: string })[], total };
+    return { threads: rows as (CommsThread & { extraction_status?: string; from_address?: string; match_method?: string; match_confidence?: number })[], total };
+  } finally { db.close(); }
+}
+
+/**
+ * Unified "needs review" summary for the badge + stats.
+ * needs_attention is the de-duplicated union of: pending threads, threads with a
+ * pending AI extraction, and threads whose contact was a borderline (role-address)
+ * capture flagged created_new_review.
+ */
+export function getReviewSummary(): {
+  pending_threads: number; review_captures: number; pending_extractions: number; needs_attention: number;
+} {
+  initCommsTables(); const db = getDb();
+  try {
+    const one = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
+    const pending_threads = one("SELECT COUNT(*) n FROM comms_threads WHERE status='pending'");
+    const pending_extractions = one("SELECT COUNT(*) n FROM comms_extractions WHERE status='pending'");
+    const review_captures = one(`
+      SELECT COUNT(DISTINCT t.id) n FROM comms_threads t
+      WHERE t.status='pending' AND EXISTS (
+        SELECT 1 FROM comms_contact_matches cm JOIN comms_messages m ON cm.message_id=m.id
+        WHERE m.thread_id=t.id AND cm.match_method='created_new_review'
+      )`);
+    const needs_attention = one(`
+      SELECT COUNT(DISTINCT t.id) n FROM comms_threads t
+      LEFT JOIN comms_messages m ON m.thread_id=t.id
+      LEFT JOIN comms_extractions e ON e.message_id=m.id
+      LEFT JOIN comms_contact_matches cm ON cm.message_id=m.id
+      WHERE t.status='pending' OR e.status='pending' OR cm.match_method='created_new_review'`);
+    return { pending_threads, review_captures, pending_extractions, needs_attention };
   } finally { db.close(); }
 }
 export function getThread(id: number): CommsThread | null {

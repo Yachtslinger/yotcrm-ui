@@ -6,6 +6,7 @@ import Link from "next/link";
 type Thread = {
   id: number; subject: string; status: string; message_count: number;
   last_activity: string; extraction_status?: string; from_address?: string; from_name?: string; lead_id?: number;
+  match_method?: string; match_confidence?: number;
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -24,9 +25,13 @@ export default function CommsPage() {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [statusFilter, setStatusFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("pending");
+  const [summary, setSummary] = useState<{ needs_attention: number; review_captures: number; pending_extractions: number } | null>(null);
 
   useEffect(() => { loadThreads(); }, [statusFilter]);
+  useEffect(() => {
+    fetch("/api/comms/review-summary").then(r => r.json()).then(d => { if (d.ok) setSummary(d); }).catch(() => {});
+  }, []);
 
   async function loadThreads() {
     setLoading(true);
@@ -60,20 +65,25 @@ export default function CommsPage() {
             </p>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            {["", "pending", "reviewed", "dismissed"].map(s => (
+            {([["pending","Needs Review"],["","All"],["reviewed","Reviewed"],["dismissed","Dismissed"]] as [string,string][]).map(([s,label]) => (
               <button key={s} onClick={() => setStatusFilter(s)}
                 style={{ padding: "6px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
                   background: statusFilter === s ? "var(--brass-400, #b8933a)" : "var(--card, #1e293b)",
                   border: "1px solid var(--border, #334155)", color: statusFilter === s ? "#fff" : "var(--foreground)" }}>
-                {s || "All"}
+                {label}{s === "pending" && summary && summary.needs_attention > 0 ? ` (${summary.needs_attention})` : ""}
               </button>
             ))}
           </div>
         </div>
 
         {/* Stats bar */}
-        <div style={{ display: "flex", gap: 16, marginBottom: 20 }}>
-          {[["Total Threads", total], ["Pending Review", threads.filter(t => t.status === "pending").length]].map(([label, val]) => (
+        <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap" }}>
+          {([
+            ["Needs Review", summary?.needs_attention ?? "—"],
+            ["Confirm Contact", summary?.review_captures ?? "—"],
+            ["Verify Reading", summary?.pending_extractions ?? "—"],
+            ["Total Threads", total],
+          ] as [string, string | number][]).map(([label, val]) => (
             <div key={String(label)} style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 20px", minWidth: 120 }}>
               <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "serif" }}>{val}</div>
               <div style={{ fontSize: 11, color: "#888", textTransform: "uppercase", letterSpacing: "0.1em" }}>{label}</div>
@@ -113,6 +123,13 @@ export default function CommsPage() {
                           background: (EXTRACT_COLORS[t.extraction_status] ?? "#888") + "22",
                           color: EXTRACT_COLORS[t.extraction_status] ?? "#888" }}>
                           {t.extraction_status === "pending" ? "⏳ Awaiting Review" : t.extraction_status === "approved" ? "✓ Reviewed" : t.extraction_status}
+                        </span>
+                      )}
+                      {t.match_method === "created_new_review" && (
+                        <span title="Captured from a role/shared address (e.g. info@, sales@) — confirm whether this should be a contact"
+                          style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, fontWeight: 600,
+                          background: "#f59e0b22", color: "#f59e0b" }}>
+                          ⚠ Confirm contact
                         </span>
                       )}
                     </div>
