@@ -1063,34 +1063,55 @@ export default function BrochuresPage() {
   }
 
   async function uploadImages(files: File[], target: "main" | "ga") {
-    // Filter to images and send them all in ONE multipart request — the
-    // /api/listings/upload route already iterates formData.getAll("files").
+    // Filter to images, then upload in chunks. Phone photos run 5-10 MB each,
+    // so one giant batch can blow Railway's response timeout (the upload route
+    // streams the request fine but builds a JSON response for every file). A
+    // chunk size of 8 keeps any single round-trip well under typical proxy
+    // limits while still being far better than the one-at-a-time UX.
     const imgs = files.filter(f => f.type.startsWith("image/"));
     if (!imgs.length) { showToast("Please select image files", "error"); return; }
     if (imgs.length < files.length) showToast(`Skipped ${files.length - imgs.length} non-image file(s)`, "error");
-    try {
-      const form = new FormData();
-      for (const f of imgs) form.append("files", f);
-      const res = await fetch("/api/listings/upload", { method: "POST", body: form });
-      const d = await res.json();
-      if (!d.ok || !Array.isArray(d.files) || !d.files.length) {
-        throw new Error(d.error || "Upload failed");
+    const CHUNK = 8;
+    let totalUploaded = 0;
+    const failures: string[] = [];
+    for (let i = 0; i < imgs.length; i += CHUNK) {
+      const batch = imgs.slice(i, i + CHUNK);
+      try {
+        const form = new FormData();
+        for (const f of batch) form.append("files", f);
+        const res = await fetch("/api/listings/upload", { method: "POST", body: form });
+        const d = await res.json();
+        if (!d.ok || !Array.isArray(d.files)) throw new Error(d.error || "Upload failed");
+        const newItems = d.files
+          .filter((f: { url?: string }) => f.url)
+          .map((f: { url: string }) => ({
+            src: `https://yotcrm-production.up.railway.app${f.url}`,
+            alt: target === "ga" ? "General Arrangement" : "",
+          }));
+        if (newItems.length) {
+          // Append per-batch so the user sees progress as chunks land,
+          // rather than nothing until every chunk completes.
+          if (target === "main") {
+            setVessel(v => v ? { ...v, images: [...v.images, ...newItems] } : v);
+          } else {
+            setVessel(v => v ? { ...v, gaImages: [...(v.gaImages || []), ...newItems] } : v);
+          }
+          totalUploaded += newItems.length;
+        }
+      } catch (err) {
+        failures.push(`batch ${Math.floor(i / CHUNK) + 1}: ${err instanceof Error ? err.message : "failed"}`);
       }
-      const newItems = d.files
-        .filter((f: { url?: string }) => f.url)
-        .map((f: { url: string }) => ({
-          src: `https://yotcrm-production.up.railway.app${f.url}`,
-          alt: target === "ga" ? "General Arrangement" : "",
-        }));
-      if (!newItems.length) throw new Error("Upload returned no files");
-      // Single state update: append all new items at once.
-      if (target === "main") {
-        setVessel(v => v ? { ...v, images: [...v.images, ...newItems] } : v);
-      } else {
-        setVessel(v => v ? { ...v, gaImages: [...(v.gaImages || []), ...newItems] } : v);
-      }
-      showToast(newItems.length === 1 ? "Image uploaded" : `${newItems.length} images uploaded`);
-    } catch (err) { showToast(err instanceof Error ? err.message : "Upload failed", "error"); }
+    }
+    if (totalUploaded) {
+      showToast(
+        failures.length
+          ? `${totalUploaded} of ${imgs.length} uploaded — ${failures.length} batch(es) failed`
+          : `${totalUploaded} image${totalUploaded === 1 ? "" : "s"} uploaded`,
+        failures.length ? "error" : "success"
+      );
+    } else if (failures.length) {
+      showToast(`Upload failed: ${failures[0]}`, "error");
+    }
   }
 
   function addImageUrl(url: string, target: "main" | "ga") {    const trimmed = url.trim();
