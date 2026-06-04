@@ -44,6 +44,19 @@ export default function CommsPage() {
     } finally { setLoading(false); }
   }
 
+  async function refreshSummary() {
+    try { const d = await (await fetch("/api/comms/review-summary")).json(); if (d.ok) setSummary(d); } catch { /* ignore */ }
+  }
+  async function captureAction(threadId: number, action: "keep" | "toss") {
+    try {
+      await fetch("/api/comms/capture-action", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ threadId, action }),
+      });
+    } catch { /* ignore */ }
+    loadThreads(); refreshSummary();
+  }
+
   function relTime(iso: string) {
     const diff = Date.now() - new Date(iso).getTime();
     const m = Math.floor(diff / 60000);
@@ -105,14 +118,13 @@ export default function CommsPage() {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {threads.map(t => (
-              <Link key={t.id} href={`/comms/${t.id}`} style={{ textDecoration: "none" }}>
-                <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 18px",
-                  display: "grid", gridTemplateColumns: "1fr auto", gap: 12, cursor: "pointer",
-                  transition: "border-color .15s" }}
-                  onMouseEnter={e => (e.currentTarget.style.borderColor = "#b8933a")}
-                  onMouseLeave={e => (e.currentTarget.style.borderColor = "var(--border)")}>
+              <div key={t.id} style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 18px",
+                transition: "border-color .15s" }}
+                onMouseEnter={e => (e.currentTarget.style.borderColor = "#b8933a")}
+                onMouseLeave={e => (e.currentTarget.style.borderColor = "var(--border)")}>
+                <Link href={`/comms/${t.id}`} style={{ textDecoration: "none", color: "inherit", display: "grid", gridTemplateColumns: "1fr auto", gap: 12, cursor: "pointer" }}>
                   <div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
                       <span style={{ fontSize: 14, fontWeight: 600 }}>{t.subject || "(no subject)"}</span>
                       <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, fontWeight: 600, letterSpacing: "0.08em",
                         background: STATUS_COLORS[t.status] + "22", color: STATUS_COLORS[t.status] }}>
@@ -142,8 +154,25 @@ export default function CommsPage() {
                   <div style={{ fontSize: 12, color: "#888", textAlign: "right", whiteSpace: "nowrap" }}>
                     {relTime(t.last_activity)}
                   </div>
-                </div>
-              </Link>
+                </Link>
+                {t.match_method === "created_new_review" && (
+                  <div style={{ display: "flex", gap: 8, marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+                    <span style={{ fontSize: 11, color: "#888", alignSelf: "center", marginRight: "auto" }}>
+                      Borderline capture — keep as a contact or toss it?
+                    </span>
+                    <button onClick={() => captureAction(t.id, "keep")}
+                      style={{ padding: "5px 12px", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                        background: "#10b981", border: "none", color: "#fff" }}>
+                      ✓ Keep contact
+                    </button>
+                    <button onClick={() => captureAction(t.id, "toss")}
+                      style={{ padding: "5px 12px", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                        background: "transparent", border: "1px solid var(--border)", color: "#ef4444" }}>
+                      Toss
+                    </button>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         )}

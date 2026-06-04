@@ -9,7 +9,7 @@ import { matchContact, createLeadFromComm } from "@/lib/comms/contact-matcher";
 import {
   findMessageByMessageId, findThreadByKey, createThread,
   createMessage, updateThreadActivity, createExtraction, logContactMatch,
-  isUntracked,
+  isUntracked, updateThreadStatus,
 } from "@/lib/comms/storage";
 import { runExtraction } from "@/lib/comms/extractor";
 import { classifySender } from "@/lib/comms/sender-classifier";
@@ -62,6 +62,7 @@ export async function POST(req: NextRequest) {
   // 3. Thread grouping
   const threadKey = computeThreadKey(parsed.subject, parsed.references.concat(parsed.inReplyTo ? [parsed.inReplyTo] : []));
   let thread = findThreadByKey(threadKey);
+  const threadIsNew = !thread;
   if (!thread) thread = createThread({ thread_key: threadKey, subject: parsed.subject });
 
   // 4. Contact match (deterministic)
@@ -149,6 +150,14 @@ export async function POST(req: NextRequest) {
 
   // 7. Update thread
   updateThreadActivity(thread.id, leadId);
+
+  // 7b. Automated, lead-less captures: keep the message (over-capture) but auto-dismiss
+  // a brand-new thread so the Needs Review queue only holds things a human should act on.
+  // Guarded to new threads only, so an automated message landing in a real conversation
+  // never dismisses that conversation.
+  if (classification.kind === "automated" && !leadId && threadIsNew) {
+    updateThreadStatus(thread.id, "dismissed");
+  }
 
   // 8 & 9. Run AI extraction only when this became a lead — skip automated/no-lead
   // captures so we don't spend Claude API calls classifying robot mail.
