@@ -17,6 +17,9 @@ import { promisify } from "util";
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { emptyVessel } from "@/lib/vessel-scraper/types";
+import type { VesselData } from "@/lib/vessel-scraper/types";
+import { aiExtractSpecs } from "@/lib/vessel-scraper/utils";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -165,7 +168,7 @@ def extract_field(text, label_pats, value_pat=None):
 # ── MEASUREMENT value patterns ────────────────────────────────────────────────
 # These capture the first measurement unit in a value string
 
-DIM_PAT    = r'[\\d.,]+\\s*(?:m|ft|mm|cm|\\')(?:[\\d\\"]+)?'
+DIM_PAT    = r'[\\d.,]+\\s*(?:m|ft|mm|cm|\\')(?:[\\d\\"]+)?(?:\\s*/\\s*[\\d.,]+\\s*(?:m|ft|mm|cm))?'
 SPEED_PAT  = r'(?:up\\s+to\\s+)?[\\d.,]+\\s*(?:knots?|kn|km/h)'
 RANGE_PAT  = r'(?:up\\s+to\\s+)?[\\d.,]+\\s*(?:nautical\\s*miles?|nm|nmi)'
 WEIGHT_PAT = r'[\\d,]+\\s*(?:kg|lb|tons?|t\\b)'
@@ -178,10 +181,12 @@ YEAR_PAT   = r'\\b(19[5-9]\\d|20[0-4]\\d)\\b'
 # label_patterns matched against start of line (formats A-D)
 
 FIELD_DEFS = [
-    # Dimensions
-    ("loa",          [r"length\\s+overall", r"length\\s+over\\s+all", r"\\bloa\\b"],          DIM_PAT),
+    # Dimensions — "length" added so plain "Length: 80'" matches (was LOA-only).
+    # Plain "beam" added so "Beam: 20'1\"" matches (regex previously required a dash or paren).
+    ("loa",          [r"length\\s+overall", r"length\\s+over\\s+all", r"\\bloa\\b", r"\\blength\\b"],  DIM_PAT),
     ("lwl",          [r"length\\s+waterline", r"\\blwl\\b"],                                   DIM_PAT),
-    ("beam",         [r"beam\\s*[-(]"],                                                         DIM_PAT),
+    ("beam",         [r"beam\\s*[-(]", r"^beam\\b", r"\\bbeam\\b"],                          DIM_PAT),
+    ("beamMax",      [r"max(?:imum)?\\s*beam", r"beam\\s*max"],                                  DIM_PAT),
     ("draft",        [r"draft", r"draught"],                                                    DIM_PAT),
     ("airDraft",     [r"height\\s+above\\s+waterline", r"air\\s+draft", r"air\\s+draught"],    DIM_PAT),
     ("displacement", [r"displacement"],                                                          WEIGHT_PAT),
@@ -196,13 +201,20 @@ FIELD_DEFS = [
     ("gensets",      [r"generators?"],                                                           None),
     ("freshWater",   [r"fresh.?water\\s+capacity", r"fresh.?water"],                            VOL_PAT),
     ("holdingTank",  [r"holding\\s+tank"],                                                      None),
+    ("fuelTank",     [r"fuel\\s+capacity", r"fuel\\s+tank"],                                  VOL_PAT),
+    # Drivetrain — picked up if labelled on the spec block.
+    ("gearbox",      [r"transmissions?", r"gearbox(?:es)?"],                                   None),
+    # Accommodation extras.
+    ("heads",        [r"^heads\\b", r"number\\s+of\\s+heads"],                              r"\\d+"),
+    ("sleeps",       [r"\\bsleeps\\b", r"total\\s+berths"],                                 r"\\d+"),
+    ("netTonnage",   [r"net\\s+ton", r"\\bnt\\b"],                                          None),
     # Identity
     ("builder",      [r"\\bbuilder\\b"],                                                         None),
     ("navalArchitect",[r"naval\\s+arch"],                                                        None),
     ("exteriorDesign",[r"exterior\\s+styl", r"exterior\\s+design"],                             None),
     ("interiorDesign",[r"interior\\s+design"],                                                   None),
     ("hullMaterial", [r"hull\\s+material", r"hull\\s+construction", r"construction\\b"],        None),
-    ("hullForm",     [r"hull\\s+form", r"hull\\s+type", r"hull\\s+shape"],                     None),
+    ("hullForm",     [r"hull\\s+form", r"hull\\s+type", r"hull\\s+shape", r"hull\\s+config"], None),
     ("grossTonnage", [r"gross\\s+ton", r"\\bgt\\b"],                                            None),
     ("classification",[r"classification"],                                                        None),
     ("flagState",    [r"\\bflag\\b"],                                                            None),
@@ -407,6 +419,8 @@ export async function POST(req: NextRequest) {
     });
 
     const extracted = JSON.parse(stdout.trim());
+
+    // Layer 1+2: map regex-extracted fields onto a canonical VesselData shape.
     const vessel = mapSpecsToVessel(
       extracted.specs,
       extracted.description,
@@ -414,6 +428,16 @@ export async function POST(req: NextRequest) {
       extracted.name,
       extracted.year,
     );
+
+    // Layer 3: AI extraction. Mirrors the URL scraper's L3 — Claude fills any
+    // fields the regex pass left empty, reading the full extracted PDF text.
+    // No-op without ANTHROPIC_API_KEY (so local dev returns L1+L2 only).
+    // This is the single biggest win for prose-heavy broker write-ups where
+    // the spec table is sparse and the real data lives in paragraphs.
+    if (extracted.raw_text && extracted.raw_text.length > 200) {
+      try { await aiExtractSpecs(vessel, extracted.raw_text); }
+      catch (e) { console.error("[scrape-pdf] aiExtractSpecs failed:", e); }
+    }
 
     return NextResponse.json({
       ok: true,
@@ -431,47 +455,39 @@ export async function POST(req: NextRequest) {
   }
 }
 
+/**
+ * Map regex-extracted fields onto a canonical VesselData via emptyVessel().
+ * Returns a real VesselData so downstream code (merge, prepVessel, render)
+ * treats PDF-sourced vessels identically to URL-scraped ones.
+ *
+ * Skill split:
+ *   - This function does the structured spec mapping + image/feature extraction.
+ *   - The POST handler then calls aiExtractSpecs() as Layer 3 to fill any
+ *     spec fields the regex pass missed. Prose handling lives here; AI
+ *     completion lives in the route.
+ */
 function mapSpecsToVessel(
   specs: Record<string, string>,
   description: string,
   rawText: string,
   name?: string,
   year?: number | null,
-) {
-  const VESSEL_FIELDS = [
-    "loa","lwl","beam","beamMax","draft","airDraft","displacement","grossTonnage",
-    "classification","flagState","hullMaterial","hullForm","superstructure",
-    "exteriorDesign","interiorDesign","navalArchitect",
-    "engines","power","propulsion","propellers","gearbox",
-    "maxSpeed","cruiseSpeed","range",
-    "fuelTank","freshWater","holdingTank","lubeOil",
-    "guests","crew","staterooms","crewCabins","ownersCabin","guestCabins",
-    "price","location","builder",
-    "stabilisers","waterMaker","bowThruster","sternThruster",
-    "gensets","generatorKW","shorepower","voltageSystem","airCon",
-    "radar","chartPlotter","aisSystem","autopilot","satcom",
-    "fireSuppression","lifeRafts","navigation",
-    "tender","toys","jacuzzi","flybridge",
-  ];
+): VesselData {
+  const v = emptyVessel("");
+  if (name) v.name = name;
+  if (description) v.description = description;
+  if (year != null) v.year = year;
 
-  const v: Record<string, unknown> = {
-    name:        name || "",
-    description: description || "",
-    features:    [],
-    images:      [],
-    year:        year || null,
-    sourceUrl:   "",
-    stockNumber: "",
-    livingSpace: "",
-    notes:       "",
-  };
-
-  for (const f of VESSEL_FIELDS) {
-    v[f] = specs[f] || "";
+  // Copy any spec field whose key happens to match VesselData. unknown fields
+  // (e.g. transmissions, heads, sleeps) ride along on the same object — they
+  // don't hurt, and may be picked up by downstream features/description logic.
+  const vRec = v as unknown as Record<string, unknown>;
+  for (const [k, val] of Object.entries(specs)) {
+    if (val && !vRec[k]) vRec[k] = val;
   }
 
   // Year fallback from raw text
-  if (!v.year) {
+  if (v.year == null) {
     const ym = rawText.match(/\b(19[5-9]\d|20[0-4]\d)\b/);
     if (ym) {
       const y = parseInt(ym[1]);
@@ -481,21 +497,35 @@ function mapSpecsToVessel(
 
   // Images from any URLs embedded in the PDF
   const imgUrls = rawText.match(/https?:\/\/[^\s"'<>]+\.(?:jpe?g|png|webp)/gi) || [];
-  v.images = [...new Set(imgUrls)].slice(0, 20).map((src: string) => ({ src, alt: "" }));
+  v.images = [...new Set(imgUrls)].slice(0, 20).map(src => ({ src, alt: "" }));
 
-  // Build features list from raw text — look for bullet-point style lines
+  // Description fallback: if the Python pass produced none, take the longest
+  // prose-shaped paragraph from the raw text (≥150 chars, reads like English).
+  if (!v.description) {
+    const paras = rawText.split(/\n{2,}/).map(s => s.trim());
+    const candidates = paras.filter(p =>
+      p.length > 150 && p.split("\n").length < 12 &&
+      /\b(the|and|with|its|for|has|this|that|offers?)\b/i.test(p) &&
+      !/^\d+\s+[A-Z]/.test(p)
+    );
+    if (candidates.length) {
+      v.description = candidates.sort((a, b) => b.length - a.length)[0].slice(0, 4000);
+    }
+  }
+
+  // Features list — bullet-style lines (8–140 chars, contain a lowercase letter,
+  // not a pure measurement or a section header). Broker write-ups bullet feature
+  // lists with "•", so we also strip a leading bullet glyph when present.
   const featureLines: string[] = [];
-  for (const line of rawText.split("\n")) {
-    const t = line.trim();
-    // Feature lines: short (8–120 chars), not a section header, not a pure measurement
-    if (t.length >= 8 && t.length <= 120 && /[a-z]/.test(t)) {
+  for (const raw of rawText.split("\n")) {
+    const t = raw.replace(/^[•·●○◦▪\-\*]\s*/, "").trim();
+    if (t.length >= 8 && t.length <= 140 && /[a-z]/.test(t)) {
       if (!/^[\d.\s]+$/.test(t) && !/^(page|fig|table|\d+\s+[A-Z])/i.test(t)) {
         featureLines.push(t);
       }
     }
   }
-  // Deduplicate and cap
-  v.features = [...new Set(featureLines)].slice(0, 30);
+  v.features = [...new Set(featureLines)].slice(0, 60);
 
   return v;
 }
