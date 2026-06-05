@@ -2217,9 +2217,13 @@ function ImageAdder({ onUrl, onUpload, placeholder, multi = false }: {
           {uploading
             ? <div className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "var(--brass-400)", borderTopColor: "transparent" }} />
             : <><Upload className="w-4 h-4 mb-0.5" style={{ color: "var(--navy-400)" }} /><span className="text-[9px]" style={{ color: "var(--navy-400)" }}>Upload</span></>}
-          <input ref={fileRef} type="file" accept="image/*" multiple className="hidden"
-            onChange={e => { const fs = Array.from(e.target.files || []); if (fs.length) handleUpload(fs); e.target.value = ""; }} />
         </div>
+        {/* Hidden input lives OUTSIDE the click target — a synthetic .click()
+            on an input inside the clickable wrapper bubbles back up to that
+            wrapper's onClick, which Safari/Chrome treat as a programmatic
+            re-click during an open dialog and suppress the picker entirely. */}
+        <input ref={fileRef} type="file" accept="image/*" multiple className="hidden"
+          onChange={e => { const fs = Array.from(e.target.files || []); if (fs.length) handleUpload(fs); e.target.value = ""; }} />
       </div>
     </div>
   );
