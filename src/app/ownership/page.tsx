@@ -25,8 +25,10 @@ type CostModel = {
     agency: Scenario; audioVisual: Scenario; auto: Scenario; bridge: Scenario;
     computer: Scenario; deck: Scenario; dockExpress: Scenario; engineering: Scenario;
     corrective?: Scenario;
-    fuels: Scenario; galley: Scenario; interior: Scenario; launches: Scenario;
-    mailFreight: Scenario; office: Scenario; dockage: Scenario;
+    fuels: Scenario; fuelBasis?: string; fuelConfidence?: string; fuelGphMid?: number;
+    galley: Scenario; interior: Scenario; launches: Scenario;
+    mailFreight: Scenario; office: Scenario;
+    dockage: Scenario; dockageHomeBerth?: Scenario; dockageTransient?: Scenario; dockagePortDues?: Scenario;
     safetyMedical: Scenario; security: Scenario; survey: Scenario; warehousing: Scenario;
   };
   insurance: { hull: Scenario; pi: Scenario; crewHealth: Scenario };
@@ -40,6 +42,12 @@ type CostModel = {
     haulAntifoul?: Scenario;
   };
   capitalEvents?: { disclaimer: string };
+  // Reserve planning — optional, NOT in headline total
+  reservePlan?: {
+    paint:Scenario;teak:Scenario;engines:Scenario;generators:Scenario;stabilizers:Scenario;
+    electronics:Scenario;avIT:Scenario;softGoods:Scenario;tenders:Scenario;classSurvey:Scenario;
+    other:Scenario;total:Scenario;
+  } | null;
   assumptions: string; rangeExplanation: string;
   categoryBreakdown: string; crewStructureNote: string; keyDrivers: string;
 };
@@ -79,6 +87,14 @@ const CONDITION_OPTIONS = [
   {key:"average",   label:"Average",    sub:"Normal wear, some deferred items",  color:"#facc15"},
   {key:"deferred",  label:"Deferred",   sub:"Known maintenance backlog",         color:"#f87171"},
   {key:"unknown",   label:"Unknown",    sub:"No survey data yet (default)",      color:"#94a3b8"},
+];
+
+// Complexity — affects engineering, deck, interior, survey
+const COMPLEXITY_OPTIONS = [
+  {key:"simple",    label:"Simple",    sub:"Express / sport / single-deck",     color:"#38bdf8"},
+  {key:"normal",    label:"Normal",    sub:"Standard flybridge motor yacht",     color:"#94a3b8"},
+  {key:"high",      label:"High",      sub:"Tri-deck / explorer / classed",      color:"#f59e0b"},
+  {key:"very_high", label:"Very High", sub:"Custom systems / complex vintage",   color:"#f87171"},
 ];
 
 // What each scenario actually means — shown in the expandable panel
@@ -285,6 +301,9 @@ export default function OwnershipPage() {
   const [vesselStyle, setVesselStyle] = React.useState("Luxury / Full Fairing & Paint");
   const [usagePattern, setUsagePattern] = React.useState("normal_private");
   const [vesselCondition, setVesselCondition] = React.useState("unknown");
+  const [vesselComplexity, setVesselComplexity] = React.useState<string|undefined>(undefined); // auto-inferred if unset
+  const [knownGph, setKnownGph] = React.useState<number|undefined>(undefined);
+  const [includeReservePlanning, setIncludeReservePlanning] = React.useState(false);
   const [charterWeeks, setCharterWeeks] = React.useState(0);
   const [segment, setSegment] = React.useState<"super"|"small">("super");
   const [crewMode, setCrewMode] = React.useState<"owner"|"captain"|"captain_mate">("captain");
@@ -403,7 +422,13 @@ export default function OwnershipPage() {
       getEff("operations.fuels",m.operations.fuels),getEff("operations.galley",m.operations.galley),
       getEff("operations.interior",m.operations.interior),getEff("operations.launches",m.operations.launches),
       getEff("operations.mailFreight",m.operations.mailFreight),getEff("operations.office",m.operations.office),
-      getEff("operations.dockage",m.operations.dockage),getEff("operations.safetyMedical",m.operations.safetyMedical),
+      // Dockage — use sub-rows when available, fall back to total
+      ...(m.operations.dockageHomeBerth
+        ? [getEff("operations.dockageHomeBerth",m.operations.dockageHomeBerth),
+           getEff("operations.dockageTransient",m.operations.dockageTransient??{low:0,mid:0,high:0}),
+           getEff("operations.dockagePortDues",m.operations.dockagePortDues??{low:0,mid:0,high:0})]
+        : [getEff("operations.dockage",m.operations.dockage)]),
+      getEff("operations.safetyMedical",m.operations.safetyMedical),
       getEff("operations.security",m.operations.security),getEff("operations.survey",m.operations.survey),
       getEff("operations.warehousing",m.operations.warehousing),
       getEff("insurance.hull",m.insurance.hull),getEff("insurance.pi",m.insurance.pi),
@@ -426,7 +451,9 @@ export default function OwnershipPage() {
       const vessel=scrapeData.vessel||{};
       setVesselLoaFt(parseLoaToFeet(vessel.loa||""));
       const res=await fetch("/api/ownership/generate",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({vessel,url:url.trim(),usagePattern,vesselCondition,charterWeeks,homePort,vesselStyle,segment,crewMode})});
+        body:JSON.stringify({vessel,url:url.trim(),usagePattern,vesselCondition,
+          vesselComplexity,knownGph:knownGph||undefined,includeReservePlanning,
+          charterWeeks,homePort,vesselStyle,segment,crewMode})});
       const data=await res.json();
       if(!data.ok) throw new Error(data.error||"Generation failed");
       setModel(data.model);
@@ -552,6 +579,48 @@ export default function OwnershipPage() {
               ))}
             </div>
           </div>
+          {/* Complexity */}
+          <div className="mb-4">
+            <label className="block text-xs uppercase tracking-wider mb-2" style={{color:"var(--navy-400)"}}>
+              Complexity <span style={{fontWeight:400,textTransform:"none",letterSpacing:0}}>— affects engineering, deck, interior, survey · auto-inferred if not set</span>
+            </label>
+            <div className="grid grid-cols-4 gap-2">
+              {COMPLEXITY_OPTIONS.map(c=>(
+                <button key={c.key} onClick={()=>setVesselComplexity(prev=>prev===c.key?undefined:c.key)} className="rounded-lg px-3 py-2 text-left"
+                  style={{background:vesselComplexity===c.key?`${c.color}20`:"var(--input,#1e293b)",border:`1.5px solid ${vesselComplexity===c.key?c.color:"var(--border)"}`,color:vesselComplexity===c.key?c.color:"var(--foreground)"}}>
+                  <div className="text-xs font-bold">{c.label}</div>
+                  <div className="text-xs mt-0.5" style={{opacity:0.7,fontSize:10}}>{c.sub}</div>
+                </button>
+              ))}
+            </div>
+            {vesselComplexity===undefined&&<p className="text-xs mt-1" style={{color:"var(--navy-400)",opacity:0.7}}>Not set — will be inferred from vessel style and age</p>}
+          </div>
+          {/* Known fuel burn — optional override */}
+          <div className="mb-4">
+            <label className="block text-xs uppercase tracking-wider mb-1.5" style={{color:"var(--navy-400)"}}>
+              Known Fuel Burn <span style={{fontWeight:400,textTransform:"none",letterSpacing:0}}>— optional · captain/survey/builder data overrides formula</span>
+            </label>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <input type="number" min={0} max={500} step={1} value={knownGph??""} placeholder="e.g. 38"
+                onChange={e=>setKnownGph(e.target.value?Math.max(0,Number(e.target.value)):undefined)}
+                className="rounded-lg text-sm px-3 py-2"
+                style={{background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)",width:110}}/>
+              <span className="text-xs" style={{color:"var(--navy-400)"}}>GPH at cruise · leave blank to use HP formula</span>
+              {knownGph&&<button onClick={()=>setKnownGph(undefined)} style={{fontSize:11,color:"var(--navy-400)",background:"none",border:"none",cursor:"pointer"}}>✕ Clear</button>}
+            </div>
+          </div>
+          {/* Reserve planning toggle */}
+          <div className="mb-4">
+            <button onClick={()=>setIncludeReservePlanning(p=>!p)}
+              style={{display:"flex",alignItems:"center",gap:8,background:"none",border:"none",cursor:"pointer",padding:0}}>
+              <span style={{width:14,height:14,borderRadius:3,border:`1.5px solid ${includeReservePlanning?"#a78bfa":"var(--border)"}`,background:includeReservePlanning?"#a78bfa":"transparent",display:"inline-flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                {includeReservePlanning&&<span style={{color:"#fff",fontSize:8,fontWeight:900,lineHeight:1}}>✓</span>}
+              </span>
+              <span className="text-xs" style={{color:includeReservePlanning?"#a78bfa":"var(--navy-400)"}}>
+                <strong>Include Reserve Planning section</strong> — suggested annual reserves for major future work (excluded from headline budget)
+              </span>
+            </button>
+          </div>
           {segment==="small"&&(
             <div className="mb-4">
               <label className="block text-xs uppercase tracking-wider mb-1.5" style={{color:"var(--navy-400)"}}>Crew Arrangement</label>
@@ -584,7 +653,7 @@ export default function OwnershipPage() {
             :getEff("crew.salaries",model.crew.salaries);
           const crewTotal=sectionTotal([effSal,getEff("crew.recruitment",model.crew.recruitment),getEff("crew.travel",model.crew.travel),getEff("crew.accommodation",model.crew.accommodation),getEff("crew.uniforms",model.crew.uniforms),getEff("crew.training",model.crew.training),getEff("crew.foodBeverage",model.crew.foodBeverage),getEff("crew.medical",model.crew.medical),getEff("crew.dayWorkers",model.crew.dayWorkers),getEff("crew.entertainment",model.crew.entertainment)]);
           const commTotal=sectionTotal([getEff("communications.phone",model.communications.phone),getEff("communications.satTV",model.communications.satTV),getEff("communications.satcom",model.communications.satcom)]);
-          const opTotal=sectionTotal([getEff("operations.agency",model.operations.agency),getEff("operations.audioVisual",model.operations.audioVisual),getEff("operations.auto",model.operations.auto),getEff("operations.bridge",model.operations.bridge),getEff("operations.computer",model.operations.computer),getEff("operations.deck",model.operations.deck),getEff("operations.dockExpress",model.operations.dockExpress),getEff("operations.engineering",model.operations.engineering),getEff("operations.corrective",model.operations.corrective??{low:0,mid:0,high:0}),getEff("operations.fuels",model.operations.fuels),getEff("operations.galley",model.operations.galley),getEff("operations.interior",model.operations.interior),getEff("operations.launches",model.operations.launches),getEff("operations.mailFreight",model.operations.mailFreight),getEff("operations.office",model.operations.office),getEff("operations.dockage",model.operations.dockage),getEff("operations.safetyMedical",model.operations.safetyMedical),getEff("operations.security",model.operations.security),getEff("operations.survey",model.operations.survey),getEff("operations.warehousing",model.operations.warehousing)]);
+          const opTotal=sectionTotal([getEff("operations.agency",model.operations.agency),getEff("operations.audioVisual",model.operations.audioVisual),getEff("operations.auto",model.operations.auto),getEff("operations.bridge",model.operations.bridge),getEff("operations.computer",model.operations.computer),getEff("operations.deck",model.operations.deck),getEff("operations.dockExpress",model.operations.dockExpress),getEff("operations.engineering",model.operations.engineering),getEff("operations.corrective",model.operations.corrective??{low:0,mid:0,high:0}),getEff("operations.fuels",model.operations.fuels),getEff("operations.galley",model.operations.galley),getEff("operations.interior",model.operations.interior),getEff("operations.launches",model.operations.launches),getEff("operations.mailFreight",model.operations.mailFreight),getEff("operations.office",model.operations.office),...(model.operations.dockageHomeBerth?[getEff("operations.dockageHomeBerth",model.operations.dockageHomeBerth),getEff("operations.dockageTransient",model.operations.dockageTransient??{low:0,mid:0,high:0}),getEff("operations.dockagePortDues",model.operations.dockagePortDues??{low:0,mid:0,high:0})]:[getEff("operations.dockage",model.operations.dockage)]),getEff("operations.safetyMedical",model.operations.safetyMedical),getEff("operations.security",model.operations.security),getEff("operations.survey",model.operations.survey),getEff("operations.warehousing",model.operations.warehousing)]);
           const insTotal=sectionTotal([getEff("insurance.hull",model.insurance.hull),getEff("insurance.pi",model.insurance.pi),getEff("insurance.crewHealth",model.insurance.crewHealth)]);
           const admTotal=sectionTotal([getEff("administrative.professionalFees",model.administrative.professionalFees),getEff("administrative.bankCharges",model.administrative.bankCharges),getEff("administrative.managementFee",model.administrative.managementFee),getEff("administrative.managementTravel",model.administrative.managementTravel)]);
           const haulEff=getEff("capital.haulAntifoul",model.capital.haulAntifoul??{low:0,mid:0,high:0});
@@ -770,7 +839,27 @@ export default function OwnershipPage() {
 
                         {/* OPS */}
                         <SectionHeader show={showScenarios} label="OPERATIONS"/>
-                        {([["operations.agency","Agency",model.operations.agency],["operations.audioVisual","Audio Visual",model.operations.audioVisual],["operations.auto","Auto",model.operations.auto],["operations.bridge","Bridge",model.operations.bridge],["operations.computer","Computer",model.operations.computer],["operations.deck","Deck",model.operations.deck],["operations.dockExpress","Dock Express / Shipping",model.operations.dockExpress],["operations.engineering","Engineering (Routine Maintenance)",model.operations.engineering],["operations.corrective","Corrective Repair Allowance",model.operations.corrective??{low:0,mid:0,high:0}],["operations.fuels","Fuels & Lubricants",model.operations.fuels],["operations.galley","Galley (Guest Provisions)",model.operations.galley],["operations.interior","Interior",model.operations.interior],["operations.launches","Launches & Tenders",model.operations.launches],["operations.mailFreight","Mail & Freight",model.operations.mailFreight],["operations.office","Office",model.operations.office],["operations.dockage","Ports, Dockage & Customs",model.operations.dockage],["operations.safetyMedical","Safety & Medical",model.operations.safetyMedical],["operations.security","Security",model.operations.security],["operations.survey","Survey & Certification",model.operations.survey],["operations.warehousing","Warehousing & Storage",model.operations.warehousing]] as [string,string,Scenario][]).map(([p,l,s])=>(<Row key={p} {...rp(p,l,s)}/>))}
+                        {([["operations.agency","Agency",model.operations.agency],["operations.audioVisual","Audio Visual",model.operations.audioVisual],["operations.auto","Auto",model.operations.auto],["operations.bridge","Bridge",model.operations.bridge],["operations.computer","Computer",model.operations.computer],["operations.deck","Deck",model.operations.deck],["operations.dockExpress","Dock Express / Shipping",model.operations.dockExpress],["operations.engineering","Engineering (Routine Maintenance)",model.operations.engineering],["operations.corrective","Corrective Repair Allowance",model.operations.corrective??{low:0,mid:0,high:0}]] as [string,string,Scenario][]).map(([p,l,s])=>(<Row key={p} {...rp(p,l,s)}/>))}
+                        {/* Fuels with confidence indicator */}
+                        <Row {...rp("operations.fuels","Fuels & Lubricants",model.operations.fuels)}/>
+                        {model.operations.fuelBasis&&(
+                          <tr><td colSpan={colCount(showScenarios)} style={{paddingBottom:4,paddingLeft:22,fontSize:10,color:model.operations.fuelConfidence==="high"?"#4ade80":model.operations.fuelConfidence==="medium"?"#facc15":"#f87171"}}>
+                            {model.operations.fuelConfidence==="high"?"🟢":model.operations.fuelConfidence==="medium"?"🟡":"🔴"}{" "}
+                            <span style={{opacity:0.75}}>{model.operations.fuelBasis}</span>
+                          </td></tr>
+                        )}
+                        {([["operations.galley","Galley (Guest Provisions)",model.operations.galley],["operations.interior","Interior",model.operations.interior],["operations.launches","Launches & Tenders",model.operations.launches],["operations.mailFreight","Mail & Freight",model.operations.mailFreight],["operations.office","Office",model.operations.office]] as [string,string,Scenario][]).map(([p,l,s])=>(<Row key={p} {...rp(p,l,s)}/>))}
+                        {/* Dockage — 3 sub-rows when available */}
+                        {model.operations.dockageHomeBerth ? (
+                          <>
+                            <Row {...rp("operations.dockageHomeBerth","  Home Berth (Annual Berth Fee)",model.operations.dockageHomeBerth)}/>
+                            <Row {...rp("operations.dockageTransient","  Transient Marina & Port Calls",model.operations.dockageTransient??{low:0,mid:0,high:0})}/>
+                            <Row {...rp("operations.dockagePortDues","  Port Dues, Utilities & Storm Storage",model.operations.dockagePortDues??{low:0,mid:0,high:0})}/>
+                          </>
+                        ) : (
+                          <Row {...rp("operations.dockage","Ports, Dockage & Customs",model.operations.dockage)}/>
+                        )}
+                        {([["operations.safetyMedical","Safety & Medical",model.operations.safetyMedical],["operations.security","Security",model.operations.security],["operations.survey","Survey & Certification",model.operations.survey],["operations.warehousing","Warehousing & Storage",model.operations.warehousing]] as [string,string,Scenario][]).map(([p,l,s])=>(<Row key={p} {...rp(p,l,s)}/>))}
                         <Row path="__op" label="TOTAL OPERATIONS" effective={opTotal} bold show={showScenarios} overrides={overrides} onOverride={handleOverride} onResetRow={resetRow}/>
 
                         {/* INSURANCE */}
@@ -815,6 +904,60 @@ export default function OwnershipPage() {
                     <div className="rounded-xl mt-4 p-4" style={{background:"rgba(251,146,60,.06)",border:"1px solid rgba(251,146,60,.20)"}}>
                       <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{color:"#fb923c"}}>Capital Events — Excluded from Annual Figure</p>
                       <p className="text-sm leading-relaxed" style={{color:"var(--foreground)",opacity:0.82}}>{model.capitalEvents.disclaimer}</p>
+                    </div>
+                  )}
+
+                  {/* Reserve planning section — optional, NOT in headline total */}
+                  {model.reservePlan&&(
+                    <div className="rounded-xl mt-4 p-5" style={{background:"rgba(167,139,250,.05)",border:"1px solid rgba(167,139,250,.25)"}}>
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <p className="text-xs font-bold uppercase tracking-widest" style={{color:"#a78bfa"}}>Reserve Planning — Suggested Annual Reserves</p>
+                          <p className="text-xs mt-1" style={{color:"var(--navy-400)"}}>Major future work annualised · <strong>NOT included in the operating budget above</strong> · edit any line directly</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs" style={{color:"#a78bfa"}}>Reserve Plan Total (mid)</p>
+                          <p className="text-lg font-bold" style={{color:"#a78bfa"}}>{fmt(model.reservePlan.total.mid)}/yr</p>
+                        </div>
+                      </div>
+                      <table style={{width:"100%",borderCollapse:"collapse"}}>
+                        <tbody>
+                          {([
+                            ["reserve.paint","Paint & Fairing (annualised cycle)",model.reservePlan.paint,"Full paint job ÷ cycle years"],
+                            ["reserve.teak","Teak Deck Maintenance",model.reservePlan.teak,"Sanding, resealing, panel replacement"],
+                            ["reserve.engines","Engine Overhaul Reserve",model.reservePlan.engines,"HP-based overhaul cost ÷ interval hours × annual hrs"],
+                            ["reserve.generators","Generators & Major Systems",model.reservePlan.generators,"Generator overhaul, major system refits"],
+                            ["reserve.stabilizers","Stabilizer Rebuild",model.reservePlan.stabilizers,"Fin rebuild, actuator service — age-dependent"],
+                            ["reserve.electronics","Electronics & Navigation",model.reservePlan.electronics,"Full nav/bridge refresh every 8 years annualised"],
+                            ["reserve.avIT","AV / IT Infrastructure",model.reservePlan.avIT,"Entertainment systems refresh every 5 years"],
+                            ["reserve.softGoods","Soft Goods & Interior",model.reservePlan.softGoods,"Upholstery, linen, cabin soft goods refresh"],
+                            ["reserve.tenders","Tenders & Water Toys",model.reservePlan.tenders,"Tender replacement every 7 years annualised"],
+                            ["reserve.classSurvey","Class / Special Survey",model.reservePlan.classSurvey,"Periodic special survey costs annualised"],
+                            ["reserve.other","Other / Contingency",model.reservePlan.other,"Unplanned reserve contingency"],
+                          ] as [string,string,Scenario,string][]).map(([p,l,s,desc])=>(
+                            <tr key={p} style={{borderBottom:"1px solid rgba(167,139,250,.08)"}}>
+                              <td style={{padding:"6px 0",fontSize:12,color:"var(--foreground)"}}>
+                                <div>{l}</div>
+                                <div style={{fontSize:10,color:"var(--navy-400)",marginTop:1}}>{desc}</div>
+                              </td>
+                              {showScenarios.low&&<td style={{padding:"6px 8px",textAlign:"right",fontSize:12,color:"#4ade80"}}>{fmt(s.low)}</td>}
+                              {showScenarios.mid&&<td style={{padding:"6px 8px",textAlign:"right",fontSize:12,color:"var(--foreground)"}}>{fmt(s.mid)}</td>}
+                              {showScenarios.high&&<td style={{padding:"6px 8px",textAlign:"right",fontSize:12,color:"#f87171"}}>{fmt(s.high)}</td>}
+                            </tr>
+                          ))}
+                          <tr style={{borderTop:"1px solid rgba(167,139,250,.3)"}}>
+                            <td style={{padding:"8px 0",fontSize:13,fontWeight:700,color:"#a78bfa"}}>RESERVE PLAN TOTAL</td>
+                            {showScenarios.low&&<td style={{padding:"8px 8px",textAlign:"right",fontSize:13,fontWeight:700,color:"#4ade80"}}>{fmt(model.reservePlan.total.low)}</td>}
+                            {showScenarios.mid&&<td style={{padding:"8px 8px",textAlign:"right",fontSize:13,fontWeight:700,color:"#a78bfa"}}>{fmt(model.reservePlan.total.mid)}</td>}
+                            {showScenarios.high&&<td style={{padding:"8px 8px",textAlign:"right",fontSize:13,fontWeight:700,color:"#f87171"}}>{fmt(model.reservePlan.total.high)}</td>}
+                          </tr>
+                          <tr>
+                            <td colSpan={colCount(showScenarios)} style={{paddingTop:6,fontSize:11,color:"#a78bfa",opacity:0.75}}>
+                              Combined Operating + Reserve: {fmt(gtAdj.mid + model.reservePlan.total.mid)}/yr mid — this is closer to true ownership cost
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
                     </div>
                   )}
                   <CategoryExamples/>
