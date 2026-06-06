@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { getGovernanceDb, initGovernanceTables } from './db';
+import { GovError } from './errors';
 
 /**
  * Governed vessel records + live field reads (Pass 3).
@@ -105,4 +106,108 @@ export function getVesselFieldRow(db: Database.Database, vesselId: number, field
       | VesselFieldRow
       | undefined) ?? null
   );
+}
+
+// ---------------------------------------------------------------------------
+// Pass 4: live field writes (broker-approved). Additive; no schema changes.
+// ---------------------------------------------------------------------------
+
+export interface WriteLiveFieldArgs {
+  vesselId: number;
+  fieldKey: string;
+  value: string | null;
+  status: string;
+  sourceId?: number | null;
+  extractionId?: number | null;
+  by?: string | null;
+  verifiedBy?: string | null;
+  acceptedBy?: string | null;
+}
+
+/**
+ * Upsert a live vessel field (UNIQUE vessel_id+field_key). created_by is set on
+ * insert and preserved on update. db-param so callers compose it in a transaction.
+ */
+export function writeLiveField(db: Database.Database, args: WriteLiveFieldArgs): VesselFieldRow {
+  const by = args.by ?? null;
+  db.prepare(
+    `INSERT INTO ma_vessel_fields
+       (vessel_id, field_key, value, status, source_id, extraction_id, created_by, updated_by, verified_by, accepted_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(vessel_id, field_key) DO UPDATE SET
+       value = excluded.value,
+       status = excluded.status,
+       source_id = excluded.source_id,
+       extraction_id = excluded.extraction_id,
+       updated_by = excluded.updated_by,
+       verified_by = excluded.verified_by,
+       accepted_by = excluded.accepted_by,
+       updated_at = datetime('now')`
+  ).run(
+    args.vesselId, args.fieldKey, args.value, args.status,
+    args.sourceId ?? null, args.extractionId ?? null,
+    by, by, args.verifiedBy ?? null, args.acceptedBy ?? null
+  );
+  return getVesselFieldRow(db, args.vesselId, args.fieldKey) as VesselFieldRow;
+}
+
+export interface FieldHistoryArgs {
+  vesselId: number;
+  fieldKey: string;
+  action: string;
+  value: string | null;
+  status: string | null;
+  source?: string | null;
+  by?: string | null;
+}
+
+export function appendFieldHistory(db: Database.Database, h: FieldHistoryArgs): void {
+  db.prepare(
+    `INSERT INTO ma_field_history (vessel_id, field_key, action, value, status, source, by_user)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(h.vesselId, h.fieldKey, h.action, h.value, h.status, h.source ?? null, h.by ?? null);
+}
+
+/** Manual broker entry of a field value -> verified, provenance 'manual'. */
+export function setVesselField(vesselId: number, fieldKey: string, value: string, by?: string | null): VesselFieldRow {
+  initGovernanceTables();
+  const db = getGovernanceDb();
+  try {
+    if (!getVesselInternal(db, vesselId)) throw new GovError(404, 'vessel not found');
+    const run = db.transaction(() => {
+      const field = writeLiveField(db, {
+        vesselId, fieldKey, value: String(value), status: 'verified',
+        sourceId: null, extractionId: null, by, verifiedBy: by ?? null, acceptedBy: null,
+      });
+      appendFieldHistory(db, { vesselId, fieldKey, action: 'manual set', value: String(value), status: 'verified', source: 'manual', by });
+      return field;
+    });
+    return run();
+  } finally {
+    db.close();
+  }
+}
+
+/** Mark an existing live field as broker-verified. 404 if the field does not exist. */
+export function verifyVesselField(vesselId: number, fieldKey: string, by?: string | null): VesselFieldRow {
+  initGovernanceTables();
+  const db = getGovernanceDb();
+  try {
+    const run = db.transaction(() => {
+      const existing = getVesselFieldRow(db, vesselId, fieldKey);
+      if (!existing) throw new GovError(404, 'vessel field not found');
+      db.prepare(
+        `UPDATE ma_vessel_fields SET status='verified', verified_by=?, updated_by=?, updated_at=datetime('now')
+         WHERE vessel_id=? AND field_key=?`
+      ).run(by ?? null, by ?? null, vesselId, fieldKey);
+      appendFieldHistory(db, {
+        vesselId, fieldKey, action: 'verified', value: existing.value, status: 'verified',
+        source: existing.source_id != null ? 'source' : 'manual', by,
+      });
+      return getVesselFieldRow(db, vesselId, fieldKey) as VesselFieldRow;
+    });
+    return run();
+  } finally {
+    db.close();
+  }
 }

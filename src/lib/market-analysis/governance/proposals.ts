@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { getGovernanceDb, initGovernanceTables } from './db';
-import { getVesselFieldRow } from './vessels';
+import { getVesselFieldRow, writeLiveField, appendFieldHistory, type VesselFieldRow } from './vessels';
+import { GovError } from './errors';
 
 /**
  * Staged vessel-field proposals (Pass 3). AI-extracted fields land here as
@@ -126,4 +127,73 @@ export function getProposal(id: number): ProposalRow | null {
 
 function getProposalInternal(db: Database.Database, id: number): ProposalRow | null {
   return (db.prepare(`SELECT * FROM ma_vessel_field_proposals WHERE id = ?`).get(id) as ProposalRow | undefined) ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Pass 4: broker resolution of pending proposals -> live vessel fields.
+// One transaction; the single proposal UPDATE moves pending -> terminal, which
+// the terminal-lock trigger permits (it only blocks UPDATEs where OLD.status is
+// already terminal). A second resolution attempt is rejected with 409.
+// ---------------------------------------------------------------------------
+
+export type ResolveAction = 'accept' | 'edit_accept' | 'reject' | 'override';
+
+/** Pure: the live field status a resolution action produces. */
+export function resolvedFieldStatus(action: 'accept' | 'edit_accept' | 'override'): 'ai_accepted' | 'overridden' {
+  return action === 'accept' ? 'ai_accepted' : 'overridden';
+}
+
+export interface ResolveOpts {
+  action: ResolveAction;
+  value?: string | null;
+  by?: string | null;
+  notes?: string | null;
+}
+
+export function resolveProposal(id: number, opts: ResolveOpts): { proposal: ProposalRow; field: VesselFieldRow | null } {
+  initGovernanceTables();
+  const db = getGovernanceDb();
+  try {
+    const run = db.transaction(() => {
+      const p = getProposalInternal(db, id);
+      if (!p) throw new GovError(404, 'proposal not found');
+      if (p.status !== 'pending') throw new GovError(409, `proposal already resolved (${p.status})`);
+      const by = opts.by ?? null;
+
+      if (opts.action === 'reject') {
+        db.prepare(
+          `UPDATE ma_vessel_field_proposals SET status='rejected', resolved_by=?, resolved_at=datetime('now'), resolution_notes=? WHERE id=?`
+        ).run(by, opts.notes ?? null, id);
+        return { proposal: getProposalInternal(db, id) as ProposalRow, field: null };
+      }
+
+      let value = p.proposed_value;
+      if (opts.action === 'edit_accept') {
+        if (opts.value == null || String(opts.value).trim() === '') throw new GovError(400, 'edit_accept requires a value');
+        value = String(opts.value).trim();
+      }
+      const liveStatus = resolvedFieldStatus(opts.action);
+      const field = writeLiveField(db, {
+        vesselId: p.vessel_id, fieldKey: p.field_name, value, status: liveStatus,
+        sourceId: p.source_id, extractionId: p.extraction_id, by,
+        verifiedBy: liveStatus === 'overridden' ? by : null,
+        acceptedBy: by,
+      });
+      const histAction =
+        opts.action === 'accept' ? 'accepted' : opts.action === 'edit_accept' ? 'edited & accepted' : 'accepted (override)';
+      appendFieldHistory(db, {
+        vesselId: p.vessel_id, fieldKey: p.field_name, action: histAction, value, status: liveStatus, source: 'ai_extracted', by,
+      });
+
+      const proposalStatus =
+        opts.action === 'accept' ? 'accepted' : opts.action === 'edit_accept' ? 'edited_accepted' : 'overridden';
+      db.prepare(
+        `UPDATE ma_vessel_field_proposals SET status=?, resolved_by=?, resolved_at=datetime('now'), resolution_notes=? WHERE id=?`
+      ).run(proposalStatus, by, opts.notes ?? null, id);
+      return { proposal: getProposalInternal(db, id) as ProposalRow, field };
+    });
+    return run();
+  } finally {
+    db.close();
+  }
 }

@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { getGovernanceDb, initGovernanceTables } from './db';
 import type { CompRecord } from '../storage';
+import { GovError } from './errors';
 
 /**
  * Pending comps (Pass 3). Parser/AI-extracted comps land here as PENDING only.
@@ -154,4 +155,32 @@ export function getComp(id: number): CompRow | null {
 
 function getCompInternal(db: Database.Database, id: number): CompRow | null {
   return (db.prepare(`SELECT * FROM ma_comps WHERE id = ?`).get(id) as CompRow | undefined) ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Pass 4: broker comp review (approve/reject). Comps have no terminal-lock, so
+// re-review is allowed; each review appends to ma_comp_field_history.
+// ---------------------------------------------------------------------------
+
+export function reviewComp(id: number, opts: { action: 'approve' | 'reject'; by?: string | null }): CompRow {
+  initGovernanceTables();
+  const db = getGovernanceDb();
+  try {
+    const run = db.transaction(() => {
+      const c = getCompInternal(db, id);
+      if (!c) throw new GovError(404, 'comp not found');
+      const status = opts.action === 'approve' ? 'approved' : 'rejected';
+      db.prepare(
+        `UPDATE ma_comps SET status=?, reviewed_by=?, reviewed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`
+      ).run(status, opts.by ?? null, id);
+      db.prepare(
+        `INSERT INTO ma_comp_field_history (comp_id, field_key, action, value, status, source, by_user)
+         VALUES (?, 'status', ?, ?, ?, 'broker', ?)`
+      ).run(id, opts.action, status, status, opts.by ?? null);
+      return getCompInternal(db, id) as CompRow;
+    });
+    return run();
+  } finally {
+    db.close();
+  }
 }
