@@ -1,4 +1,3 @@
-import 'server-only';
 import Database from 'better-sqlite3';
 import { GOVERNANCE_SCHEMA_VERSION } from './types';
 

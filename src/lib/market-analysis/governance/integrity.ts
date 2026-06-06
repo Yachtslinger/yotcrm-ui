@@ -1,4 +1,3 @@
-import 'server-only';
 import { getGovernanceDb, initGovernanceTables } from './db';
 import type { IntegrityIssue } from './types';
 
