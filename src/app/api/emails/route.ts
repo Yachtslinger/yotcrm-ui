@@ -10,7 +10,10 @@ export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   try {
     // Simple API key check for unauthenticated endpoint
-    const API_KEY = process.env.EMAIL_API_KEY || "yotcrm-email-intake-2026";
+    const API_KEY = process.env.EMAIL_API_KEY; // env-only — no hardcoded secret fallback
+    if (!API_KEY) {
+      return NextResponse.json({ ok: false, error: "Email intake not configured: EMAIL_API_KEY is not set." }, { status: 503 });
+    }
     const authHeader = req.headers.get("x-api-key") || "";
     const urlKey = req.nextUrl.searchParams.get("key") || "";
     if (authHeader !== API_KEY && urlKey !== API_KEY) {

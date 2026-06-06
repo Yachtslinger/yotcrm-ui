@@ -9,10 +9,13 @@ const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const RAW_OLLAMA_URL = process.env.OLLAMA_URL || "";
 const OLLAMA_URL = (RAW_OLLAMA_URL && !RAW_OLLAMA_URL.includes("trycloudflare") && !RAW_OLLAMA_URL.includes("loca.lt"))
   ? RAW_OLLAMA_URL : "http://bore.pub:7777";
-const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "sk-yotcrm-301613feda903c146c05b8dd97869352af4846fdacfe9b01407deefd97103b31";
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY; // env-only — no hardcoded secret fallback
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gpt-oss:20b";
 
 export async function callAI(prompt: string, maxTokens = 1200): Promise<string> {
+  if (!ANTHROPIC_KEY && !OLLAMA_API_KEY) {
+    throw new Error("AI not configured: set ANTHROPIC_API_KEY and/or OLLAMA_API_KEY in the environment.");
+  }
   // Try Anthropic first
   if (ANTHROPIC_KEY) {
     try {
@@ -47,6 +50,7 @@ async function callAnthropic(prompt: string, maxTokens: number): Promise<string>
 }
 
 async function callOpenWebUI(prompt: string, maxTokens: number): Promise<string> {
+  if (!OLLAMA_API_KEY) throw new Error("YotBot not configured: OLLAMA_API_KEY missing.");
   const res = await fetch(`${OLLAMA_URL}/api/chat/completions`, {
     method: "POST",
     headers: {

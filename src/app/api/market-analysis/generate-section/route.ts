@@ -22,7 +22,7 @@ const OLLAMA_URL = (() => {
   return (raw && !raw.includes("trycloudflare") && !raw.includes("loca.lt"))
     ? raw : "http://bore.pub:7777";
 })();
-const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "sk-yotcrm-301613feda903c146c05b8dd97869352af4846fdacfe9b01407deefd97103b31";
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY; // env-only — no hardcoded secret fallback
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gpt-oss:20b";
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
@@ -63,8 +63,12 @@ export async function POST(req: NextRequest) {
     let text = "";
     let lastError = "";
 
-    // Try YotBot (Ollama/Open WebUI)
-    try {
+    if (!OLLAMA_API_KEY && !ANTHROPIC_KEY) {
+      return NextResponse.json({ ok:false, error:"AI not configured: set OLLAMA_API_KEY and/or ANTHROPIC_API_KEY in the environment." }, { status:500 });
+    }
+
+    // Try YotBot (Ollama/Open WebUI) — only when its key is configured
+    if (OLLAMA_API_KEY) try {
       const res = await fetch(`${OLLAMA_URL}/api/chat/completions`, {
         method: "POST",
         headers: {
