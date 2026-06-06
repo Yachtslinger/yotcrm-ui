@@ -24,6 +24,7 @@ type CostModel = {
   operations: {
     agency: Scenario; audioVisual: Scenario; auto: Scenario; bridge: Scenario;
     computer: Scenario; deck: Scenario; dockExpress: Scenario; engineering: Scenario;
+    corrective?: Scenario;
     fuels: Scenario; galley: Scenario; interior: Scenario; launches: Scenario;
     mailFreight: Scenario; office: Scenario; dockage: Scenario;
     safetyMedical: Scenario; security: Scenario; survey: Scenario; warehousing: Scenario;
@@ -55,6 +56,29 @@ const HOME_PORTS = [
 ];
 const VESSEL_STYLES = [
   "Luxury / Full Fairing & Paint","Production / Standard Finish","Explorer / Commercial Finish",
+];
+
+// Use patterns — sets explicit Low/Mid/High engine hours
+const USAGE_PATTERNS: Record<string,[number,number,number]> = {
+  light_private:  [100,200,350],
+  normal_private: [200,350,600],
+  active_owner:   [350,600,900],
+  charter_heavy:  [550,850,1300],
+};
+const USAGE_PATTERN_LABELS: Record<string,{label:string;sub:string}> = {
+  light_private:  {label:"Light Private",  sub:"200 hrs mid · weekends & holidays"},
+  normal_private: {label:"Normal Private",  sub:"350 hrs mid · 3–4 active months"},
+  active_owner:   {label:"Active Owner",    sub:"600 hrs mid · regular seasonal use"},
+  charter_heavy:  {label:"Charter / Heavy", sub:"850 hrs mid · professional / liveaboard"},
+};
+
+// Vessel condition → affects corrective repair allowance shown in model
+const CONDITION_OPTIONS = [
+  {key:"excellent", label:"Excellent",  sub:"Recent survey, no known issues",  color:"#4ade80"},
+  {key:"good",      label:"Good",       sub:"Well maintained, minor items only", color:"#86efac"},
+  {key:"average",   label:"Average",    sub:"Normal wear, some deferred items",  color:"#facc15"},
+  {key:"deferred",  label:"Deferred",   sub:"Known maintenance backlog",         color:"#f87171"},
+  {key:"unknown",   label:"Unknown",    sub:"No survey data yet (default)",      color:"#94a3b8"},
 ];
 
 // What each scenario actually means — shown in the expandable panel
@@ -259,7 +283,8 @@ export default function OwnershipPage() {
   const [url, setUrl]         = React.useState("");
   const [homePort, setHomePort] = React.useState("Florida / US East Coast");
   const [vesselStyle, setVesselStyle] = React.useState("Luxury / Full Fairing & Paint");
-  const [annualHours, setAnnualHours] = React.useState(800);
+  const [usagePattern, setUsagePattern] = React.useState("normal_private");
+  const [vesselCondition, setVesselCondition] = React.useState("unknown");
   const [charterWeeks, setCharterWeeks] = React.useState(0);
   const [segment, setSegment] = React.useState<"super"|"small">("super");
   const [crewMode, setCrewMode] = React.useState<"owner"|"captain"|"captain_mate">("captain");
@@ -374,6 +399,7 @@ export default function OwnershipPage() {
       getEff("operations.auto",m.operations.auto),getEff("operations.bridge",m.operations.bridge),
       getEff("operations.computer",m.operations.computer),getEff("operations.deck",m.operations.deck),
       getEff("operations.dockExpress",m.operations.dockExpress),getEff("operations.engineering",m.operations.engineering),
+      getEff("operations.corrective",m.operations.corrective??{low:0,mid:0,high:0}),
       getEff("operations.fuels",m.operations.fuels),getEff("operations.galley",m.operations.galley),
       getEff("operations.interior",m.operations.interior),getEff("operations.launches",m.operations.launches),
       getEff("operations.mailFreight",m.operations.mailFreight),getEff("operations.office",m.operations.office),
@@ -400,11 +426,12 @@ export default function OwnershipPage() {
       const vessel=scrapeData.vessel||{};
       setVesselLoaFt(parseLoaToFeet(vessel.loa||""));
       const res=await fetch("/api/ownership/generate",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({vessel,url:url.trim(),annualHours,charterWeeks,homePort,vesselStyle,segment,crewMode})});
+        body:JSON.stringify({vessel,url:url.trim(),usagePattern,vesselCondition,charterWeeks,homePort,vesselStyle,segment,crewMode})});
       const data=await res.json();
       if(!data.ok) throw new Error(data.error||"Generation failed");
       setModel(data.model);
-      setBaseHours(annualHours); setAdjustHours(annualHours); setAdjustCharterWeeks(charterWeeks);
+      const patternMid = (USAGE_PATTERNS[usagePattern]??USAGE_PATTERNS.normal_private)[1];
+      setBaseHours(patternMid); setAdjustHours(patternMid); setAdjustCharterWeeks(charterWeeks);
       const meta=data.model._meta;
       const cc=meta?.crewCount??data.model.crew?.salaries?.breakdown?.length??5;
       setBaseCrewCount(cc); setAdjustCrewCount(cc);
@@ -449,8 +476,8 @@ export default function OwnershipPage() {
       <div className="max-w-5xl mx-auto px-4 py-8">
 
         <div className="mb-5">
-          <h1 className="text-2xl font-bold mb-1" style={{color:"var(--brass-400)"}}>Annual Ownership Cost Model</h1>
-          <p className="text-sm" style={{color:"var(--navy-400)"}}>HP-based fuel · Agreed hull value insurance · Crewfinders 2025 salaries · Per-line include/exclude</p>
+          <h1 className="text-2xl font-bold mb-1" style={{color:"var(--brass-400)"}}>Estimated Annual Operating Budget</h1>
+          <p className="text-sm" style={{color:"var(--navy-400)"}}>HP-based fuel · Agreed hull value insurance · Crewfinders 2025 salaries · Condition-adjusted corrective allowance</p>
         </div>
 
         {/* Segment */}
@@ -471,24 +498,20 @@ export default function OwnershipPage() {
             value={url} onChange={e=>setUrl(e.target.value)} onKeyDown={e=>e.key==="Enter"&&generate()}
             placeholder="https://www.yachtworld.com/yacht/… or denisonyachtsales.com/…"/>
           <div className="grid grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="block text-xs uppercase tracking-wider mb-1.5" style={{color:"var(--navy-400)"}}>Annual Engine Hours</label>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <input type="number" min={100} max={2000} step={50} value={annualHours}
-                  onChange={e=>setAnnualHours(Math.max(100,Math.min(2000,Number(e.target.value)||800)))}
-                  className="rounded-lg text-sm px-3 py-2"
-                  style={{background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)",width:90}}/>
-                <span className="text-xs" style={{color:"var(--navy-400)"}}>hrs/yr · drives fuel</span>
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs uppercase tracking-wider mb-1.5" style={{color:"var(--navy-400)"}}>Charter Weeks / Year</label>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <input type="number" min={0} max={20} step={1} value={charterWeeks}
-                  onChange={e=>setCharterWeeks(Math.max(0,Math.min(20,Number(e.target.value)||0)))}
-                  className="rounded-lg text-sm px-3 py-2"
-                  style={{background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)",width:90}}/>
-                <span className="text-xs" style={{color:"var(--navy-400)"}}>wks · revenue offset</span>
+            <div className="col-span-2">
+              <label className="block text-xs uppercase tracking-wider mb-2" style={{color:"var(--navy-400)"}}>Annual Use Pattern <span style={{fontWeight:400,textTransform:"none",letterSpacing:0}}>— sets Low / Mid / High engine hours</span></label>
+              <div className="grid grid-cols-2 gap-2">
+                {Object.entries(USAGE_PATTERN_LABELS).map(([key,{label,sub}])=>{
+                  const hrs=USAGE_PATTERNS[key];
+                  return (
+                    <button key={key} onClick={()=>setUsagePattern(key)} className="rounded-lg px-3 py-2 text-left"
+                      style={{background:usagePattern===key?"var(--brass-400)":"var(--input,#1e293b)",border:`1px solid ${usagePattern===key?"var(--brass-400)":"var(--border)"}`,color:usagePattern===key?"#0a1628":"var(--foreground)"}}>
+                      <div className="text-xs font-bold">{label}</div>
+                      <div className="text-xs mt-0.5" style={{opacity:0.75}}>{sub}</div>
+                      <div className="text-xs mt-1" style={{opacity:0.55,fontFamily:"monospace"}}>{hrs[0]} / {hrs[1]} / {hrs[2]} hrs L/M/H</div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
             <div>
@@ -504,6 +527,29 @@ export default function OwnershipPage() {
                 style={{background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)"}}>
                 {VESSEL_STYLES.map(s=><option key={s} value={s}>{s}</option>)}
               </select>
+            </div>
+            <div>
+              <label className="block text-xs uppercase tracking-wider mb-1.5" style={{color:"var(--navy-400)"}}>Charter Weeks / Year</label>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <input type="number" min={0} max={20} step={1} value={charterWeeks}
+                  onChange={e=>setCharterWeeks(Math.max(0,Math.min(20,Number(e.target.value)||0)))}
+                  className="rounded-lg text-sm px-3 py-2"
+                  style={{background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)",width:90}}/>
+                <span className="text-xs" style={{color:"var(--navy-400)"}}>wks · revenue offset</span>
+              </div>
+            </div>
+          </div>
+          {/* Condition rating */}
+          <div className="mb-4">
+            <label className="block text-xs uppercase tracking-wider mb-2" style={{color:"var(--navy-400)"}}>Vessel Condition <span style={{fontWeight:400,textTransform:"none",letterSpacing:0}}>— affects corrective repair allowance</span></label>
+            <div className="flex gap-2 flex-wrap">
+              {CONDITION_OPTIONS.map(c=>(
+                <button key={c.key} onClick={()=>setVesselCondition(c.key)} className="flex-1 rounded-lg px-3 py-2 text-left min-w-24"
+                  style={{background:vesselCondition===c.key?`${c.color}20`:"var(--input,#1e293b)",border:`1.5px solid ${vesselCondition===c.key?c.color:"var(--border)"}`,color:vesselCondition===c.key?c.color:"var(--foreground)"}}>
+                  <div className="text-xs font-bold">{c.label}</div>
+                  <div className="text-xs mt-0.5" style={{opacity:0.7,fontSize:10}}>{c.sub}</div>
+                </button>
+              ))}
             </div>
           </div>
           {segment==="small"&&(
@@ -538,7 +584,7 @@ export default function OwnershipPage() {
             :getEff("crew.salaries",model.crew.salaries);
           const crewTotal=sectionTotal([effSal,getEff("crew.recruitment",model.crew.recruitment),getEff("crew.travel",model.crew.travel),getEff("crew.accommodation",model.crew.accommodation),getEff("crew.uniforms",model.crew.uniforms),getEff("crew.training",model.crew.training),getEff("crew.foodBeverage",model.crew.foodBeverage),getEff("crew.medical",model.crew.medical),getEff("crew.dayWorkers",model.crew.dayWorkers),getEff("crew.entertainment",model.crew.entertainment)]);
           const commTotal=sectionTotal([getEff("communications.phone",model.communications.phone),getEff("communications.satTV",model.communications.satTV),getEff("communications.satcom",model.communications.satcom)]);
-          const opTotal=sectionTotal([getEff("operations.agency",model.operations.agency),getEff("operations.audioVisual",model.operations.audioVisual),getEff("operations.auto",model.operations.auto),getEff("operations.bridge",model.operations.bridge),getEff("operations.computer",model.operations.computer),getEff("operations.deck",model.operations.deck),getEff("operations.dockExpress",model.operations.dockExpress),getEff("operations.engineering",model.operations.engineering),getEff("operations.fuels",model.operations.fuels),getEff("operations.galley",model.operations.galley),getEff("operations.interior",model.operations.interior),getEff("operations.launches",model.operations.launches),getEff("operations.mailFreight",model.operations.mailFreight),getEff("operations.office",model.operations.office),getEff("operations.dockage",model.operations.dockage),getEff("operations.safetyMedical",model.operations.safetyMedical),getEff("operations.security",model.operations.security),getEff("operations.survey",model.operations.survey),getEff("operations.warehousing",model.operations.warehousing)]);
+          const opTotal=sectionTotal([getEff("operations.agency",model.operations.agency),getEff("operations.audioVisual",model.operations.audioVisual),getEff("operations.auto",model.operations.auto),getEff("operations.bridge",model.operations.bridge),getEff("operations.computer",model.operations.computer),getEff("operations.deck",model.operations.deck),getEff("operations.dockExpress",model.operations.dockExpress),getEff("operations.engineering",model.operations.engineering),getEff("operations.corrective",model.operations.corrective??{low:0,mid:0,high:0}),getEff("operations.fuels",model.operations.fuels),getEff("operations.galley",model.operations.galley),getEff("operations.interior",model.operations.interior),getEff("operations.launches",model.operations.launches),getEff("operations.mailFreight",model.operations.mailFreight),getEff("operations.office",model.operations.office),getEff("operations.dockage",model.operations.dockage),getEff("operations.safetyMedical",model.operations.safetyMedical),getEff("operations.security",model.operations.security),getEff("operations.survey",model.operations.survey),getEff("operations.warehousing",model.operations.warehousing)]);
           const insTotal=sectionTotal([getEff("insurance.hull",model.insurance.hull),getEff("insurance.pi",model.insurance.pi),getEff("insurance.crewHealth",model.insurance.crewHealth)]);
           const admTotal=sectionTotal([getEff("administrative.professionalFees",model.administrative.professionalFees),getEff("administrative.bankCharges",model.administrative.bankCharges),getEff("administrative.managementFee",model.administrative.managementFee),getEff("administrative.managementTravel",model.administrative.managementTravel)]);
           const haulEff=getEff("capital.haulAntifoul",model.capital.haulAntifoul??{low:0,mid:0,high:0});
@@ -550,7 +596,7 @@ export default function OwnershipPage() {
               <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
                 <div>
                   <h2 className="text-xl font-bold" style={{color:"var(--foreground)"}}>{model.vesselName}</h2>
-                  <p className="text-xs mt-0.5" style={{color:"var(--navy-400)"}}>Annual Ownership Cost Model</p>
+                  <p className="text-xs mt-0.5" style={{color:"var(--navy-400)"}}>Estimated Annual Operating Budget</p>
                 </div>
                 <div className="flex gap-2 flex-wrap">
                   {(["table","analysis"] as const).map(t=>(
@@ -592,6 +638,12 @@ export default function OwnershipPage() {
                   </div>
                 ))}
               </div>
+
+              {/* Disclaimer */}
+              <p className="text-xs mb-4 px-1" style={{color:"var(--navy-400)",lineHeight:1.55}}>
+                <span style={{fontWeight:700,color:"#64748b"}}>Estimated Annual Operating Budget only.</span>{" "}
+                Excludes acquisition costs, sales/use tax, import duty, financing costs, depreciation, resale loss, and major capital/refit events. See capital events note below.
+              </p>
 
               {/* Adjust Assumptions */}
               <div className="rounded-xl p-4 mb-4" style={{background:"var(--card)",border:"1px solid var(--border)"}}>
@@ -718,7 +770,7 @@ export default function OwnershipPage() {
 
                         {/* OPS */}
                         <SectionHeader show={showScenarios} label="OPERATIONS"/>
-                        {([["operations.agency","Agency",model.operations.agency],["operations.audioVisual","Audio Visual",model.operations.audioVisual],["operations.auto","Auto",model.operations.auto],["operations.bridge","Bridge",model.operations.bridge],["operations.computer","Computer",model.operations.computer],["operations.deck","Deck",model.operations.deck],["operations.dockExpress","Dock Express / Shipping",model.operations.dockExpress],["operations.engineering","Engineering (Routine)",model.operations.engineering],["operations.fuels","Fuels & Lubricants",model.operations.fuels],["operations.galley","Galley (Guest Provisions)",model.operations.galley],["operations.interior","Interior",model.operations.interior],["operations.launches","Launches & Tenders",model.operations.launches],["operations.mailFreight","Mail & Freight",model.operations.mailFreight],["operations.office","Office",model.operations.office],["operations.dockage","Ports, Dockage & Customs",model.operations.dockage],["operations.safetyMedical","Safety & Medical",model.operations.safetyMedical],["operations.security","Security",model.operations.security],["operations.survey","Survey & Certification",model.operations.survey],["operations.warehousing","Warehousing & Storage",model.operations.warehousing]] as [string,string,Scenario][]).map(([p,l,s])=>(<Row key={p} {...rp(p,l,s)}/>))}
+                        {([["operations.agency","Agency",model.operations.agency],["operations.audioVisual","Audio Visual",model.operations.audioVisual],["operations.auto","Auto",model.operations.auto],["operations.bridge","Bridge",model.operations.bridge],["operations.computer","Computer",model.operations.computer],["operations.deck","Deck",model.operations.deck],["operations.dockExpress","Dock Express / Shipping",model.operations.dockExpress],["operations.engineering","Engineering (Routine Maintenance)",model.operations.engineering],["operations.corrective","Corrective Repair Allowance",model.operations.corrective??{low:0,mid:0,high:0}],["operations.fuels","Fuels & Lubricants",model.operations.fuels],["operations.galley","Galley (Guest Provisions)",model.operations.galley],["operations.interior","Interior",model.operations.interior],["operations.launches","Launches & Tenders",model.operations.launches],["operations.mailFreight","Mail & Freight",model.operations.mailFreight],["operations.office","Office",model.operations.office],["operations.dockage","Ports, Dockage & Customs",model.operations.dockage],["operations.safetyMedical","Safety & Medical",model.operations.safetyMedical],["operations.security","Security",model.operations.security],["operations.survey","Survey & Certification",model.operations.survey],["operations.warehousing","Warehousing & Storage",model.operations.warehousing]] as [string,string,Scenario][]).map(([p,l,s])=>(<Row key={p} {...rp(p,l,s)}/>))}
                         <Row path="__op" label="TOTAL OPERATIONS" effective={opTotal} bold show={showScenarios} overrides={overrides} onOverride={handleOverride} onResetRow={resetRow}/>
 
                         {/* INSURANCE */}
@@ -738,7 +790,7 @@ export default function OwnershipPage() {
 
                         {/* GRAND TOTAL */}
                         <tr><td colSpan={colCount(showScenarios)} className="pt-4"/></tr>
-                        <Row path="__gt" label="GRAND TOTAL" effective={gtAdj} bold show={showScenarios} overrides={overrides} onOverride={handleOverride} onResetRow={resetRow}/>
+                        <Row path="__gt" label="ESTIMATED ANNUAL OPERATING BUDGET" effective={gtAdj} bold show={showScenarios} overrides={overrides} onOverride={handleOverride} onResetRow={resetRow}/>
                         {adjustCharterWeeks>0&&<>
                           <Row {...rp("__charter",`Charter Revenue (${adjustCharterWeeks} wks est. net)`,{low:-charterRevenue.low,mid:-charterRevenue.mid,high:-charterRevenue.high})}/>
                           <Row path="__net" label="NET ANNUAL COST" effective={netCost} bold show={showScenarios} overrides={overrides} onOverride={handleOverride} onResetRow={resetRow}/>
