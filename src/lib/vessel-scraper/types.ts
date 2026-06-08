@@ -20,6 +20,7 @@ export interface VesselData {
   // ── Identity ──────────────────────────────────────────────────────────────
   name:           string;
   builder:        string;
+  model?:         string;   // model / series designation, e.g. "85E", "112"
   year:           number | null;
   location:       string;
   price:          string;
@@ -94,6 +95,7 @@ export interface VesselData {
   navClass?:       string;     // page-canonical name
   refitYear?:      string;
   refitDetails?:   string;
+  refitScope?:     string;   // "cosmetic" | "mechanical" | "full" | "none"
   paintSystem?:    string;
   windowGlazing?:  string;
   interiorStyle?:  string;
@@ -163,6 +165,7 @@ export interface VesselData {
   // ── Engine split fields ───────────────────────────────────────────────────
   engineMake?:     string;   // manufacturer only, e.g. "MTU", "CAT", "MAN"
   engineModel?:    string;   // model only, e.g. "12V 4000 M93"
+  engineCount?:    string;   // number of main engines, e.g. "2"
 
   // ── Tender detail ─────────────────────────────────────────────────────────
   tenderMake?:     string;

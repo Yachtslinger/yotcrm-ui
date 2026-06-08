@@ -63,6 +63,11 @@ export async function POST(req: NextRequest) {
         price: vessel.price,
         location: vessel.location,
         image: vessel.images?.[0]?.src || "",
+        model: vessel.model || "",
+        engineBrand: vessel.engineMake || "",
+        engineCount: vessel.engineCount || "",
+        refitYear: vessel.refitYear || "",
+        refitScope: vessel.refitScope || "",
       }
     });
   } catch (err) {

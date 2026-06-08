@@ -942,3 +942,104 @@ export function mineVesselIdentity(
     if (bm && bm[1].length >= 3) vessel.builder = bm[1];
   }
 }
+
+
+// ─── Engine / model / refit extraction ────────────────────────────────────
+// Reusable, deterministic fallbacks that read engine brand+count, model
+// designation, and refit year+scope from a listing's combined visible text
+// (highlights + features + description). Fill ONLY empty fields. No network,
+// no API key. Used by providers whose structured passes leave these blank
+// (e.g. Denison listings that put "TWIN CATERPILLAR C32" in a bullet list and
+// "Complete Refit in 2024" / "Ocean Alexander 85E" only in prose).
+
+const ENGINE_BRANDS =
+  "Caterpillar|CAT|MTU|MAN|Cummins|Volvo Penta|Volvo|MerCruiser|Yanmar|" +
+  "John Deere|Detroit Diesel|Detroit|Scania|Deutz|Iveco|FPT|Lugger|Perkins";
+
+const COUNT_WORDS: Record<string, string> = {
+  single: "1", one: "1", twin: "2", two: "2",
+  triple: "3", three: "3", quad: "4", quadruple: "4", four: "4",
+};
+
+/** Normalise a matched engine brand to a canonical display name. */
+function canonEngineBrand(s: string): string {
+  const t = s.trim();
+  if (/^cat$/i.test(t)) return "Caterpillar";
+  if (/^volvo$/i.test(t)) return "Volvo Penta";
+  if (/^fpt$/i.test(t)) return "FPT";
+  if (/^mtu$/i.test(t)) return "MTU";
+  if (/^man$/i.test(t)) return "MAN";
+  return t;
+}
+
+/** Engine brand + count from combined listing text. Fills only blanks. */
+export function mineEngineIdentity(vessel: VesselData, raw: string): void {
+  if (!raw) return;
+  const t = raw.replace(/\s+/g, " ");
+
+  if (!vessel.engineMake) {
+    const m =
+      t.match(new RegExp(
+        "engines?\\s*[:\\-]?\\s*(?:\\d+\\s*[x\u00d7]\\s*|single\\s+|twin\\s+|two\\s+|" +
+        "triple\\s+|three\\s+|quad(?:ruple)?\\s+|four\\s+)?(" + ENGINE_BRANDS + ")", "i")) ||
+      t.match(new RegExp(
+        "\\b(?:single|twin|two|triple|three|quad(?:ruple)?|four|\\d+\\s*[x\u00d7])\\s+(" +
+        ENGINE_BRANDS + ")", "i")) ||
+      t.match(new RegExp("\\b(" + ENGINE_BRANDS + ")\\b", "i"));
+    if (m) vessel.engineMake = canonEngineBrand(m[1]);
+  }
+
+  if (!vessel.engineCount) {
+    // Word form: "twin Caterpillar", "twin ... engines" (count word within ~20
+    // chars of a brand or the word "engine") — digits excluded from the gap so
+    // a model number like "C 32 ENGINES" can't be read as a count.
+    const wm = t.match(new RegExp(
+      "\\b(single|twin|two|triple|three|quad(?:ruple)?|four)\\b(?=[\\sA-Za-z'&]{0,20}(?:" +
+      ENGINE_BRANDS + "|engines?\\b))", "i"));
+    if (wm) {
+      vessel.engineCount = COUNT_WORDS[wm[1].toLowerCase()] || "";
+    } else {
+      // Digit form requires an explicit "x" separator: "2 x MTU", "2x Caterpillar".
+      const dm = t.match(new RegExp(
+        "\\b([1-6])\\s*[x\u00d7]\\s*(?:" + ENGINE_BRANDS + "|engines?\\b)", "i"));
+      if (dm) vessel.engineCount = dm[1];
+    }
+  }
+}
+
+/** Model / series designation from text, anchored to a known builder. */
+export function mineModel(vessel: VesselData, raw: string): void {
+  if (vessel.model || !vessel.builder || !raw) return;
+  const t = raw.replace(/\s+/g, " ");
+  const esc = vessel.builder.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // "Ocean Alexander 85E" → "85E"
+  const m = t.match(new RegExp(esc + "\\s+(\\d{2,3}[A-Za-z]{0,3})\\b", "i"));
+  if (m) {
+    vessel.model = m[1].toUpperCase();
+    return;
+  }
+  // Fallback: bare length number as the model (e.g. "85").
+  if (vessel.loa) {
+    const ln = vessel.loa.match(/\d{2,3}/);
+    if (ln) vessel.model = ln[0];
+  }
+}
+
+/** Refit year + scope from text. Scope only set when a qualifier word present. */
+export function mineRefit(vessel: VesselData, raw: string): void {
+  if (!raw) return;
+  const t = raw.replace(/\s+/g, " ");
+
+  if (!vessel.refitYear) {
+    const ry =
+      t.match(/(?:complete|full|major|extensive|total|partial|cosmetic|mechanical)?\s*refit(?:ted)?\s+(?:in\s+|completed\s+(?:in\s+)?)?((?:19|20)\d{2})/i) ||
+      t.match(/\b((?:19|20)\d{2})\s+refit\b/i);
+    if (ry) vessel.refitYear = ry[1];
+  }
+
+  if (!vessel.refitScope) {
+    if (/\b(complete|full|total|extensive|comprehensive)\s+refit/i.test(t)) vessel.refitScope = "full";
+    else if (/\bmechanical\s+(?:refit|overhaul)/i.test(t)) vessel.refitScope = "mechanical";
+    else if (/\b(cosmetic|interior)\s+refit\b/i.test(t)) vessel.refitScope = "cosmetic";
+  }
+}

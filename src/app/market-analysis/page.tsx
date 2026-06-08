@@ -299,6 +299,11 @@ export default function MarketAnalysisPage() {
       if (d.comp.make && !subjectMake) setSubjectMake(d.comp.make);
       if (d.comp.length && !subjectLength) setSubjectLength(d.comp.length);
       if (v.price && !subjectAskingPrice) setSubjectAskingPrice(v.price);
+      if (v.model && !subjectModel) setSubjectModel(v.model);
+      if (v.engineBrand && !engineBrand) setEngineBrand(v.engineBrand);
+      if (v.engineCount && !engineCount) setEngineCount(v.engineCount);
+      if (v.refitYear && !lastRefitYear) setLastRefitYear(v.refitYear);
+      if (v.refitScope && !refitScope && ["cosmetic","mechanical","full","none"].includes(v.refitScope)) setRefitScope(v.refitScope);
       showToast(`✓ Loaded: ${v.name}`, "success");
     } catch (err) { showToast(`Scrape error: ${err}`, "error"); }
     finally { setSubjectScraping(false); }

@@ -10,7 +10,7 @@
 import * as cheerio from "cheerio";
 import type { VesselData } from "../types";
 import { emptyVessel } from "../types";
-import { clean, cleanHeadline, dedupeImages, assignSpec, mineVesselIdentity } from "../utils";
+import { clean, cleanHeadline, dedupeImages, assignSpec, mineVesselIdentity, mineEngineIdentity, mineModel, mineRefit } from "../utils";
 
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -534,6 +534,20 @@ function parseDenison(url: string, html: string): VesselData {
     let slug = "";
     try { slug = new URL(url).pathname.split("/").filter(Boolean).pop() || ""; } catch { /* ignore */ }
     mineVesselIdentity(vessel, { headings, breadcrumb, slug });
+  }
+
+  // ── 17c. Engine brand/count, model, refit ────────────────────────────────
+  // These often live only in the highlights bullet list ("TWIN CATERPILLAR
+  // C32", "Engines: Caterpillar") and the marketing prose ("2016 Ocean
+  // Alexander 85E", "Complete Refit in 2024"), which the structured passes
+  // above don't read. Combine those text sources and mine, blanks only.
+  {
+    const idText = [flat, (vessel.features || []).join(". "), vessel.description]
+      .filter(Boolean)
+      .join(" \n ");
+    mineEngineIdentity(vessel, idText);
+    mineModel(vessel, idText);
+    mineRefit(vessel, idText);
   }
 
 
