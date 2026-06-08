@@ -31,6 +31,7 @@ const NAV_ITEMS = [
   { href: "/showings",  label: "Locations",   Icon: MapPin,          color: "#059669", group: "tools" },
   { href: "/intel",     label: "Lighthouse",      Icon: Shield,     color: "#7c3aed", group: "tools" },
   { href: "/market-analysis", label: "Market Analysis", Icon: BarChart2, color: "#b8933a", group: "tools" },
+  { href: "/market-analysis/governed", label: "Deal Workspace", Icon: Shield, color: "#0e7490", group: "tools" },
   { href: "/comms",            label: "Comms Capture",  Icon: Inbox,     color: "#0ea5e9", group: "tools" },
   { href: "/marinas",   label: "Marinas",     Icon: Anchor,          color: "#0e7490", group: "tools" },
   { href: "/card/will",   label: "My Card",     Icon: CreditCard,      color: "#c9a55c", group: "account" },
