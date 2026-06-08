@@ -860,3 +860,85 @@ export async function fetchPageText(url: string): Promise<string> {
     return "";
   }
 }
+
+
+/**
+ * mineVesselIdentity — derive the core identity fields (length, builder, year)
+ * from a listing's heading(s), breadcrumb, and URL slug.
+ *
+ * Rationale: these signals are present on virtually every brokerage listing —
+ * including pages that omit JSON-LD entirely (e.g. some Denison listings, where
+ * the only place "85' Ocean Alexander 2016" appears is the visible heading, the
+ * breadcrumb, and the slug `claire-85-ocean-alexander`). Structured (JSON-LD)
+ * and prose passes miss those, leaving year/make/length blank.
+ *
+ * Runs as a FALLBACK: fills only fields still empty, so it can never overwrite
+ * better structured data. Deterministic — no network, no API key.
+ */
+export function mineVesselIdentity(
+  vessel: VesselData,
+  sources: { headings?: string[]; breadcrumb?: string; slug?: string }
+): void {
+  const thisYear = new Date().getFullYear();
+
+  // ── Headings: "85' Ocean Alexander | 2016", "120' Benetti 2001", etc. ──────
+  const headings = (sources.headings || [])
+    .map((h) => clean(h).replace(/[|]/g, " ").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  for (const h of headings) {
+    // Length — a 2–3 digit number immediately followed by ' / ft / foot / feet
+    const lm = h.match(/\b(\d{2,3})\s*(?:['′’]|ft\b|foot\b|feet\b)/i);
+    // Year — a 19xx / 20xx token
+    const ym = h.match(/\b((?:19|20)\d{2})\b/);
+
+    if (!vessel.loa && lm) vessel.loa = `${lm[1]} ft`;
+    if (!vessel.year && ym) {
+      const y = parseInt(ym[1], 10);
+      if (y > 1900 && y <= thisYear + 1) vessel.year = y;
+    }
+    // Builder — the text sitting between the length token and the year token
+    // (or end of heading), with boat-noise words stripped.
+    if (!vessel.builder && lm) {
+      const start = (lm.index ?? 0) + lm[0].length;
+      const end = ym && (ym.index ?? -1) > start ? (ym.index as number) : h.length;
+      let b = h.slice(start, end)
+        .replace(/\b(yacht|yachts|motor\s*yacht|sail(?:ing)?\s*yacht|for\s*sale)\b/gi, "")
+        .replace(/[|–\-]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (b.length >= 3 && /[A-Za-z]/.test(b) && !/^\d+$/.test(b)) vessel.builder = b;
+    }
+  }
+
+  // ── URL slug fallback: "claire-85-ocean-alexander" → 85 ft, Ocean Alexander.
+  // Slug shape on most brokerages: <name words>-<length>-<builder words>[-dup].
+  if (sources.slug && (!vessel.loa || !vessel.builder)) {
+    const tokens = sources.slug
+      .toLowerCase()
+      .split(/[-_]/)
+      .filter(Boolean)
+      // drop trailing duplicate markers like "-i", "-ii", "-iii"
+      .filter((t) => !/^(i{1,3}|iv|vi{0,3})$/.test(t));
+    const numIdx = tokens.findIndex((t) => /^\d{2,3}$/.test(t));
+    if (numIdx >= 0) {
+      if (!vessel.loa) vessel.loa = `${tokens[numIdx]} ft`;
+      if (!vessel.builder) {
+        const builderTokens = tokens.slice(numIdx + 1);
+        if (builderTokens.length) {
+          vessel.builder = builderTokens
+            .map((t) => t.charAt(0).toUpperCase() + t.slice(1))
+            .join(" ");
+        }
+      }
+    }
+  }
+
+  // ── Breadcrumb fallback for builder only (e.g. "… › Ocean Alexander › …"). ─
+  if (!vessel.builder && sources.breadcrumb) {
+    const crumb = clean(sources.breadcrumb);
+    // Take a 1–3 word capitalised maker-like segment if one stands alone.
+    const bm = crumb.match(/\b([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})\b(?=\s*(?:›|>|\/|\||$))/);
+    if (bm && bm[1].length >= 3) vessel.builder = bm[1];
+  }
+}

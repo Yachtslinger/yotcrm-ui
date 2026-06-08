@@ -10,7 +10,7 @@
 import * as cheerio from "cheerio";
 import type { VesselData } from "../types";
 import { emptyVessel } from "../types";
-import { clean, cleanHeadline, dedupeImages, assignSpec } from "../utils";
+import { clean, cleanHeadline, dedupeImages, assignSpec, mineVesselIdentity } from "../utils";
 
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -515,6 +515,27 @@ function parseDenison(url: string, html: string): VesselData {
     const cells = $(row).find("th, td");
     if (cells.length >= 2) assignSpec(vessel, cells.eq(0).text(), cells.eq(1).text());
   });
+
+  // ── 17b. Identity fallback (length / builder / year) ─────────────────────
+  // The visible heading, breadcrumb and URL slug always carry "85' Ocean
+  // Alexander 2016" even when this listing exposes no JSON-LD Boat node. Fills
+  // only blanks left by the structured passes above — never overwrites them.
+  {
+    const headings: string[] = [];
+    $("h1, h2, h3").slice(0, 8).each((_, el) => {
+      const t = clean($(el).text());
+      if (t) headings.push(t);
+    });
+    const ogTitle = clean($('meta[property="og:title"]').attr("content"));
+    if (ogTitle) headings.push(ogTitle);
+    const breadcrumb = clean(
+      $("[class*='breadcrumb' i], nav[aria-label*='breadcrumb' i], ol.breadcrumb").first().text()
+    );
+    let slug = "";
+    try { slug = new URL(url).pathname.split("/").filter(Boolean).pop() || ""; } catch { /* ignore */ }
+    mineVesselIdentity(vessel, { headings, breadcrumb, slug });
+  }
+
 
   // ── 18. Gallery — Denison CDN + boatsgroup fallback ─────────────────────
   // Denison migrated from boatsgroup to cdn.denisonyachtsales.com
