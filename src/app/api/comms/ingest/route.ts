@@ -13,6 +13,7 @@ import {
 } from "@/lib/comms/storage";
 import { runExtraction } from "@/lib/comms/extractor";
 import { classifySender } from "@/lib/comms/sender-classifier";
+import { extractForwardedSenders } from "@/lib/comms/forward-parser";
 
 export const runtime = "nodejs";
 
@@ -87,6 +88,26 @@ export async function POST(req: NextRequest) {
     if (externalRecipient) {
       clientAddress = externalRecipient.address;
       clientName = externalRecipient.name || "";
+    }
+  }
+
+  // Forwarded-email fallback: a manual "FW:" arrives with the broker as the From
+  // and only the capture box as recipient, so attribution lands on an internal
+  // address. Dig the original sender out of the forwarded body and use the real
+  // client instead. Only kicks in when the resolved client is still internal.
+  const resolvedDomain = clientAddress.split("@")[1]?.toLowerCase() ?? "";
+  const resolvedInternal = INTERNAL_DOMAINS.some(d => resolvedDomain === d || resolvedDomain.endsWith("." + d));
+  let attributedVia = isOutbound ? "outbound_recipient" : "sender";
+  if (resolvedInternal) {
+    for (const cand of extractForwardedSenders(parsed.subject, parsed.bodyPlain, parsed.bodyHtml)) {
+      const cd = cand.address.split("@")[1]?.toLowerCase() ?? "";
+      const candInternal = INTERNAL_DOMAINS.some(d => cd === d || cd.endsWith("." + d));
+      if (cand.address && !candInternal && !cand.address.toLowerCase().includes("yotbot")) {
+        clientAddress = cand.address;
+        clientName = cand.name || clientName;
+        attributedVia = "forwarded_sender";
+        break;
+      }
     }
   }
 
@@ -175,6 +196,9 @@ export async function POST(req: NextRequest) {
     threadId: thread.id,
     leadId,
     matchMethod: matchResult.match_method,
+    clientAddress,
+    clientName,
+    attributedVia,
     senderKind: classification.kind,
     senderReasons: classification.reasons,
     leadSkippedReason,
