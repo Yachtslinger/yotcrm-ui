@@ -744,7 +744,7 @@ export default function OwnershipPage() {
                 </div>
 
                 {/* Crew slider — goes to 0 */}
-                {model.segment!=="small"&&perCrewRates&&(
+                {segment!=="small"&&perCrewRates&&(
                   <div className="mt-4 pt-4" style={{borderTop:"1px solid rgba(255,255,255,.06)"}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                       <span className="text-xs font-bold uppercase tracking-widest" style={{color:"var(--brass-400)"}}>Crew Configuration</span>

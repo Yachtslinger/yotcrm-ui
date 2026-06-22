@@ -418,9 +418,19 @@ export async function POST(req:NextRequest){
       managementTier="none",vesselCondition="unknown",
       vesselComplexity,                    // optional: simple/normal/high/very_high
       knownGph,                            // optional: user-supplied actual GPH
-      crewPreset="full_private",customPositions,
+      segment = "super",                   // "super" | "small"
+      crewMode = "full_private",           // small-vessel crew arrangement
+      crewPreset: crewPresetArg,           // explicit preset overrides segment/crewMode
+      customPositions,
       includeReservePlanning=false,        // optional: add reserve planning section
     }=body;
+
+    // Resolve crew preset: explicit arg wins, then derive from segment+crewMode
+    const crewPreset: string = crewPresetArg ?? (
+      segment==="small"
+        ? (crewMode==="owner"?"owner":crewMode==="captain_mate"?"captain_mate":"captain_day")
+        : "full_private"
+    );
 
     const v:Record<string,string>=vessel||{};
     const lft=parseLoaFt(v.loa||"100");
@@ -493,6 +503,7 @@ Respond with ONLY this JSON object — no preamble, no markdown fences.
     const model={
       vesselName:v.name||"Vessel",vesselUrl:url||"",
       _meta:{crewCount:crew.count,fullTimeCount:crew.fullTimeCount,loa_m:lm,loa_ft:lft,buildYear:yr,age,hullType,hpTotal,agreedHullValue:hullValue,managementTier,crewPreset,vesselCondition,usagePattern,annualHrsTriple,complexity,fuelBasis:m.operations.fuelBasis,fuelConfidence:m.operations.fuelConfidence,fuelGphMid:m.operations.fuelGphMid,perCrew:budget.perCrew,positionKeys,isDayRateCaptain},
+      segment, crewMode,
       ...budget.model,...narrative,
     };
     return NextResponse.json({ok:true,model});

@@ -37,8 +37,8 @@ export async function POST(req: Request): Promise<NextResponse> {
     if (!rows.length) {
       return NextResponse.json({ error: "No rows to import" }, { status: 400 });
     }
-    if (rows.length > 5000) {
-      return NextResponse.json({ error: "Max 5,000 contacts per import" }, { status: 400 });
+    if (rows.length > 6000) {
+      return NextResponse.json({ error: "Max 6,000 contacts per import" }, { status: 400 });
     }
 
     const db = new Database(DB_PATH, { readonly: false });
