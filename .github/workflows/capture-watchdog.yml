@@ -1,0 +1,22 @@
+# Off-Mac dead-man's switch trigger.
+# Pings the cloud watchdog every ~10 min from GitHub's cloud (independent of
+# Will's Mac). If the capture pipeline's heartbeat has gone silent past the
+# staleness threshold, the watchdog endpoint sends the alert. This file only
+# *triggers* the check — all the alert logic lives in /api/comms/watchdog.
+name: capture-watchdog
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # every 10 minutes (GitHub may delay under load)
+  workflow_dispatch: {}        # allows manual run from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping dead-man's-switch watchdog
+        run: |
+          curl -fsS -m 30 -X POST \
+            -H "authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            https://yotcrm-production.up.railway.app/api/comms/watchdog \
+            && echo "watchdog pinged ok" || echo "watchdog ping failed (non-fatal)"
