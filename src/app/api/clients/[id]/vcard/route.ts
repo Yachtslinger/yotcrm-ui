@@ -37,7 +37,21 @@ export async function GET(
       if (price > 0) noteParts.push(`Price: $${price.toLocaleString()}`);
     }
     if (contact.listing_url) noteParts.push(`Listing: ${contact.listing_url}`);
-    
+
+    // ── Buyer search criteria (fills in as the lead is qualified) ──
+    const money = (v: unknown) => { const n = Number(v); return n > 0 ? "$" + n.toLocaleString() : ""; };
+    const budget = [money(contact.budget_min), money(contact.budget_max)].filter(Boolean);
+    if (budget.length) noteParts.push(`Budget: ${budget.join("–")}`);
+    const loa = [contact.loa_min, contact.loa_max].filter(Boolean);
+    if (loa.length) noteParts.push(`Length: ${loa.join("–")} ft`);
+    const yr = [contact.year_min, contact.year_max].filter(Boolean);
+    if (yr.length) noteParts.push(`Year: ${yr.join("–")}`);
+    if (contact.vessel_type_pref) noteParts.push(`Type: ${contact.vessel_type_pref}`);
+    if (contact.make_preference) noteParts.push(`Make wanted: ${contact.make_preference}`);
+    if (contact.preferred_location) noteParts.push(`Area: ${contact.preferred_location}`);
+    if (contact.min_cabins) noteParts.push(`Cabins: ${contact.min_cabins}+`);
+    if (contact.engine_type_pref) noteParts.push(`Engine: ${contact.engine_type_pref}`);
+
     if (noteParts.length > 0) {
       lines.push(`NOTE:${noteParts.join(" | ")}`);
     }
