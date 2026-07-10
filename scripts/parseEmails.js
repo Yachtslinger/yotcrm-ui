@@ -722,6 +722,28 @@ function extractBoatFromSubject(subject) {
         }
     }
 
+    // Pattern 5: known make appearing ANYWHERE in the subject, word-bounded.
+    // Handles portal-forwarded subjects like "New enquiry for your Benetti 118 (rb681504)".
+    // Word boundaries keep non-boat subjects (e.g. "Maritime Lawyer") boat-less.
+    {
+        const lower = clean.toLowerCase();
+        for (const make of KNOWN_MAKES_SET) {
+            const m = make.toLowerCase();
+            const idx = lower.indexOf(m);
+            if (idx === -1) continue;
+            const before = idx === 0 ? ' ' : lower[idx - 1];
+            const after = lower[idx + m.length] || ' ';
+            if (/[a-z0-9]/.test(before) || /[a-z]/.test(after)) continue; // not a standalone make token
+            result.boatMake = make;
+            const rest = clean.substring(idx + make.length).replace(/^[\s:]+/, '');
+            const modelMatch = rest.match(/^([A-Za-z0-9][\w.\-\/ ]*?)(?:\s*[\(\-–]|$)/);
+            if (modelMatch && modelMatch[1].trim()) result.boatModel = modelMatch[1].trim();
+            const yr = clean.match(/\b(?:19|20)\d{2}\b/);
+            if (yr && !result.boatYear) result.boatYear = yr[0];
+            return result;
+        }
+    }
+
     return result;
 }
 
