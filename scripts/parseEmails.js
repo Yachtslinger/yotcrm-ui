@@ -209,6 +209,17 @@ function identifyEmailType(headers, body) {
         }
     }
 
+    // Structured buyer inquiry from Denison's listing system ("Featured Listing Inquiry" /
+    // "You've received a new lead for …"). These can arrive from sales@ or ANY denison address, not
+    // just inquiries@, and previously fell through to 'unknown' and were dropped. They carry the full
+    // Vessel Info / Name / Email / Page Link structure that parseDenisonEmail already understands.
+    if (bodyLower.includes('featured listing inquiry') ||
+        bodyLower.includes("you've received a new lead") ||
+        bodyLower.includes('you have received a new lead') ||
+        bodyLower.includes('received a new lead for')) {
+        return 'denison';
+    }
+
     // Not a recognized lead source — reject
     return 'unknown';
 }
