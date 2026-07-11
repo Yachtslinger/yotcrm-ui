@@ -214,6 +214,7 @@ function identifyEmailType(headers, body) {
     // just inquiries@, and previously fell through to 'unknown' and were dropped. They carry the full
     // Vessel Info / Name / Email / Page Link structure that parseDenisonEmail already understands.
     if (bodyLower.includes('featured listing inquiry') ||
+        bodyLower.includes('worldwide search inquiry') ||
         bodyLower.includes("you've received a new lead") ||
         bodyLower.includes('you have received a new lead') ||
         bodyLower.includes('received a new lead for')) {
