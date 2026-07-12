@@ -70,7 +70,24 @@ export async function scrapeVessel(url: string): Promise<VesselData> {
   const normalised = normaliseUrl(url);
   const { hostname } = new URL(normalised);
   const provider = PROVIDERS.find(p => p.pattern.test(hostname));
-  const result = provider ? await provider.fn(normalised) : await genericScrape(normalised);
+  // Dedicated provider first (most precise). If it throws OR returns essentially
+  // nothing, fall back to the generic OG/JSON-LD/table scraper (+ AI layer below)
+  // so a broken site-specific scraper never means "no brochure" — it just means
+  // we degrade to the universal path. This is what makes Fraser/Edmiston/IYC/etc.
+  // keep working even when their site changes out from under a custom scraper.
+  let result: VesselData;
+  if (provider) {
+    try {
+      result = await provider.fn(normalised);
+      if (!result?.name && !(result?.images?.length)) {
+        result = await genericScrape(normalised);
+      }
+    } catch {
+      result = await genericScrape(normalised);
+    }
+  } else {
+    result = await genericScrape(normalised);
+  }
 
   // Global watermark guard
   result.images = result.images.filter(i =>
