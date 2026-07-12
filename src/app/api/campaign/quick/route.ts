@@ -73,6 +73,11 @@ function buildEmail(slug: string, type: string, vessel: any, brokers: any[], toE
 
 export async function POST(req: NextRequest) {
   try {
+    // Secret-key trigger for automation/testing (the logged-in UI can also call this).
+    const key = req.headers.get("x-campaign-key") || "";
+    if (key !== (process.env.CAMPAIGN_KEY || "yotcrm-campaign-2026")) {
+      return NextResponse.json({ ok: false, error: "bad campaign key" }, { status: 401 });
+    }
     const { slug, type = "newlisting", testTo } = await req.json();
     if (!slug || !testTo) return NextResponse.json({ ok: false, error: "slug and testTo required" }, { status: 400 });
 
