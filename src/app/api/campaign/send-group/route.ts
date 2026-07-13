@@ -8,7 +8,7 @@
 // never re-sends to someone already sent THIS slug, batches of 100 via Resend.
 import { NextRequest, NextResponse } from "next/server";
 import { getBrochure } from "@/lib/brochure-storage";
-import { buildEmail } from "@/lib/campaign/quickEmail";
+import { buildEmail, buildEmailFromDraft } from "@/lib/campaign/quickEmail";
 import Database from "better-sqlite3";
 
 export const runtime = "nodejs";
@@ -25,6 +25,7 @@ export async function POST(req: NextRequest) {
     const slug = String(body.slug || "").replace(/[^a-zA-Z0-9._-]/g, "");
     const type = body.type || "newlisting";
     const group = body.group === "buyer" ? "buyer" : "verified";
+    const draft = body.draft;
     const dryRun = body.dryRun === true;
     let limit = parseInt(body.limit, 10);
     if (!slug) return NextResponse.json({ ok: false, error: "slug required" }, { status: 400 });
@@ -74,7 +75,7 @@ export async function POST(req: NextRequest) {
     for (let i = 0; i < recips.length; i += 100) {
       const chunk = recips.slice(i, i + 100);
       const messages = chunk.map(email => {
-        const { html, subject } = buildEmail(slug, type, row.vessel, email);
+        const { html, subject } = draft ? buildEmailFromDraft(draft, email) : buildEmail(slug, type, row.vessel, email);
         return { from, to: [email], reply_to: "WN@DenisonYachting.com", subject, html };
       });
       try {
