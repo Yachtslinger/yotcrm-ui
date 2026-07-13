@@ -20,8 +20,7 @@ const NAV_ITEMS = [
   { href: "/matches",   label: "Matches",     Icon: Zap,             color: "#7c3aed", group: "core" },
   { href: "/connect",      label: "Connect",      Icon: Link2,           color: "#f59e0b", group: "core" },
   { href: "/connect/todo", label: "Connect: To Do", Icon: CheckSquare,    color: "#059669", group: "core" },
-  { href: "/campaigns", label: "Campaigns",   Icon: Mail,            color: "#0e7490", group: "core" },
-  { href: "/campaigns/new", label: "Send Campaign", Icon: Mail,      color: "#e57b2e", group: "core" },
+  { href: "/campaigns/new", label: "Campaigns", Icon: Mail,          color: "#0e7490", group: "core" },
   { href: "/buyers",    label: "Buyers",      Icon: Search,          color: "#6366f1", group: "listings" },
   { href: "/listings",  label: "My Listings", Icon: Briefcase,       color: "#b45e0b", group: "listings" },
 
