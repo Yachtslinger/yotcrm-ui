@@ -95,7 +95,7 @@ export function buildEmailFromDraft(dr: Draft, toEmail: string) {
   const gal = (dr.gallery || []).filter(g => g && g.src);
   const gallery = gal.length ? `<tr><td style="padding:8px 30px 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${
     gal.slice(0, 2).map(g => { const im = `<img src="${esc(g.src)}" width="262" style="width:100%;height:auto;display:block" alt="">`;
-      return `<td width="50%" style="padding:3px;">${g.link ? `<a href="${esc(g.link)}">${im}</a>` : im}</td>`; }).join("")
+      return `<td width="50%" style="padding:3px;"><a href="${esc(g.link || dr.brochureUrl)}">${im}</a></td>`; }).join("")
     }</tr></table></td></tr>` : "";
 
   const customBtns = (dr.buttons || []).filter(b => b.label && b.url);
@@ -129,7 +129,7 @@ export function buildEmailFromDraft(dr: Draft, toEmail: string) {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f6;padding:18px 0"><tr><td align="center">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;background:#fff">
   <tr><td style="font-size:0;line-height:0"><img src="${BASE}/denison-header.png" alt="Denison Yachting" width="600" style="width:100%;height:auto;display:block;border:0"></td></tr>
-  <tr><td>${dr.heroLink ? `<a href="${esc(dr.heroLink)}">${heroImg}</a>` : heroImg}</td></tr>
+  <tr><td><a href="${esc(dr.heroLink || dr.brochureUrl)}">${heroImg}</a></td></tr>
   ${dr.bannerText ? `<tr><td align="center" style="background:${ORANGE};padding:10px;color:#fff;font-size:13px;letter-spacing:3px;font-family:Arial,Helvetica,sans-serif">${esc(dr.bannerText)}</td></tr>` : ""}
   <tr><td align="center" style="padding:26px 30px 4px">
     <div style="color:${NAVY};font-size:32px;letter-spacing:1px">${esc(dr.headline)}</div>
