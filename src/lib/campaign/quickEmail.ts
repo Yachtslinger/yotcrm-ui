@@ -17,7 +17,7 @@ export const SUBJECTS: Record<string, (n: string, p: string) => string> = {
   openday:    (n) => `Inspect ${n}`,
 };
 
-export type Broker = { name: string; title?: string; email?: string; phone?: string };
+export type Broker = { name: string; title?: string; email?: string; cell?: string; office?: string; phone?: string; photo?: string; link?: string };
 export type GalleryItem = { src: string; link?: string };
 export type Button = { label: string; url: string };
 export type Draft = {
@@ -30,8 +30,8 @@ export type Draft = {
 };
 
 export const DEFAULT_BROKERS: Broker[] = [
-  { name: "Will Noftsinger", title: "Build Consultant, The Americas", email: "WN@DenisonYachting.com", phone: "850.461.3342" },
-  { name: "Paolo Ameglio", title: "Yacht Broker", email: "PGA@DenisonYachting.com", phone: "786.251.2588" },
+  { name: "William (Will) Noftsinger III", title: "Yacht Broker", email: "WN@DenisonYachting.com", cell: "(850) 461-3342", office: "954.763.3971", photo: "https://cdn.denisonyachtsales.com/images/denison-update/users/photos/69af22d913e91.jpg", link: "https://www.denisonyachtsales.com/broker/will-noftsinger" },
+  { name: "Paolo Ameglio", title: "Yacht Broker", email: "PGA@DenisonYachting.com", cell: "(786) 251-2588", office: "954.763.3971", photo: "https://cdn.denisonyachtsales.com/images/denison-update/users/photos/699c8a181e92f.jpg", link: "https://www.denisonyachtsales.com/broker/paolo-ameglio" },
 ];
 
 function esc(s: any) {
@@ -110,8 +110,19 @@ export function buildEmailFromDraft(dr: Draft, toEmail: string) {
   </table></td></tr>` : "";
 
   const brokersRows = (dr.brokers && dr.brokers.length ? dr.brokers : DEFAULT_BROKERS.slice(0, 1))
-    .map(b => `<tr><td style="padding:14px 30px;border-top:1px solid ${LINE};color:#334155;font-size:12px;line-height:1.6;font-family:Arial,Helvetica,sans-serif">
-      <strong>${esc(b.name)}</strong>${b.title ? ` &mdash; ${esc(b.title)}` : ""}<br>${esc(b.email || "")}${b.phone ? ` &nbsp;&middot;&nbsp; ${esc(b.phone)}` : ""}</td></tr>`).join("");
+    .map(b => {
+      const info = ([["EMAIL", b.email], ["CELL", b.cell || b.phone], ["OFFICE", b.office]] as [string, string | undefined][])
+        .filter(([, v]) => v)
+        .map(([k, v]) => `<tr><td valign="top" style="color:${ORANGE};font-size:10px;letter-spacing:1px;padding:3px 14px 3px 0;font-weight:bold;white-space:nowrap;font-family:Arial,Helvetica,sans-serif">${k}</td><td valign="top" style="color:#475569;font-size:13px;padding:3px 0;font-family:Arial,Helvetica,sans-serif">${esc(v)}</td></tr>`).join("");
+      const img = b.photo ? `<img src="${esc(b.photo)}" width="94" height="94" style="width:94px;height:94px;object-fit:cover;border-radius:6px;display:block;border:0" alt="${esc(b.name)}">` : "";
+      const photoCell = b.photo ? `<td width="106" valign="top" style="padding:0 12px 0 0">${b.link ? `<a href="${esc(b.link)}">${img}</a>` : img}</td>` : "";
+      return `<tr><td style="padding:16px 30px;border-top:1px solid ${LINE}"><table role="presentation" cellpadding="0" cellspacing="0"><tr>
+        ${photoCell}
+        <td valign="middle">
+          <div style="color:${NAVY};font-size:17px;font-weight:bold;margin-bottom:7px;font-family:Arial,Helvetica,sans-serif">${esc(b.name)}</div>
+          <table role="presentation" cellpadding="0" cellspacing="0">${info}</table>
+        </td></tr></table></td></tr>`;
+    }).join("");
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;background:#eef2f6;font-family:Georgia,'Times New Roman',serif">
