@@ -25,6 +25,7 @@ export function middleware(req: NextRequest) {
     pathname === "/manifest.json" ||
     pathname === "/sw.js" ||
     pathname === "/favicon.ico" ||
+    pathname.match(/\.(png|jpe?g|svg|gif|webp)$/i) ||
     pathname === "/reset.html"
   ) {
     return NextResponse.next();

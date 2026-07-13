@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { vesselToDraft, buildEmailFromDraft, DEFAULT_BROKERS, BANNERS, SUBJECTS, type Draft } from "@/lib/campaign/quickEmail";
 
 const NAVY = "#0b1f3a", ORANGE = "#e57b2e", MUTE = "#64748b", LINE = "#e2e8f0";
@@ -27,8 +27,30 @@ export default function NewCampaign() {
   const [audience, setAudience] = useState<number | null>(null);
   const [wave, setWave] = useState(50);
   const [log, setLog] = useState<string[]>([]);
+  const [drafts, setDrafts] = useState<any[]>([]);
+  const [draftId, setDraftId] = useState<number | null>(null);
   const say = (m: string) => setLog(l => [new Date().toLocaleTimeString() + " — " + m, ...l].slice(0, 10));
   const up = (patch: Partial<Draft>) => setDraft(d => (d ? { ...d, ...patch } : d));
+  useEffect(() => { fetch("/api/campaign/draft").then(r => r.json()).then(d => { if (d.ok) setDrafts(d.drafts); }).catch(() => {}); }, []);
+  async function loadDrafts() { const d = await fetch("/api/campaign/draft").then(r => r.json()); if (d.ok) setDrafts(d.drafts); }
+  async function saveDraft() {
+    if (!draft) return;
+    const name = prompt("Name this draft:", draft.headline) || draft.headline || "Untitled";
+    setBusy("Saving draft…");
+    const d = await post("/api/campaign/draft", { id: draftId, name, draft, allImages });
+    if (d.ok) { setDraftId(d.id); say("Draft saved"); loadDrafts(); } else say("Save failed: " + (d.error || "?"));
+    setBusy("");
+  }
+  async function loadDraft(id: number) {
+    if (!id) return; setBusy("Loading draft…");
+    const d = await fetch("/api/campaign/draft?id=" + id).then(r => r.json());
+    if (d.ok) { setDraft(d.draft); setAllImages(d.allImages || []); setDraftId(d.id); say("Loaded: " + d.name); refreshAudience(d.draft.slug, d.draft.type); }
+    setBusy("");
+  }
+  function addFeature() { if (draft) up({ features: [...draft.features, ""] }); }
+  function setFeature(i: number, v: string) { if (!draft) return; const features = [...draft.features]; features[i] = v; up({ features }); }
+  function delFeature(i: number) { if (draft) up({ features: draft.features.filter((_, j) => j !== i) }); }
+  function toggle(k: "showDescription" | "showFeatures" | "showGallery" | "showSpecs") { if (draft) up({ [k]: draft[k] === false } as any); }
 
   async function loadListing() {
     if (!url.trim()) return;
@@ -90,7 +112,16 @@ export default function NewCampaign() {
   return (
     <div style={{ padding: "20px", fontFamily: "system-ui, sans-serif", color: "#111" }}>
       <h1 style={{ fontSize: 22, margin: 0, color: NAVY }}>Send a Listing Campaign</h1>
-      <p style={{ color: MUTE, marginTop: 3, marginBottom: 16, fontSize: 13 }}>Paste a URL, edit everything, preview live, then send to verified buyers. No Vertical Response.</p>
+      <p style={{ color: MUTE, marginTop: 3, marginBottom: 12, fontSize: 13 }}>Paste a URL, edit everything, preview live, then send to verified buyers. No Vertical Response.</p>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
+        <button style={btn("#f1f5f9", NAVY)} onClick={saveDraft} disabled={!draft || !!busy}>Save draft</button>
+        <select style={{ ...inp, marginBottom: 0, width: 260 }} value={draftId || ""} onChange={e => loadDraft(parseInt(e.target.value))}>
+          <option value="">Open a saved draft…</option>
+          {drafts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+        {draftId && <span style={{ fontSize: 12, color: MUTE }}>editing saved draft</span>}
+      </div>
 
       <div style={card}>
         <label style={lbl}>Paste a listing URL (any brokerage)</label>
@@ -143,6 +174,27 @@ export default function NewCampaign() {
               <div style={{ fontSize: 11, color: MUTE, marginTop: 6 }}>Orange = hero · Navy = gallery</div>
               <label style={{ ...lbl, marginTop: 10 }}>Make the hero photo a link (optional)</label>
               <input style={inp} placeholder="https://… (defaults to the brochure page)" value={draft.heroLink || ""} onChange={e => up({ heroLink: e.target.value })} />
+            </div>
+
+            <div style={card}>
+              <label style={lbl}>Key features (bulleted highlights)</label>
+              {draft.features.map((f, i) => (
+                <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                  <input style={{ ...inp, marginBottom: 0, flex: 1 }} placeholder="e.g. Beach club & swim platform" value={f} onChange={e => setFeature(i, e.target.value)} />
+                  <button style={btn("#f1f5f9", "#991b1b")} onClick={() => delFeature(i)}>✕</button>
+                </div>
+              ))}
+              <button style={btn("#f1f5f9", NAVY)} onClick={addFeature}>+ Add feature</button>
+            </div>
+
+            <div style={card}>
+              <label style={lbl}>Show / hide sections</label>
+              {(["showDescription", "showFeatures", "showGallery", "showSpecs"] as const).map(k => (
+                <label key={k} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginBottom: 5 }}>
+                  <input type="checkbox" checked={draft[k] !== false} onChange={() => toggle(k)} />
+                  {k === "showDescription" ? "Description" : k === "showFeatures" ? "Key features" : k === "showGallery" ? "Gallery photos" : "Specifications"}
+                </label>
+              ))}
             </div>
 
             <div style={card}>

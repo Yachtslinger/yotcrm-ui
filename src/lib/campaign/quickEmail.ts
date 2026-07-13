@@ -24,8 +24,9 @@ export type Draft = {
   slug: string; type: string; bannerText: string;
   subject: string; headline: string; specLine: string; location: string; price: string;
   description: string; heroUrl: string; heroLink?: string;
-  gallery: GalleryItem[]; specs: [string, string][];
+  gallery: GalleryItem[]; specs: [string, string][]; features: string[];
   buttons: Button[]; brokers: Broker[]; brochureUrl: string; photoCount: number;
+  showFeatures?: boolean; showSpecs?: boolean; showGallery?: boolean; showDescription?: boolean;
 };
 
 export const DEFAULT_BROKERS: Broker[] = [
@@ -57,10 +58,12 @@ export function vesselToDraft(vessel: any, type: string, slug: string): Draft {
     heroUrl: imgs[0] || "",
     gallery: imgs.slice(1, 3).map((s: string) => ({ src: s })),
     specs,
+    features: (vessel.features || []).map((f: any) => String(f).trim()).filter(Boolean).slice(0, 8),
     buttons: [],
     brokers: [DEFAULT_BROKERS[0]],
     brochureUrl: `${BASE}/brochures/${encodeURIComponent(slug)}`,
     photoCount: imgs.length,
+    showFeatures: true, showSpecs: true, showGallery: true, showDescription: true,
   };
 }
 
@@ -100,6 +103,12 @@ export function buildEmailFromDraft(dr: Draft, toEmail: string) {
     customBtns.map(b => `<a href="${esc(b.url)}" style="background:${NAVY};color:#fff;text-decoration:none;font-size:13px;padding:11px 26px;border-radius:5px;display:inline-block;margin:4px;font-family:Arial,Helvetica,sans-serif">${esc(b.label)}</a>`).join("")
     }</td></tr>` : "";
 
+  const featList = (dr.features || []).filter(Boolean);
+  const featuresBlock = (dr.showFeatures !== false && featList.length) ? `<tr><td style="padding:8px 34px 6px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+    <tr><td style="color:${NAVY};font-size:12px;letter-spacing:2px;font-weight:bold;font-family:Arial,Helvetica,sans-serif;padding-bottom:6px">KEY FEATURES</td></tr>
+    ${featList.map(f => `<tr><td style="color:${INK};font-size:13px;line-height:1.6;padding:2px 0;font-family:Arial,Helvetica,sans-serif"><span style="color:${ORANGE}">&bull;</span> ${esc(f)}</td></tr>`).join("")}
+  </table></td></tr>` : "";
+
   const brokersRows = (dr.brokers && dr.brokers.length ? dr.brokers : DEFAULT_BROKERS.slice(0, 1))
     .map(b => `<tr><td style="padding:14px 30px;border-top:1px solid ${LINE};color:#334155;font-size:12px;line-height:1.6;font-family:Arial,Helvetica,sans-serif">
       <strong>${esc(b.name)}</strong>${b.title ? ` &mdash; ${esc(b.title)}` : ""}<br>${esc(b.email || "")}${b.phone ? ` &nbsp;&middot;&nbsp; ${esc(b.phone)}` : ""}</td></tr>`).join("");
@@ -109,10 +118,8 @@ export function buildEmailFromDraft(dr: Draft, toEmail: string) {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f6;padding:18px 0"><tr><td align="center">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;background:#fff">
   <tr><td style="height:4px;background:${ORANGE};font-size:0;line-height:0">&nbsp;</td></tr>
-  <tr><td align="center" style="background:${NAVY};padding:17px 16px;font-family:Arial,Helvetica,sans-serif">
-    <span style="color:#fff;font-size:13px;letter-spacing:2px">DENISON YACHTING</span>
-    <span style="color:#63799a;font-size:13px;margin:0 8px">|</span>
-    <span style="color:#fff;font-size:13px;letter-spacing:2px">YACHTSLINGER</span></td></tr>
+  <tr><td align="center" style="background:${NAVY};padding:18px 16px">
+    <img src="${BASE}/denison-header.png" alt="Denison Yachting" width="320" style="width:320px;max-width:82%;height:auto;display:inline-block;border:0"></td></tr>
   <tr><td>${dr.heroLink ? `<a href="${esc(dr.heroLink)}">${heroImg}</a>` : heroImg}</td></tr>
   ${dr.bannerText ? `<tr><td align="center" style="background:${ORANGE};padding:10px;color:#fff;font-size:13px;letter-spacing:3px;font-family:Arial,Helvetica,sans-serif">${esc(dr.bannerText)}</td></tr>` : ""}
   <tr><td align="center" style="padding:26px 30px 4px">
@@ -121,11 +128,12 @@ export function buildEmailFromDraft(dr: Draft, toEmail: string) {
     ${dr.location ? `<div style="color:${MUTE};font-size:11px;letter-spacing:2px;margin-top:6px;text-transform:uppercase;font-family:Arial,Helvetica,sans-serif">${esc(dr.location)}</div>` : ""}
     ${dr.price ? `<div style="color:${ORANGE};font-size:23px;margin-top:14px">${esc(dr.price)}</div>` : ""}
   </td></tr>
-  ${descHtml ? `<tr><td align="center" style="padding:14px 34px 6px;color:${INK};font-size:13px;line-height:1.85">${descHtml}</td></tr>` : ""}
+  ${(dr.showDescription !== false && descHtml) ? `<tr><td align="center" style="padding:14px 34px 6px;color:${INK};font-size:13px;line-height:1.85">${descHtml}</td></tr>` : ""}
+  ${featuresBlock}
   <tr><td align="center" style="padding:14px"><a href="${esc(link)}" style="border:1px solid ${NAVY};color:${NAVY};text-decoration:none;font-size:12px;letter-spacing:2px;padding:12px 44px;display:inline-block;font-family:Arial,Helvetica,sans-serif">VIEW FULL DETAILS</a></td></tr>
   ${buttonsRow}
-  ${gallery}
-  ${specs ? `<tr><td style="padding:14px 30px 20px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${NAVY}" style="background:${NAVY};border-radius:6px">
+  ${dr.showGallery === false ? "" : gallery}
+  ${(dr.showSpecs !== false && specs) ? `<tr><td style="padding:14px 30px 20px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${NAVY}" style="background:${NAVY};border-radius:6px">
     <tr><td style="padding:16px 20px 8px;color:#fff;font-size:12px;letter-spacing:3px;border-bottom:2px solid ${ORANGE};font-family:Arial,Helvetica,sans-serif">SPECIFICATIONS</td></tr>
     <tr><td style="padding:8px 16px 14px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${specs}</table></td></tr></table></td></tr>` : ""}
   <tr><td align="center" style="padding:18px 30px 6px"><a href="${esc(link)}" style="background:${ORANGE};color:#fff;text-decoration:none;font-size:14px;padding:13px 40px;border-radius:5px;display:inline-block;font-family:Arial,Helvetica,sans-serif">View Full Details &amp; ${dr.photoCount || ""} Photos &rarr;</a></td></tr>
