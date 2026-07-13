@@ -9,8 +9,9 @@ export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   try {
     const key = req.headers.get("x-campaign-key") || "";
-    if (key !== (process.env.CAMPAIGN_KEY || "yotcrm-campaign-2026")) {
-      return NextResponse.json({ ok: false, error: "bad campaign key" }, { status: 401 });
+    const cookie = req.cookies.get("yotcrm_session")?.value || "";
+    if (key !== (process.env.CAMPAIGN_KEY || "yotcrm-campaign-2026") && cookie.length < 10) {
+      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
     }
     const { slug, type = "newlisting", testTo } = await req.json();
     if (!slug || !testTo) return NextResponse.json({ ok: false, error: "slug and testTo required" }, { status: 400 });

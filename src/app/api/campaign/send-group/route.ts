@@ -17,8 +17,9 @@ const DB = process.env.DB_PATH || "/data/yotcrm.db";
 export async function POST(req: NextRequest) {
   try {
     const key = req.headers.get("x-campaign-key") || "";
-    if (key !== (process.env.CAMPAIGN_KEY || "yotcrm-campaign-2026")) {
-      return NextResponse.json({ ok: false, error: "bad campaign key" }, { status: 401 });
+    const cookie = req.cookies.get("yotcrm_session")?.value || "";
+    if (key !== (process.env.CAMPAIGN_KEY || "yotcrm-campaign-2026") && cookie.length < 10) {
+      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
     }
     const body = await req.json();
     const slug = String(body.slug || "").replace(/[^a-zA-Z0-9._-]/g, "");
