@@ -117,9 +117,7 @@ export function buildEmailFromDraft(dr: Draft, toEmail: string) {
 <body style="margin:0;background:#eef2f6;font-family:Georgia,'Times New Roman',serif">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f6;padding:18px 0"><tr><td align="center">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;background:#fff">
-  <tr><td style="height:4px;background:${ORANGE};font-size:0;line-height:0">&nbsp;</td></tr>
-  <tr><td align="center" style="background:${NAVY};padding:18px 16px">
-    <img src="${BASE}/denison-header.png" alt="Denison Yachting" width="320" style="width:320px;max-width:82%;height:auto;display:inline-block;border:0"></td></tr>
+  <tr><td style="font-size:0;line-height:0"><img src="${BASE}/denison-header.png" alt="Denison Yachting" width="600" style="width:100%;height:auto;display:block;border:0"></td></tr>
   <tr><td>${dr.heroLink ? `<a href="${esc(dr.heroLink)}">${heroImg}</a>` : heroImg}</td></tr>
   ${dr.bannerText ? `<tr><td align="center" style="background:${ORANGE};padding:10px;color:#fff;font-size:13px;letter-spacing:3px;font-family:Arial,Helvetica,sans-serif">${esc(dr.bannerText)}</td></tr>` : ""}
   <tr><td align="center" style="padding:26px 30px 4px">
