@@ -25,6 +25,8 @@ export default function NewCampaign() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [testEmail, setTestEmail] = useState("wn@denisonyachting.com");
   const [audience, setAudience] = useState<number | null>(null);
+  const [sentInfo, setSentInfo] = useState<{ sentCount: number; sent: { email: string; sent_at: string }[] } | null>(null);
+  const [showRecips, setShowRecips] = useState(false);
   const [wave, setWave] = useState(50);
   const [log, setLog] = useState<string[]>([]);
   const [drafts, setDrafts] = useState<any[]>([]);
@@ -65,9 +67,9 @@ export default function NewCampaign() {
     setBusy("");
   }
 
-  async function refreshAudience(slug: string, type: string) {
-    const d = await post("/api/campaign/send-group", { slug, type, group: "verified", dryRun: true });
-    if (d.ok) setAudience(d.remainingInGroup);
+  async function refreshAudience(slug: string, _type?: string) {
+    const d = await fetch("/api/campaign/status?slug=" + encodeURIComponent(slug)).then(r => r.json()).catch(() => null);
+    if (d && d.ok) { setAudience(d.remaining); setSentInfo({ sentCount: d.sentCount, sent: d.sent }); }
   }
 
   function setType(type: string) {
@@ -102,7 +104,7 @@ export default function NewCampaign() {
     if (!confirm(`Send this to ${n} verified buyers now? This sends real email.`)) return;
     setBusy(`Sending to ${n}…`);
     const d = await post("/api/campaign/send-group", { slug: draft.slug, type: draft.type, group: "verified", limit: n, draft });
-    if (d.ok) { say(`Sent ${d.sent}${d.failed ? ", " + d.failed + " failed" : ""}. ${d.remainingInGroup} remain.`); setAudience(d.remainingInGroup); }
+    if (d.ok) { say(`Sent ${d.sent}${d.failed ? ", " + d.failed + " failed" : ""}. ${d.remainingInGroup} remain.`); refreshAudience(draft.slug); }
     else say("Send failed: " + (d.error || "?"));
     setBusy("");
   }
@@ -226,7 +228,21 @@ export default function NewCampaign() {
                 <button style={btn(NAVY)} onClick={sendTest} disabled={!!busy}>Send test</button>
               </div>
               <label style={lbl}>2 · Send to verified buyers</label>
-              <div style={{ fontSize: 14, marginBottom: 8 }}>Eligible: <strong style={{ color: NAVY }}>{audience == null ? "…" : audience}</strong></div>
+              <div style={{ fontSize: 14, marginBottom: 6 }}>
+                Sent so far: <strong style={{ color: NAVY }}>{sentInfo ? sentInfo.sentCount : "…"}</strong>
+                &nbsp;·&nbsp; Remaining: <strong style={{ color: NAVY }}>{audience == null ? "…" : audience}</strong>
+              </div>
+              {sentInfo && sentInfo.sentCount > 0 && (
+                <div style={{ marginBottom: 8, fontSize: 12, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  <a href={"/api/campaign/status?format=csv&slug=" + encodeURIComponent(draft.slug)} style={{ color: ORANGE }}>Download who was sent (CSV)</a>
+                  <button onClick={() => setShowRecips(v => !v)} style={{ ...btn("#f1f5f9", NAVY), padding: "5px 10px", fontSize: 12 }}>{showRecips ? "Hide" : "Show"} recipients</button>
+                </div>
+              )}
+              {showRecips && sentInfo && (
+                <div style={{ maxHeight: 150, overflowY: "auto", background: "#f8fafc", borderRadius: 6, padding: 8, fontSize: 12, color: "#475569", marginBottom: 8 }}>
+                  {sentInfo.sent.length === 0 ? <div style={{ color: MUTE }}>No one yet.</div> : sentInfo.sent.map((s, i) => <div key={i}>{i + 1}. {s.email} <span style={{ color: MUTE }}>· {s.sent_at}</span></div>)}
+                </div>
+              )}
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                 <span style={{ fontSize: 12, color: MUTE }}>Wave</span>
                 <input type="number" min={1} style={{ ...inp, marginBottom: 0, width: 90 }} value={wave} onChange={e => setWave(parseInt(e.target.value) || 0)} />
