@@ -74,7 +74,7 @@ function buildEmail(slug: string, type: string, v: any, toEmail: string) {
   <tr><td align="center" style="background:${NAVY};padding:17px 16px;font-family:Arial,Helvetica,sans-serif">
     <span style="color:#fff;font-size:13px;letter-spacing:2px">DENISON YACHTING</span>
     <span style="color:#63799a;font-size:13px;margin:0 8px">|</span>
-    <span style="color:#fff;font-size:13px;letter-spacing:2px">YACHTSLINGER YACHTING</span></td></tr>
+    <span style="color:#fff;font-size:13px;letter-spacing:2px">YACHTSLINGER</span></td></tr>
   <tr><td><img src="${esc(hero)}" width="600" style="width:100%;display:block" alt="${esc(name)}"></td></tr>
   <tr><td align="center" style="background:${ORANGE};padding:10px;color:#fff;font-size:13px;letter-spacing:3px;font-family:Arial,Helvetica,sans-serif">${esc(banner)}</td></tr>
   <tr><td align="center" style="padding:26px 30px 4px">
@@ -94,7 +94,7 @@ function buildEmail(slug: string, type: string, v: any, toEmail: string) {
   <tr><td style="padding:16px 30px;border-top:1px solid ${LINE};color:#334155;font-size:12px;line-height:1.6;font-family:Arial,Helvetica,sans-serif">
     <strong>Will Noftsinger</strong> &mdash; Build Consultant, The Americas<br>WN@DenisonYachting.com &nbsp;&middot;&nbsp; 850.461.3342</td></tr>
   <tr><td align="center" style="padding:14px 24px 22px;background:#f8fafc;color:${MUTE};font-size:11px;line-height:1.6;font-family:Arial,Helvetica,sans-serif">
-    Denison Yachting &middot; Yachtslinger Yachting &middot; 1550 SE 17th Street, Fort Lauderdale, FL<br>
+    Denison Yachting &middot; Yachtslinger &middot; 1550 SE 17th Street, Fort Lauderdale, FL<br>
     You received this because you inquired about a yacht. <a href="${unsub}" style="color:#64748b">Unsubscribe</a>.</td></tr>
 </table></td></tr></table></body></html>`;
 
