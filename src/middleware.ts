@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const COOKIE_NAME = "yotcrm_session";
 
-const PUBLIC_PATHS = ["/login", "/api/auth", "/api/health", "/api/sync", "/api/clients/recent", "/api/emails", "/api/cards/leads", "/api/cards/views", "/card", "/api/matches/ingest", "/api/public", "/home", "/listing", "/api/listings/files", "/api/listings/debug", "/api/brochures", "/email/", "/bookmarklet", "/api/brochures/ingest", "/api/comms/ingest", "/api/comms/untracked", "/api/comms/cleanup", "/api/comms/heartbeat", "/api/comms/watchdog", "/api/campaign/unsubscribe", "/api/campaign/quick", "/api/campaign/webhook"];
+const PUBLIC_PATHS = ["/login", "/api/auth", "/api/health", "/api/sync", "/api/clients/recent", "/api/emails", "/api/cards/leads", "/api/cards/views", "/card", "/api/matches/ingest", "/api/public", "/home", "/listing", "/api/listings/files", "/api/listings/debug", "/api/brochures", "/email/", "/bookmarklet", "/api/brochures/ingest", "/api/comms/ingest", "/api/comms/untracked", "/api/comms/cleanup", "/api/comms/heartbeat", "/api/comms/watchdog", "/api/campaign/unsubscribe", "/api/campaign/quick", "/api/campaign/webhook", "/api/campaign/send-group"];
 
 function isPublic(pathname: string): boolean {
   if (PUBLIC_PATHS.some(p => pathname.startsWith(p))) return true;
