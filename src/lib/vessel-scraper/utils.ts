@@ -9,11 +9,16 @@ export function clean(s?: string | null): string {
 /** Clean and strip known junk suffixes from a headline */
 export function cleanHeadline(s?: string): string {
   if (!s) return "";
-  return s
-    .replace(/\s*[-–|]\s*(Denison|YachtWorld|Yacht\s*World|BoatTrader|boats\.com|YATCO|JamesEdition|Boat\s*International|Ocean\s*King|Van\s*der\s*Valk).*$/i, "")
-    .replace(/\s*[-–|]\s*Yacht(s|ing)?\s*(Sales?|for\s*Sale)?.*$/i, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  let out = s;
+  // Everything after a pipe is almost always the site / brokerage name.
+  const pipe = out.indexOf("|");
+  if (pipe > 0) out = out.slice(0, pipe);
+  // Strip a trailing " - <Brokerage>" for known brokerages (a bare dash can be part of a real name).
+  out = out.replace(/\s*[-–]\s*(Denison|YachtWorld|Yacht\s*World|BoatTrader|boats\.com|YATCO|JamesEdition|Boat\s*International|Ocean\s*King|Van\s*der\s*Valk|Fraser|Edmiston|IYC|Burgess|Northrop|Camper|Bluewater|Cecil\s*Wright|Worth\s*Avenue|Ocean\s*Independence|Allied\s*Marine)\b.*$/i, "");
+  // Strip trailing "(Motor/Sailing/Super) Yacht(s) for Sale/Charter" and a bare "for Sale/Charter".
+  out = out.replace(/\s+(?:motor\s+|sailing\s+|super\s*)?yachts?\s+for\s+(?:sale|charter)\b.*$/i, "");
+  out = out.replace(/\s+for\s+(?:sale|charter)\b.*$/i, "");
+  return out.replace(/\s+/g, " ").trim();
 }
 
 /** Normalise a measurement string — keeps original format, just trims */
