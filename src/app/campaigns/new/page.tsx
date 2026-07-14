@@ -58,11 +58,14 @@ export default function NewCampaign() {
     if (!url.trim()) return;
     setBusy("Reading listing…"); setDraft(null); setAudience(null); setAllImages([]);
     try {
-      const d = await post("/api/brochures/generate", { url: url.trim() });
+      const d = await post("/api/brochures/preview", { url: url.trim() });
       if (!d.ok) { say("Couldn't read that listing: " + (d.error || "?")); setBusy(""); return; }
-      const dr = vesselToDraft({ ...d.vessel, images: d.vessel.images || [] }, "newlisting", d.slug);
-      setDraft(dr); setAllImages(d.vessel.images || []); say("Loaded " + dr.headline + " (" + (d.vessel.images || []).length + " photos)");
-      refreshAudience(d.slug, "newlisting");
+      const imgs = (d.vessel.images || []).map((im: any) => (im?.src || im)).filter(Boolean);
+      const slug = (url.trim().replace(/\/+$/, "").split("/").pop() || "listing").replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 80) || ("listing-" + Date.now());
+      const dr = vesselToDraft({ ...d.vessel, images: imgs }, "newlisting", slug);
+      dr.linkUrl = url.trim();
+      setDraft(dr); setAllImages(imgs); say("Loaded " + dr.headline + " (" + imgs.length + " photos)");
+      refreshAudience(slug, "newlisting");
     } catch (e: any) { say("Error: " + e.message); }
     setBusy("");
   }
@@ -143,6 +146,12 @@ export default function NewCampaign() {
               </div>
             </div>
 
+            <div style={{ ...card, borderColor: ORANGE }}>
+              <label style={lbl}>Where every click goes (Denison listing link)</label>
+              <input style={{ ...inp, marginBottom: 0 }} placeholder="https://www.denisonyachtsales.com/yachts-for-sale/…" value={draft.linkUrl || ""} onChange={e => up({ linkUrl: e.target.value })} />
+              <div style={{ fontSize: 11, color: MUTE, marginTop: 6 }}>Every photo and button in the email opens this link. Defaults to the listing you loaded.</div>
+            </div>
+
             <div style={card}>
               <label style={lbl}>Subject line</label>
               <input style={inp} value={draft.subject} onChange={e => up({ subject: e.target.value })} />
@@ -174,8 +183,6 @@ export default function NewCampaign() {
                 })}
               </div>
               <div style={{ fontSize: 11, color: MUTE, marginTop: 6 }}>Orange = hero · Navy = gallery</div>
-              <label style={{ ...lbl, marginTop: 10 }}>Make the hero photo a link (optional)</label>
-              <input style={inp} placeholder="https://… (defaults to the brochure page)" value={draft.heroLink || ""} onChange={e => up({ heroLink: e.target.value })} />
             </div>
 
             <div style={card}>

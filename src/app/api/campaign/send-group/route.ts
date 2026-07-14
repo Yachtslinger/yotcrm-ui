@@ -35,8 +35,9 @@ export async function POST(req: NextRequest) {
     if (!Number.isFinite(limit)) limit = 5;
     limit = Math.min(limit, 2000);
 
-    const row = getBrochure(slug);
-    if (!row) return NextResponse.json({ ok: false, error: "This listing is out of date — click Load to refresh it, then send." }, { status: 404 });
+    let row: any = null;
+    try { row = getBrochure(slug); } catch {}
+    if (!row && !draft) return NextResponse.json({ ok: false, error: "Load a listing first (no draft or brochure to send)." }, { status: 400 });
 
     const d = new Database(DB);
     d.exec(`CREATE TABLE IF NOT EXISTS campaign_suppressions (email TEXT PRIMARY KEY, source TEXT DEFAULT 'unsubscribe', created_at TEXT NOT NULL)`);
