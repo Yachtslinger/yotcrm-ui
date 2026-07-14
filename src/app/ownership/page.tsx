@@ -313,6 +313,13 @@ export default function OwnershipPage() {
   const [segment, setSegment] = React.useState<"super"|"small">("super");
   const [crewMode, setCrewMode] = React.useState<"owner"|"captain"|"captain_mate">("captain");
 
+  // Charter proforma state
+  const [showCharterProforma, setShowCharterProforma] = React.useState(false);
+  const [charterWeekScenarios, setCharterWeekScenarios] = React.useState<[number,number,number]>([8,14,20]);
+  const [charterWeeklyRate, setCharterWeeklyRate] = React.useState<number|null>(null);
+  const [charterCommissionPct, setCharterCommissionPct] = React.useState(15);
+  const [charterRepositioning, setCharterRepositioning] = React.useState<"none"|"regional"|"seasonal"|"transatlantic">("regional");
+
   const [loading, setLoading]   = React.useState(false);
   const [error, setError]       = React.useState("");
   const [model, setModel]       = React.useState<CostModel|null>(null);
@@ -694,7 +701,7 @@ export default function OwnershipPage() {
             </div>
           </div>
           {/* Reserve planning toggle */}
-          <div className="mb-4">
+          <div className="mb-2">
             <button onClick={()=>setIncludeReservePlanning(p=>!p)}
               style={{display:"flex",alignItems:"center",gap:8,background:"none",border:"none",cursor:"pointer",padding:0}}>
               <span style={{width:14,height:14,borderRadius:3,border:`1.5px solid ${includeReservePlanning?"#a78bfa":"var(--border)"}`,background:includeReservePlanning?"#a78bfa":"transparent",display:"inline-flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
@@ -702,6 +709,18 @@ export default function OwnershipPage() {
               </span>
               <span className="text-xs" style={{color:includeReservePlanning?"#a78bfa":"var(--navy-400)"}}>
                 <strong>Include Reserve Planning section</strong> — suggested annual reserves for major future work (excluded from headline budget)
+              </span>
+            </button>
+          </div>
+          {/* Charter proforma toggle */}
+          <div className="mb-4">
+            <button onClick={()=>setShowCharterProforma(p=>!p)}
+              style={{display:"flex",alignItems:"center",gap:8,background:"none",border:"none",cursor:"pointer",padding:0}}>
+              <span style={{width:14,height:14,borderRadius:3,border:`1.5px solid ${showCharterProforma?"#38bdf8":"var(--border)"}`,background:showCharterProforma?"#38bdf8":"transparent",display:"inline-flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                {showCharterProforma&&<span style={{color:"#fff",fontSize:8,fontWeight:900,lineHeight:1}}>✓</span>}
+              </span>
+              <span className="text-xs" style={{color:showCharterProforma?"#38bdf8":"var(--navy-400)"}}>
+                <strong>Include Charter Income Proforma</strong> — gross proceeds, broker commission, additional charter costs, repositioning, and net offset to operating budget
               </span>
             </button>
           </div>
@@ -1045,6 +1064,198 @@ export default function OwnershipPage() {
                     </div>
                   )}
                   <CategoryExamples/>
+
+                  {/* ── Charter Income Proforma ────────────────────────────── */}
+                  {showCharterProforma&&(()=>{
+                    const lft = model._meta?.loa_ft ?? vesselLoaFt;
+                    // Weekly rate estimate by LOA ($/ft/week)
+                    const ratePerFt = lft<80?280:lft<100?335:lft<120?390:lft<140?445:lft<160?505:lft<185?575:650;
+                    const medMult = homePort.toLowerCase().includes("mediterr")?1.22:1.0;
+                    const estimatedRate = Math.round(lft*ratePerFt*medMult/5000)*5000;
+                    const rate = charterWeeklyRate ?? estimatedRate;
+
+                    // Repositioning cost (scales with vessel size)
+                    const repoBase:{[k:string]:number} = {none:0,regional:9000,seasonal:28000,transatlantic:88000};
+                    const repoCost = Math.round((repoBase[charterRepositioning]*(lft/100))/5000)*5000;
+
+                    // Fixed annual charter costs
+                    const insuranceLoading = Math.round((4000+lft*20)/500)*500;
+                    const compliance = lft>100?5000:3000;
+                    const marketing = Math.round((2500+lft*12)/500)*500;
+                    const totalFixed = insuranceLoading+compliance+marketing+repoCost;
+
+                    // Per-week variable costs
+                    const weeklyFuelOverage = Math.round((gtAdj.mid/52)*0.20/500)*500;
+                    const weeklyWear = Math.round(lft*30/500)*500;
+
+                    const SCEN_LABELS = ["Conservative","Moderate","Active"];
+                    const SCEN_COLORS = ["#4ade80","#facc15","#f87171"];
+
+                    const scenarios = charterWeekScenarios.map((weeks,i)=>{
+                      const gross = rate*weeks;
+                      const commission = Math.round(gross*(charterCommissionPct/100));
+                      const netRevenue = gross-commission;
+                      const variableCosts = (weeklyFuelOverage+weeklyWear)*weeks;
+                      const totalAdditional = variableCosts+totalFixed;
+                      const netContribution = netRevenue-totalAdditional;
+                      const netOwnerCost = gtAdj.mid-netContribution;
+                      const breakEvenWeeks = totalAdditional>0&&rate*(1-charterCommissionPct/100)>0
+                        ? Math.ceil((gtAdj.mid+totalFixed)/Math.max(1,(rate*(1-charterCommissionPct/100))-weeklyFuelOverage-weeklyWear))
+                        : 0;
+                      return{weeks,gross,commission,netRevenue,variableCosts,weeklyFuelOverage,weeklyWear,totalFixed,totalAdditional,netContribution,netOwnerCost,breakEvenWeeks,label:SCEN_LABELS[i],color:SCEN_COLORS[i]};
+                    });
+
+                    const r5c=(n:number)=>(n<0?"−$":"$")+Math.round(Math.abs(n)).toLocaleString("en-US");
+                    const isEditing_rate = React.useRef(false); void isEditing_rate;
+
+                    return(
+                      <div className="rounded-xl mt-4 p-5" style={{background:"rgba(56,189,248,.04)",border:"1px solid rgba(56,189,248,.25)"}}>
+                        {/* Section header */}
+                        <div className="flex items-start justify-between mb-4">
+                          <div>
+                            <p className="text-xs font-bold uppercase tracking-widest" style={{color:"#38bdf8"}}>Charter Income Proforma</p>
+                            <p className="text-xs mt-1" style={{color:"var(--navy-400)"}}>Gross proceeds, broker commission, additional charter costs, repositioning — net offset to annual operating budget</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs" style={{color:"#38bdf8"}}>Est. Weekly Gross Rate</p>
+                            <p className="text-lg font-bold" style={{color:"#38bdf8"}}>${(rate).toLocaleString("en-US")}/wk</p>
+                            <p className="text-xs" style={{color:"var(--navy-400)"}}>{charterWeeklyRate?"custom rate":"estimated from LOA"}</p>
+                          </div>
+                        </div>
+
+                        {/* Controls */}
+                        <div className="grid grid-cols-2 gap-4 mb-5 p-3 rounded-lg" style={{background:"rgba(0,0,0,.2)"}}>
+                          <div>
+                            <label className="block text-xs uppercase tracking-wider mb-1" style={{color:"var(--navy-400)"}}>Weekly Charter Rate (Gross)</label>
+                            <div style={{display:"flex",alignItems:"center",gap:6}}>
+                              <span style={{fontSize:13,color:"var(--navy-400)"}}>$</span>
+                              <input type="number" min={5000} max={1000000} step={5000}
+                                value={charterWeeklyRate??estimatedRate}
+                                onChange={e=>setCharterWeeklyRate(Number(e.target.value)||null)}
+                                className="rounded-lg text-sm px-2 py-1.5" style={{background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)",width:130}}/>
+                              {charterWeeklyRate&&<button onClick={()=>setCharterWeeklyRate(null)} style={{fontSize:10,color:"var(--navy-400)",background:"none",border:"none",cursor:"pointer"}}>↺ Reset</button>}
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-xs uppercase tracking-wider mb-1" style={{color:"var(--navy-400)"}}>Broker Commission</label>
+                            <div style={{display:"flex",alignItems:"center",gap:6}}>
+                              <input type="number" min={5} max={30} step={1} value={charterCommissionPct}
+                                onChange={e=>setCharterCommissionPct(Math.max(5,Math.min(30,Number(e.target.value)||15)))}
+                                className="rounded-lg text-sm px-2 py-1.5" style={{background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)",width:60}}/>
+                              <span style={{fontSize:13,color:"var(--navy-400)"}}>% (MYBA standard: 15%)</span>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-xs uppercase tracking-wider mb-1" style={{color:"var(--navy-400)"}}>Charter Weeks / Year</label>
+                            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                              {charterWeekScenarios.map((w,i)=>(
+                                <div key={i} style={{display:"flex",alignItems:"center",gap:3}}>
+                                  <span style={{fontSize:10,color:SCEN_COLORS[i]}}>{SCEN_LABELS[i].slice(0,4)}:</span>
+                                  <input type="number" min={1} max={30} step={1} value={w}
+                                    onChange={e=>{const v=Math.max(1,Math.min(30,Number(e.target.value)||w));setCharterWeekScenarios(prev=>{const n=[...prev] as [number,number,number];n[i]=v;return n;});}}
+                                    style={{width:40,background:"var(--input,#1e293b)",border:`1px solid ${SCEN_COLORS[i]}40`,borderRadius:6,color:"var(--foreground)",fontSize:12,padding:"2px 4px",textAlign:"center"}}/>
+                                </div>
+                              ))}
+                              <span style={{fontSize:10,color:"var(--navy-400)"}}>wks</span>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-xs uppercase tracking-wider mb-1" style={{color:"var(--navy-400)"}}>Repositioning</label>
+                            <select value={charterRepositioning} onChange={e=>setCharterRepositioning(e.target.value as typeof charterRepositioning)}
+                              className="rounded-lg text-xs px-2 py-1.5 w-full" style={{background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)"}}>
+                              <option value="none">None — stays in home port</option>
+                              <option value="regional">Regional only — Bahamas / nearby</option>
+                              <option value="seasonal">Seasonal migration — FL ↔ NE or similar</option>
+                              <option value="transatlantic">Transatlantic — Med season + Caribbean</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Proforma table */}
+                        <table style={{width:"100%",borderCollapse:"collapse"}}>
+                          <thead>
+                            <tr style={{borderBottom:"1px solid rgba(56,189,248,.3)"}}>
+                              <th style={{textAlign:"left",padding:"4px 0",fontSize:10,textTransform:"uppercase",letterSpacing:"0.08em",color:"var(--navy-400)"}}>Line Item</th>
+                              {scenarios.map(s=><th key={s.label} style={{textAlign:"right",padding:"4px 10px",fontSize:10,textTransform:"uppercase",letterSpacing:"0.06em",color:s.color}}>{s.label}<br/><span style={{fontSize:9,fontWeight:400,opacity:0.7}}>({s.weeks} wks/yr)</span></th>)}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {/* Revenue block */}
+                            <tr><td colSpan={4} style={{padding:"10px 0 3px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",color:"#38bdf8"}}>Revenue</td></tr>
+                            {[
+                              ["Gross Charter Revenue",s=>s.gross,false],
+                              [`Less: Broker Commission (${charterCommissionPct}%)`,s=>-s.commission,false],
+                            ].map(([label,fn,bold])=>(
+                              <tr key={label as string} style={{borderBottom:"1px solid rgba(255,255,255,.04)"}}>
+                                <td style={{padding:"5px 0",fontSize:12,color:bold?"#38bdf8":"var(--foreground)",fontWeight:bold?700:400}}>{label as string}</td>
+                                {scenarios.map(s=><td key={s.label} style={{padding:"5px 10px",textAlign:"right",fontSize:12,color:(fn as (s:typeof scenarios[0])=>number)(s)<0?"#f87171":"var(--foreground)"}}>{r5c((fn as (s:typeof scenarios[0])=>number)(s))}</td>)}
+                              </tr>
+                            ))}
+                            <tr style={{borderBottom:"1px solid rgba(56,189,248,.4)"}}>
+                              <td style={{padding:"6px 0",fontSize:12,fontWeight:700,color:"#38bdf8"}}>Net Charter Revenue</td>
+                              {scenarios.map(s=><td key={s.label} style={{padding:"6px 10px",textAlign:"right",fontSize:12,fontWeight:700,color:"#38bdf8"}}>{r5c(s.netRevenue)}</td>)}
+                            </tr>
+
+                            {/* Additional costs block */}
+                            <tr><td colSpan={4} style={{padding:"10px 0 3px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",color:"#f87171"}}>Additional Charter Costs</td></tr>
+                            {[
+                              ["Fuel Overage (charter profile uses more hrs)",s=>-s.weeklyFuelOverage*s.weeks,"20% above operating baseline for charter weeks"],
+                              ["Wear & Maintenance Premium",s=>-s.weeklyWear*s.weeks,`$${Math.round(weeklyWear).toLocaleString()}/wk — charter accelerates wear on all systems`],
+                              ["Charter Insurance Loading",s=>-insuranceLoading,"Additional premium for commercial charter use"],
+                              ["Flag / USCG Charter Compliance",s=>-compliance,"Annual certification for charter operations — flag, USCG COI, or MCA"],
+                              ["Marketing & Listing Fees",s=>-marketing,"Central agency listing, boat shows, photography/video refresh"],
+                              ...(repoCost>0?[["Repositioning Costs",s=>-repoCost,"Fuel, crew time, and transient marina for positioning voyages"]]:[]),
+                            ].map(([label,fn,desc])=>(
+                              <tr key={label as string} style={{borderBottom:"1px solid rgba(255,255,255,.04)"}}>
+                                <td style={{padding:"5px 0",fontSize:12,color:"var(--foreground)"}}>
+                                  <div>{label as string}</div>
+                                  <div style={{fontSize:10,color:"var(--navy-400)",marginTop:1}}>{desc as string}</div>
+                                </td>
+                                {scenarios.map(s=><td key={s.label} style={{padding:"5px 10px",textAlign:"right",fontSize:12,color:"#f87171"}}>{r5c((fn as (s:typeof scenarios[0])=>number)(s))}</td>)}
+                              </tr>
+                            ))}
+                            <tr style={{borderBottom:"1px solid rgba(248,113,113,.4)"}}>
+                              <td style={{padding:"6px 0",fontSize:12,fontWeight:700,color:"#f87171"}}>Total Additional Costs</td>
+                              {scenarios.map(s=><td key={s.label} style={{padding:"6px 10px",textAlign:"right",fontSize:12,fontWeight:700,color:"#f87171"}}>{r5c(-s.totalAdditional)}</td>)}
+                            </tr>
+
+                            {/* Net contribution */}
+                            <tr style={{borderBottom:"1px solid rgba(52,211,153,.4)"}}>
+                              <td style={{padding:"8px 0",fontSize:13,fontWeight:700,color:"#34d399"}}>Net Charter Contribution to Owner</td>
+                              {scenarios.map(s=><td key={s.label} style={{padding:"8px 10px",textAlign:"right",fontSize:13,fontWeight:700,color:s.netContribution>0?"#34d399":"#f87171"}}>{r5c(s.netContribution)}</td>)}
+                            </tr>
+
+                            {/* Net owner cost */}
+                            <tr><td colSpan={4} style={{padding:"12px 0 3px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",color:"var(--brass-400)"}}>Net Annual Cost After Charter</td></tr>
+                            <tr style={{borderBottom:"1px solid rgba(255,255,255,.06)"}}>
+                              <td style={{padding:"5px 0",fontSize:12,color:"var(--foreground)"}}>Annual Operating Budget (mid)</td>
+                              {scenarios.map(s=><td key={s.label} style={{padding:"5px 10px",textAlign:"right",fontSize:12,color:"#facc15"}}>{r5c(gtAdj.mid)}</td>)}
+                            </tr>
+                            <tr style={{borderBottom:"1px solid rgba(255,255,255,.06)"}}>
+                              <td style={{padding:"5px 0",fontSize:12,color:"var(--foreground)"}}>Less: Charter Contribution</td>
+                              {scenarios.map(s=><td key={s.label} style={{padding:"5px 10px",textAlign:"right",fontSize:12,color:"#34d399"}}>{r5c(-Math.max(0,s.netContribution))}</td>)}
+                            </tr>
+                            <tr style={{borderTop:"2px solid rgba(184,147,58,.4)"}}>
+                              <td style={{padding:"8px 0",fontSize:13,fontWeight:700,color:"var(--brass-400)"}}>NET ANNUAL COST TO OWNER</td>
+                              {scenarios.map(s=><td key={s.label} style={{padding:"8px 10px",textAlign:"right",fontSize:13,fontWeight:700,color:s.netOwnerCost<gtAdj.mid*0.5?"#4ade80":s.netOwnerCost<0?"#4ade80":"#facc15"}}>{r5c(s.netOwnerCost)}</td>)}
+                            </tr>
+
+                            {/* Breakeven */}
+                            <tr>
+                              <td colSpan={4} style={{paddingTop:10,fontSize:11,color:"var(--navy-400)",lineHeight:1.6}}>
+                                Break-even: approximately <strong style={{color:"#38bdf8"}}>{scenarios[1].breakEvenWeeks} charter weeks</strong> at {r5c(rate)}/wk covers the full annual operating budget (mid scenario) after additional charter costs.
+                                {repoCost>0&&<span> Repositioning cost of {r5c(repoCost)} is treated as fixed regardless of charter volume.</span>}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+
+                        <div className="mt-4 p-3 rounded-lg" style={{background:"rgba(0,0,0,.2)",fontSize:11,color:"var(--navy-400)",lineHeight:1.6}}>
+                          <strong style={{color:"#38bdf8"}}>Note on APA (Advanced Provisioning Allowance):</strong> Charter guests pay an APA — typically 30–35% of the base charter rate — on top of the charter fee. This is a client float used for fuel, provisions, port fees, and gratuities during the charter. It is not additional owner revenue; APA income and APA expenses should roughly net to zero. Any surplus is returned to the client. APA is therefore excluded from this proforma as a revenue-neutral item. The additional fuel and provisioning costs above reflect the owner's exposure on any APA shortfall.
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
