@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     limit = Math.min(limit, 2000);
 
     const row = getBrochure(slug);
-    if (!row) return NextResponse.json({ ok: false, error: "brochure not found" }, { status: 404 });
+    if (!row) return NextResponse.json({ ok: false, error: "This listing is out of date — click Load to refresh it, then send." }, { status: 404 });
 
     const d = new Database(DB);
     d.exec(`CREATE TABLE IF NOT EXISTS campaign_suppressions (email TEXT PRIMARY KEY, source TEXT DEFAULT 'unsubscribe', created_at TEXT NOT NULL)`);
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
     for (let i = 0; i < recips.length; i += 100) {
       const chunk = recips.slice(i, i + 100);
       const messages = chunk.map(email => {
-        const { html, subject } = draft ? buildEmailFromDraft(draft, email) : buildEmail(slug, type, row.vessel, email);
+        const { html, subject } = draft ? buildEmailFromDraft(draft, email) : buildEmail(slug, type, row!.vessel, email);
         return { from, to: [email], reply_to: "WN@DenisonYachting.com", subject, html };
       });
       try {
