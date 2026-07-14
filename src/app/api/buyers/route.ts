@@ -22,6 +22,7 @@ export async function GET(req: Request) {
   const lengthMax = searchParams.get("lengthMax");
   const make      = searchParams.get("make");
   const status    = searchParams.get("status");
+  const vesselType = searchParams.get("vesselType");
   const page      = Math.max(1, parseInt(searchParams.get("page") || "1"));
   const pageSize  = Math.min(200, Math.max(1, parseInt(searchParams.get("pageSize") || "100")));
 
@@ -44,6 +45,10 @@ export async function GET(req: Request) {
     if (status && status !== "all") {
       leadConds.push("LOWER(l.status) = ?");
       leadParams.push(status.toLowerCase());
+    }
+    if (vesselType && vesselType !== "all") {
+      leadConds.push("l.vessel_type_pref = ?");
+      leadParams.push(vesselType);
     }
 
     const hasBoatFilters = boatConds.length > 0;
@@ -70,6 +75,7 @@ export async function GET(req: Request) {
       SELECT
         l.id, l.first_name, l.last_name, l.email, l.phone,
         l.status, l.source, l.notes, l.updated_at,
+        l.vessel_type_pref, l.tags, l.make_preference, l.preferred_location, l.budget_max, l.email_status,
         b.make AS boat_make, b.model AS boat_model,
         b.year AS boat_year, b.length AS boat_length,
         b.price AS boat_price, b.location AS boat_location,
@@ -104,6 +110,12 @@ export async function GET(req: Request) {
       status:    r.status || "other",
       source:    r.source,
       notes:     r.notes,
+      vesselType:  r.vessel_type_pref || "",
+      tags:        r.tags || "",
+      makePref:    r.make_preference || "",
+      prefLocation: r.preferred_location || "",
+      budgetMax:   r.budget_max || "",
+      emailStatus: r.email_status || "",
       boat_make:     r.boat_make    || "",
       boat_model:    r.boat_model   || "",
       boat_year:     r.boat_year    || "",
@@ -172,6 +184,12 @@ export async function GET(req: Request) {
       GROUP BY make ORDER BY count DESC LIMIT 20
     `).all();
 
+    const vesselTypes = db.prepare(`
+      SELECT vessel_type_pref AS label, COUNT(*) AS count
+      FROM leads WHERE vessel_type_pref IS NOT NULL AND vessel_type_pref != ''
+      GROUP BY vessel_type_pref ORDER BY count DESC
+    `).all();
+
     return NextResponse.json({
       ok: true,
       buyers,
@@ -181,6 +199,7 @@ export async function GET(req: Request) {
       totalPages: Math.ceil(total / pageSize),
       segments: { price: priceSegs, length: lengthSegs, year: yearSegs },
       topMakes,
+      vesselTypes,
     });
   } catch (err) {
     return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });

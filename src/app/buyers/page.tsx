@@ -19,12 +19,12 @@ type Filters = {
   yearMin: string; yearMax: string;
   priceMin: string; priceMax: string;
   lengthMin: string; lengthMax: string;
-  make: string; status: string;
+  make: string; status: string; vesselType: string;
 };
 
 const EMPTY_FILTERS: Filters = {
   yearMin: "", yearMax: "", priceMin: "", priceMax: "",
-  lengthMin: "", lengthMax: "", make: "", status: "all",
+  lengthMin: "", lengthMax: "", make: "", status: "all", vesselType: "all",
 };
 
 function formatPrice(val: string): string {
@@ -42,6 +42,7 @@ export default function BuyerSearchPage() {
   const [appliedFilters, setAppliedFilters] = useState<Filters>(EMPTY_FILTERS);
   const [segments, setSegments] = useState<{ price: Segment[]; length: Segment[]; year: Segment[] }>({ price: [], length: [], year: [] });
   const [topMakes, setTopMakes] = useState<TopMake[]>([]);
+  const [vesselTypes, setVesselTypes] = useState<{ label: string; count: number }[]>([]);
   const [showFilters, setShowFilters] = useState(true);
   const [total, setTotal] = useState(0);
 
@@ -56,6 +57,7 @@ export default function BuyerSearchPage() {
     if (f.lengthMax) params.set("lengthMax", f.lengthMax);
     if (f.make) params.set("make", f.make);
     if (f.status && f.status !== "all") params.set("status", f.status);
+    if (f.vesselType && f.vesselType !== "all") params.set("vesselType", f.vesselType);
     try {
       const res = await fetch(`/api/buyers?${params.toString()}`);
       const data = await res.json();
@@ -64,6 +66,7 @@ export default function BuyerSearchPage() {
         setTotal(data.total);
         if (data.segments) setSegments(data.segments);
         if (data.topMakes) setTopMakes(data.topMakes);
+        if (data.vesselTypes) setVesselTypes(data.vesselTypes);
       }
     } catch {} finally { setLoading(false); }
   }, []);
@@ -99,7 +102,14 @@ export default function BuyerSearchPage() {
     fetchBuyers(newF);
   };
 
-  const hasActiveFilters = Object.entries(appliedFilters).some(([k, v]) => k !== "status" ? v !== "" : v !== "all");
+  const selectVesselType = (label: string) => {
+    const newF = { ...filters, vesselType: filters.vesselType === label ? "all" : label };
+    setFilters(newF);
+    setAppliedFilters(newF);
+    fetchBuyers(newF);
+  };
+
+  const hasActiveFilters = Object.entries(appliedFilters).some(([k, v]) => (k === "status" || k === "vesselType") ? v !== "all" : v !== "");
 
   return (
     <PageShell
@@ -116,6 +126,21 @@ export default function BuyerSearchPage() {
       {/* ═══ FILTER PANEL ═══ */}
       {showFilters && (
         <div className="card-elevated p-4 md:p-5 mb-5 space-y-4">
+
+          {/* Areas of Interest — vessel type groups */}
+          {vesselTypes.length > 0 && (
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)] mb-2">Areas of Interest</div>
+              <div className="flex flex-wrap gap-2">
+                {vesselTypes.map(vt => (
+                  <button key={vt.label} onClick={() => selectVesselType(vt.label)}
+                    className={`px-3 py-1.5 rounded-full text-sm border transition ${appliedFilters.vesselType === vt.label ? "bg-slate-800 text-white border-transparent" : "border-[var(--border)] hover:border-[var(--brass-400)]"}`}>
+                    {vt.label} <span className="opacity-60">{vt.count}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Segment Chips — Price */}
           {segments.price.some(s => s.count > 0) && (
