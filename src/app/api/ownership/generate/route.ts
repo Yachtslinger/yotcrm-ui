@@ -182,7 +182,9 @@ function dockageBreakdown(lft:number,port:string){
 /* ─── HAUL-OUT ────────────────────────────────────────────────────────────── */
 function haulAntifoul(lft:number,port:string){
   const biennial=port.toLowerCase().includes("alaska")||port.toLowerCase().includes("pacific north");
-  const r=biennial?[40,65,90]:[100,130,165];
+  // $/LOA-ft: full annual bottom job — haul fee, blocking, 2-coat antifoul, zincs, prop polish
+  // Warm water (annual): $170-400/ft · Cold water biennial ÷2: $90-200/ft
+  const r=biennial?[90,140,200]:[170,255,400];
   return{low:r5(lft*r[0]),mid:r5(lft*r[1]),high:r5(lft*r[2])};
 }
 
@@ -275,9 +277,9 @@ function crewPresetPositions(preset:string,lft:number):{keys:string[];isDayRate:
   return{keys:[],isDayRate:false};
 }
 function crewSupportCosts(ftc:number,total:number,isLux:boolean){
-  const r1l=(n:number)=>Math.round(n/1000)*1000;const fpd=isLux?48:38;
+  const r1l=(n:number)=>Math.round(n/1000)*1000; void isLux;
   return{
-    foodBeverage:{low:r5(ftc*34*365),mid:r5(ftc*fpd*365),high:r5(ftc*65*365)},
+    foodBeverage:{low:r5(ftc*15*365),mid:r5(ftc*23*365),high:r5(ftc*36*365)},
     crewHealth:{low:r5(ftc*4500),mid:r5(ftc*6000),high:r5(ftc*8500)},
     recruitment:{low:r1l(total*2500),mid:r1l(total*4000),high:r1l(total*7500)},
     travel:{low:r1l(ftc*3500),mid:r1l(ftc*5200),high:r1l(ftc*9000)},
