@@ -297,6 +297,11 @@ function CategoryExamples() {
 /* ─── Main Page ──────────────────────────────────────────────────────────── */
 export default function OwnershipPage() {
   const [url, setUrl]         = React.useState("");
+  const [inputMode, setInputMode] = React.useState<"url"|"pdf">("url");
+  const [pdfFile, setPdfFile] = React.useState<File|null>(null);
+  const [pdfParsing, setPdfParsing] = React.useState(false);
+  const [pdfVessel, setPdfVessel] = React.useState<Record<string,unknown>|null>(null);
+  const [pdfFileName, setPdfFileName] = React.useState("");
   const [homePort, setHomePort] = React.useState("Florida / US East Coast");
   const [vesselStyle, setVesselStyle] = React.useState("Luxury / Full Fairing & Paint");
   const [usagePattern, setUsagePattern] = React.useState("normal_private");
@@ -442,16 +447,24 @@ export default function OwnershipPage() {
   }
 
   async function generate() {
-    if (!url.trim()) return;
+    if (inputMode==="url"&&!url.trim()) return;
+    if (inputMode==="pdf"&&!pdfVessel) return;
     setLoading(true); setError(""); setModel(null); setOverrides({}); setExcludedPaths(new Set());
     try {
-      const scrapeRes=await fetch("/api/brochures/preview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:url.trim()})});
-      const scrapeData=await scrapeRes.json();
-      if(!scrapeData.ok&&!scrapeData.vessel) throw new Error(scrapeData.error||"Scrape failed");
-      const vessel=scrapeData.vessel||{};
-      setVesselLoaFt(parseLoaToFeet(vessel.loa||""));
+      let vessel: Record<string,unknown> = {};
+      if (inputMode==="pdf"&&pdfVessel) {
+        vessel = pdfVessel;
+        setVesselLoaFt(parseLoaToFeet(String(pdfVessel.loa||"")));
+      } else {
+        const scrapeRes=await fetch("/api/brochures/preview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:url.trim()})});
+        const scrapeData=await scrapeRes.json();
+        if(!scrapeData.ok&&!scrapeData.vessel) throw new Error(scrapeData.error||"Scrape failed");
+        vessel=scrapeData.vessel||{};
+        setVesselLoaFt(parseLoaToFeet(String(vessel.loa||"")));
+      }
+      const sourceUrl = inputMode==="url" ? url.trim() : "";
       const res=await fetch("/api/ownership/generate",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({vessel,url:url.trim(),usagePattern,vesselCondition,
+        body:JSON.stringify({vessel,url:sourceUrl,usagePattern,vesselCondition,
           vesselComplexity,knownGph:knownGph||undefined,includeReservePlanning,
           charterWeeks,homePort,vesselStyle,segment,crewMode})});
       const data=await res.json();
@@ -519,11 +532,82 @@ export default function OwnershipPage() {
 
         {/* Form */}
         <div className="rounded-xl p-5 mb-6" style={{background:"var(--card)",border:"1px solid var(--border)"}}>
-          <label className="block text-xs uppercase tracking-wider mb-2" style={{color:"var(--navy-400)"}}>Listing URL</label>
-          <input className="w-full rounded-lg text-sm px-3 py-2.5 mb-4"
-            style={{background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)"}}
-            value={url} onChange={e=>setUrl(e.target.value)} onKeyDown={e=>e.key==="Enter"&&generate()}
-            placeholder="https://www.yachtworld.com/yacht/… or denisonyachtsales.com/…"/>
+          {/* Input mode toggle */}
+          <div className="flex gap-2 mb-3">
+            {([["url","🔗 Listing URL","Paste a YachtWorld, Denison, or broker link"],["pdf","📄 Upload PDF","Vessel brochure or spec sheet"]] as [string,string,string][]).map(([mode,label,sub])=>(
+              <button key={mode} onClick={()=>setInputMode(mode as "url"|"pdf")} className="flex-1 rounded-lg px-3 py-2 text-left"
+                style={{background:inputMode===mode?"var(--brass-400)":"var(--input,#1e293b)",border:`1px solid ${inputMode===mode?"var(--brass-400)":"var(--border)"}`,color:inputMode===mode?"#0a1628":"var(--foreground)"}}>
+                <div className="text-xs font-bold">{label}</div>
+                <div className="text-xs mt-0.5" style={{opacity:0.7}}>{sub}</div>
+              </button>
+            ))}
+          </div>
+
+          {inputMode==="url"&&(
+            <>
+              <label className="block text-xs uppercase tracking-wider mb-2" style={{color:"var(--navy-400)"}}>Listing URL</label>
+              <input className="w-full rounded-lg text-sm px-3 py-2.5 mb-4"
+                style={{background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)"}}
+                value={url} onChange={e=>setUrl(e.target.value)} onKeyDown={e=>e.key==="Enter"&&generate()}
+                placeholder="https://www.yachtworld.com/yacht/… or denisonyachtsales.com/…"/>
+            </>
+          )}
+
+          {inputMode==="pdf"&&(
+            <div className="mb-4">
+              <label className="block text-xs uppercase tracking-wider mb-2" style={{color:"var(--navy-400)"}}>Vessel Brochure or Spec Sheet (PDF)</label>
+              <div className="rounded-lg p-4" style={{background:"var(--input,#1e293b)",border:`1px dashed ${pdfVessel?"#4ade80":"var(--border)"}`,textAlign:"center"}}>
+                {!pdfVessel&&!pdfParsing&&(
+                  <label style={{cursor:"pointer",display:"block"}}>
+                    <input type="file" accept="application/pdf" style={{display:"none"}}
+                      onChange={async e=>{
+                        const f=e.target.files?.[0];
+                        if(!f)return;
+                        setPdfFile(f);setPdfParsing(true);setPdfVessel(null);setError("");
+                        try{
+                          const fd=new FormData();fd.append("pdf",f);
+                          const res=await fetch("/api/ownership/pdf-parse",{method:"POST",body:fd});
+                          const data=await res.json();
+                          if(!data.ok)throw new Error(data.error||"PDF parse failed");
+                          setPdfVessel(data.vessel);
+                          setPdfFileName(data.fileName||f.name);
+                        }catch(err){setError(err instanceof Error?err.message:"PDF parse failed");setPdfFile(null);}
+                        finally{setPdfParsing(false);}
+                      }}/>
+                    <div style={{fontSize:24,marginBottom:6}}>📄</div>
+                    <p className="text-sm font-semibold" style={{color:"var(--brass-400)"}}>Click to upload PDF</p>
+                    <p className="text-xs mt-1" style={{color:"var(--navy-400)"}}>Brochure, spec sheet, survey — up to 30 MB</p>
+                  </label>
+                )}
+                {pdfParsing&&(
+                  <div style={{padding:"8px 0"}}>
+                    <div className="w-5 h-5 border-2 rounded-full animate-spin mx-auto mb-2" style={{borderColor:"var(--brass-400)",borderTopColor:"transparent"}}/>
+                    <p className="text-xs" style={{color:"var(--navy-400)"}}>Reading PDF… extracting vessel specs…</p>
+                  </div>
+                )}
+                {pdfVessel&&!pdfParsing&&(
+                  <div style={{textAlign:"left"}}>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{fontSize:18}}>✅</span>
+                        <div>
+                          <p className="text-xs font-bold" style={{color:"#4ade80"}}>{String(pdfVessel.name||pdfFileName)}</p>
+                          <p className="text-xs" style={{color:"var(--navy-400)"}}>{pdfFileName} · specs extracted</p>
+                        </div>
+                      </div>
+                      <button onClick={()=>{setPdfVessel(null);setPdfFile(null);setPdfFileName("");}}
+                        style={{fontSize:11,color:"var(--navy-400)",background:"none",border:"none",cursor:"pointer"}}>✕ Remove</button>
+                    </div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                      {[["LOA",String(pdfVessel.loa||"")],["Year",String(pdfVessel.year||"")],["Engines",String(pdfVessel.engines||"").slice(0,40)],["Range",String(pdfVessel.range||"")]].filter(([,v])=>v&&v!=="null").map(([k,v])=>(
+                        <span key={k} style={{fontSize:10,padding:"2px 7px",borderRadius:4,background:"rgba(74,222,128,.08)",color:"#4ade80",border:"1px solid rgba(74,222,128,.2)"}}>{k}: {v}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div className="col-span-2">
               <label className="block text-xs uppercase tracking-wider mb-2" style={{color:"var(--navy-400)"}}>Annual Use Pattern <span style={{fontWeight:400,textTransform:"none",letterSpacing:0}}>— sets Low / Mid / High engine hours</span></label>
@@ -634,11 +718,11 @@ export default function OwnershipPage() {
               </div>
             </div>
           )}
-          <button onClick={generate} disabled={loading||!url.trim()} className="px-6 py-2.5 rounded-lg text-sm font-bold"
-            style={{background:loading||!url.trim()?"var(--border)":"var(--brass-400)",color:loading||!url.trim()?"var(--navy-400)":"#fff",cursor:loading||!url.trim()?"not-allowed":"pointer"}}>
+          <button onClick={generate} disabled={loading||(inputMode==="url"&&!url.trim())||(inputMode==="pdf"&&!pdfVessel)} className="px-6 py-2.5 rounded-lg text-sm font-bold"
+            style={{background:loading||(inputMode==="url"&&!url.trim())||(inputMode==="pdf"&&!pdfVessel)?"var(--border)":"var(--brass-400)",color:loading||(inputMode==="url"&&!url.trim())||(inputMode==="pdf"&&!pdfVessel)?"var(--navy-400)":"#fff",cursor:loading||(inputMode==="url"&&!url.trim())||(inputMode==="pdf"&&!pdfVessel)?"not-allowed":"pointer"}}>
             {loading?"Analyzing…":"Generate Model"}
           </button>
-          {loading&&<div className="mt-3 flex items-center gap-2"><div className="w-4 h-4 border-2 rounded-full animate-spin" style={{borderColor:"var(--brass-400)",borderTopColor:"transparent"}}/><span className="text-xs" style={{color:"var(--navy-400)"}}>Scraping vessel data… building cost model (~30s)…</span></div>}
+          {loading&&<div className="mt-3 flex items-center gap-2"><div className="w-4 h-4 border-2 rounded-full animate-spin" style={{borderColor:"var(--brass-400)",borderTopColor:"transparent"}}/><span className="text-xs" style={{color:"var(--navy-400)"}}>{inputMode==="pdf"?"Building cost model from PDF specs (~20s)…":"Scraping vessel data… building cost model (~30s)…"}</span></div>}
           {error&&<p className="mt-2 text-xs" style={{color:"#f87171"}}>Error: {error}</p>}
         </div>
 
