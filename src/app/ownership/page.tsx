@@ -11,7 +11,8 @@ type CostModel = {
   _meta?: {
     crewCount: number; fullTimeCount: number; loa_m: number; loa_ft: number;
     buildYear: number; age: number; hullType: string; hpTotal: number;
-    agreedHullValue: number; managementTier: string; crewPreset: string;
+    agreedHullValue: number; hullValueSource?: string;
+    managementTier: string; crewPreset: string;
     perCrew?: PerCrew; positionKeys: string[]; isDayRateCaptain: boolean;
   };
   crew: {
@@ -308,7 +309,7 @@ export default function OwnershipPage() {
   const [vesselCondition, setVesselCondition] = React.useState("unknown");
   const [vesselComplexity, setVesselComplexity] = React.useState<string|undefined>(undefined); // auto-inferred if unset
   const [knownGph, setKnownGph] = React.useState<number|undefined>(undefined);
-  const [includeReservePlanning, setIncludeReservePlanning] = React.useState(false);
+  const [agreedHullValue, setAgreedHullValue] = React.useState<number|undefined>(undefined);  const [includeReservePlanning, setIncludeReservePlanning] = React.useState(false);
   const [charterWeeks, setCharterWeeks] = React.useState(0);
   const [segment, setSegment] = React.useState<"super"|"small">("super");
   const [crewMode, setCrewMode] = React.useState<"owner"|"captain"|"captain_mate">("captain");
@@ -472,7 +473,9 @@ export default function OwnershipPage() {
       const sourceUrl = inputMode==="url" ? url.trim() : "";
       const res=await fetch("/api/ownership/generate",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({vessel,url:sourceUrl,usagePattern,vesselCondition,
-          vesselComplexity,knownGph:knownGph||undefined,includeReservePlanning,
+          vesselComplexity,knownGph:knownGph||undefined,
+          agreedHullValue:agreedHullValue||undefined,
+          includeReservePlanning,
           charterWeeks,homePort,vesselStyle,segment,crewMode})});
       const data=await res.json();
       if(!data.ok) throw new Error(data.error||"Generation failed");
@@ -686,7 +689,7 @@ export default function OwnershipPage() {
             </div>
             {vesselComplexity===undefined&&<p className="text-xs mt-1" style={{color:"var(--navy-400)",opacity:0.7}}>Not set — will be inferred from vessel style and age</p>}
           </div>
-          {/* Known fuel burn — optional override */}
+          {/* Known fuel burn */}
           <div className="mb-4">
             <label className="block text-xs uppercase tracking-wider mb-1.5" style={{color:"var(--navy-400)"}}>
               Known Fuel Burn <span style={{fontWeight:400,textTransform:"none",letterSpacing:0}}>— optional · captain/survey/builder data overrides formula</span>
@@ -699,6 +702,26 @@ export default function OwnershipPage() {
               <span className="text-xs" style={{color:"var(--navy-400)"}}>GPH at cruise · leave blank to use HP formula</span>
               {knownGph&&<button onClick={()=>setKnownGph(undefined)} style={{fontSize:11,color:"var(--navy-400)",background:"none",border:"none",cursor:"pointer"}}>✕ Clear</button>}
             </div>
+          </div>
+          {/* Agreed hull value */}
+          <div className="mb-4">
+            <label className="block text-xs uppercase tracking-wider mb-1.5" style={{color:"var(--navy-400)"}}>
+              Agreed Hull Value <span style={{fontWeight:400,textTransform:"none",letterSpacing:0}}>— for H&M insurance · leave blank to use asking price or LOA estimate</span>
+            </label>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:13,color:"var(--navy-400)"}}>$</span>
+              <input type="number" min={100000} max={500000000} step={100000} value={agreedHullValue??""} placeholder="e.g. 4500000"
+                onChange={e=>setAgreedHullValue(e.target.value?Math.max(100000,Number(e.target.value)):undefined)}
+                className="rounded-lg text-sm px-3 py-2"
+                style={{background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)",width:160}}/>
+              {agreedHullValue&&<span className="text-xs font-semibold" style={{color:"var(--brass-400)"}}>${(agreedHullValue/1_000_000).toFixed(2)}M</span>}
+              {agreedHullValue&&<button onClick={()=>setAgreedHullValue(undefined)} style={{fontSize:11,color:"var(--navy-400)",background:"none",border:"none",cursor:"pointer"}}>✕ Clear</button>}
+            </div>
+            {model&&model._meta?.hullValueSource&&(
+              <p className="text-xs mt-1" style={{color:"var(--navy-400)",opacity:0.7}}>
+                Currently using: <strong style={{color:"var(--brass-400)"}}>${((model._meta.agreedHullValue as number)/1_000_000).toFixed(2)}M</strong> — {model._meta.hullValueSource as string}
+              </p>
+            )}
           </div>
           {/* Reserve planning toggle */}
           <div className="mb-2">

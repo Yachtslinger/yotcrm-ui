@@ -158,18 +158,27 @@ function estimatedAgreedValue(lft:number):number{
   if(lft<130)return 9500000;if(lft<150)return 14000000;if(lft<165)return 19000000;
   if(lft<185)return 26000000;return 38000000;
 }
+// Parse an asking price string from a listing ("$4,500,000", "$4.5M", "4500000", etc.)
+function parseAskingPrice(price:string|undefined|null):number|null{
+  if(!price)return null;
+  const s=String(price).replace(/[$,\s]/g,"").toUpperCase();
+  const mMatch=s.match(/^([\d.]+)M$/);if(mMatch)return parseFloat(mMatch[1])*1_000_000;
+  const kMatch=s.match(/^([\d.]+)K$/);if(kMatch)return parseFloat(kMatch[1])*1_000;
+  const n=parseFloat(s.replace(/[^0-9.]/g,""));
+  return(!isNaN(n)&&n>=100_000)?n:null;
+}
 
 /* ─── DOCKAGE — split into 3 visible subcomponents ───────────────────────── */
 function dockageBreakdown(lft:number,port:string){
   const p=port.toLowerCase();
   let rates:[number,number,number];
-  if(p.includes("mediterr")||p.includes(" med"))rates=[55,90,165];
-  else if(p.includes("florida")||p.includes("east"))rates=[35,55,92];
-  else if(p.includes("gulf"))rates=[25,42,70];
-  else if(p.includes("caribbean"))rates=[28,46,80];
-  else if(p.includes("pacific")||p.includes("alaska"))rates=[22,36,62];
-  else if(p.includes("worldwide")||p.includes("expedi"))rates=[40,68,125];
-  else rates=[35,55,92];
+  if(p.includes("mediterr")||p.includes(" med"))rates=[65,105,185];
+  else if(p.includes("florida")||p.includes("east"))rates=[45,70,115];
+  else if(p.includes("gulf"))rates=[30,50,82];
+  else if(p.includes("caribbean"))rates=[32,52,88];
+  else if(p.includes("pacific")||p.includes("alaska"))rates=[25,42,70];
+  else if(p.includes("worldwide")||p.includes("expedi"))rates=[45,75,135];
+  else rates=[45,70,115];
   const hb={low:r5(lft*rates[0]*12),mid:r5(lft*rates[1]*12),high:r5(lft*rates[2]*12)};
   const tr={low:r5(hb.low*0.18),mid:r5(hb.mid*0.18),high:r5(hb.high*0.18)};
   const pd={low:r5(hb.low*0.10),mid:r5(hb.mid*0.10),high:r5(hb.high*0.10)};
@@ -440,7 +449,10 @@ export async function POST(req:NextRequest){
     const yr=parseYear(v.year||"2010");
     const age=2026-yr;
     const hpTotal=engineHpTotal||0;
-    const hullValue=agreedHullValue||estimatedAgreedValue(lft);
+    // Hull value — priority: user override → asking price from listing → LOA table
+    const askingPrice = parseAskingPrice(v.price || v.askingPrice);
+    const hullValue = agreedHullValue || askingPrice || estimatedAgreedValue(lft);
+    const hullValueSource = agreedHullValue?"user-entered":askingPrice?"listing asking price (use as insurance value starting point — confirm with broker)":"LOA-based estimate (no price data found)";
 
     // Resolve hours
     const patternHrs=USAGE_PATTERNS[usagePattern];
@@ -504,7 +516,7 @@ Respond with ONLY this JSON object — no preamble, no markdown fences.
 
     const model={
       vesselName:v.name||"Vessel",vesselUrl:url||"",
-      _meta:{crewCount:crew.count,fullTimeCount:crew.fullTimeCount,loa_m:lm,loa_ft:lft,buildYear:yr,age,hullType,hpTotal,agreedHullValue:hullValue,managementTier,crewPreset,vesselCondition,usagePattern,annualHrsTriple,complexity,fuelBasis:m.operations.fuelBasis,fuelConfidence:m.operations.fuelConfidence,fuelGphMid:m.operations.fuelGphMid,perCrew:budget.perCrew,positionKeys,isDayRateCaptain},
+      _meta:{crewCount:crew.count,fullTimeCount:crew.fullTimeCount,loa_m:lm,loa_ft:lft,buildYear:yr,age,hullType,hpTotal,agreedHullValue:hullValue,hullValueSource,managementTier,crewPreset,vesselCondition,usagePattern,annualHrsTriple,complexity,fuelBasis:m.operations.fuelBasis,fuelConfidence:m.operations.fuelConfidence,fuelGphMid:m.operations.fuelGphMid,perCrew:budget.perCrew,positionKeys,isDayRateCaptain},
       segment, crewMode,
       ...budget.model,...narrative,
     };
