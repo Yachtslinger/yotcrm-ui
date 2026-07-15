@@ -26,6 +26,12 @@ function parseKnots(val: string|number|undefined): number {
 function r5(n: number) { return Math.round(n/5000)*5000; }
 function r1(n: number) { return Math.round(n/1000)*1000; }
 
+/* ─── CONSERVATIVE LOA — always round up to the next 5-foot mark ─────────
+   A 90ft vessel bills as 95ft at the yard and marina.
+   A 120ft vessel bills as 125ft. Adds a 1-5ft safety buffer on every model. */
+function conservativeLoa(lft: number): number {
+  return Math.floor(lft / 5) * 5 + 5;
+}
 /* ─── USAGE PATTERNS ──────────────────────────────────────────────────────── */
 const USAGE_PATTERNS: Record<string,[number,number,number]> = {
   light_private:  [100,200,350],
@@ -350,17 +356,22 @@ function buildBudget(opts:{
   const isLux=finish==="luxury";
   const complexMult=COMPLEXITY_MULT[complexity]??1.0;
 
-  const crew    =buildCrewFromPositions(positionKeys,lft,isDayRateCaptain);
+  // Conservative LOA — always the next 5-foot mark above actual (90ft→95ft, 120ft→125ft)
+  // Used for all LOA-based costs. Crew salaries and hull value use actual LOA.
+  const cLft = conservativeLoa(lft);
+  const cLm  = cLft / 3.28084;
+
+  const crew    =buildCrewFromPositions(positionKeys,lft,isDayRateCaptain);  // actual LOA for salary brackets
   const support =crewSupportCosts(crew.fullTimeCount,crew.count,isLux);
   const fuelRes =calcFuelHierarchy({knownGph,hpTotal,hullType,lft,hrs:annualHrsTriple,fuelCapacityGal,rangeNm,cruiseSpeed});
-  const hm      =calcHullInsurance(agreedHullValue,age,false);
+  const hm      =calcHullInsurance(agreedHullValue,age,false);               // hull value-based, not LOA
   const{pi,crewHealth}=piAndCrewHealth(hm,crew.fullTimeCount);
-  const dock    =dockageBreakdown(lft,port);
-  const engBase =routineEngineering(lft,age,hpTotal>0?hpTotal:lft*12);
+  const dock    =dockageBreakdown(cLft,port);                                 // conservative LOA
+  const engBase =routineEngineering(cLft,age,hpTotal>0?hpTotal:cLft*12);    // conservative LOA
   // Apply complexity to engineering, then corrective
   const eng     =applyComplexity(engBase,complexMult);
   const corrective=correctiveRepair(eng,vesselCondition);
-  const opsBase =operationsItems(lft,lm,isLux);
+  const opsBase =operationsItems(cLft,cLm,isLux);                            // conservative LOA
   // Apply complexity to deck, interior, survey, safety
   const ops={...opsBase,
     deck:    applyComplexity(opsBase.deck,complexMult),
@@ -369,9 +380,9 @@ function buildBudget(opts:{
     safetyMedical:applyComplexity(opsBase.safetyMedical,complexMult),
   };
   const comms   =commsItems();
-  const admin   =adminItems(lm);
-  const haul    =haulAntifoul(lft,port);
-  const reservePlan=includeReservePlanning?buildReservePlan(lft,lm,age,hpTotal>0?hpTotal:lft*12,finish):null;
+  const admin   =adminItems(cLm);                                             // conservative LOA
+  const haul    =haulAntifoul(cLft,port);                                    // conservative LOA
+  const reservePlan=includeReservePlanning?buildReservePlan(cLft,cLm,age,hpTotal>0?hpTotal:cLft*12,finish):null;
 
   const capitalEvents={disclaimer:`This model covers annual operating costs only. Major capital events — full paint refits, engine overhauls, electronics upgrades, and interior refits — are excluded. These vary enormously by vessel condition, engine hours, and maintenance history and cannot be responsibly estimated without a full pre-purchase survey. Plan for them as a separate budget conversation with your broker and captain.`};
 
@@ -516,7 +527,7 @@ Respond with ONLY this JSON object — no preamble, no markdown fences.
 
     const model={
       vesselName:v.name||"Vessel",vesselUrl:url||"",
-      _meta:{crewCount:crew.count,fullTimeCount:crew.fullTimeCount,loa_m:lm,loa_ft:lft,buildYear:yr,age,hullType,hpTotal,agreedHullValue:hullValue,hullValueSource,managementTier,crewPreset,vesselCondition,usagePattern,annualHrsTriple,complexity,fuelBasis:m.operations.fuelBasis,fuelConfidence:m.operations.fuelConfidence,fuelGphMid:m.operations.fuelGphMid,perCrew:budget.perCrew,positionKeys,isDayRateCaptain},
+      _meta:{crewCount:crew.count,fullTimeCount:crew.fullTimeCount,loa_m:lm,loa_ft:lft,buildYear:yr,age,hullType,hpTotal,agreedHullValue:hullValue,hullValueSource,conservativeLft:conservativeLoa(lft),managementTier,crewPreset,vesselCondition,usagePattern,annualHrsTriple,complexity,fuelBasis:m.operations.fuelBasis,fuelConfidence:m.operations.fuelConfidence,fuelGphMid:m.operations.fuelGphMid,perCrew:budget.perCrew,positionKeys,isDayRateCaptain},
       segment, crewMode,
       ...budget.model,...narrative,
     };
