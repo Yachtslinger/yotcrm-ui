@@ -36,30 +36,67 @@ export async function scrapeNorthropJohnson(url: string): Promise<VesselData> {
   const query = nameFromUrl(url);
   if (!query) throw new Error(`N&J: cannot extract vessel name from URL: ${url}`);
 
-  const res = await fetch(`${ALGOLIA_BASE}/query`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-algolia-application-id": ALGOLIA_APP,
-      "x-algolia-api-key": ALGOLIA_KEY,
-    },
-    body: JSON.stringify({ query, hitsPerPage: 3 }),
-    signal: AbortSignal.timeout(12000),
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`N&J Algolia API: ${res.status}`);
+  // ── Layer 1: Algolia (best-effort) ──────────────────────────────────────
+  // Algolia only indexes current listings — archived / sold yachts (like
+  // EXCELLENCE, whose page still exists) return zero hits. In that case we
+  // silently fall through to the HTML pass, which alone can extract every
+  // spec and photo. Any Algolia failure (network, no hits, API blip) is
+  // logged and swallowed rather than throwing.
+  let hit: Record<string, unknown> | null = null;
+  try {
+    const res = await fetch(`${ALGOLIA_BASE}/query`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-algolia-application-id": ALGOLIA_APP,
+        "x-algolia-api-key": ALGOLIA_KEY,
+      },
+      body: JSON.stringify({ query, hitsPerPage: 3 }),
+      signal: AbortSignal.timeout(12000),
+      cache: "no-store",
+    });
+    if (res.ok) {
+      const json = await res.json();
+      const hits: Record<string, unknown>[] = json.hits || [];
+      if (hits.length) {
+        // Pick best match — prefer exact name match, else first result
+        const slug = query.toLowerCase();
+        hit = hits.find(h =>
+          String(h.name || "").toLowerCase() === slug ||
+          String(h.url || "").toLowerCase().includes(slug.replace(/ /g, "-"))
+        ) || hits[0];
+      }
+    }
+  } catch (e) {
+    console.warn(`[N&J] Algolia lookup failed for "${query}" — falling back to HTML only:`, e);
+  }
 
-  const json = await res.json();
-  const hits: Record<string, unknown>[] = json.hits || [];
-  if (!hits.length) throw new Error(`N&J: no yacht found for "${query}"`);
+  if (hit) applyAlgoliaHit(vessel, hit);
 
-  // Pick best match — prefer exact name match, else first result
-  const slug = query.toLowerCase();
-  const hit = hits.find(h =>
-    String(h.name || "").toLowerCase() === slug ||
-    String(h.url || "").toLowerCase().includes(slug.replace(/ /g, "-"))
-  ) || hits[0];
+  // ── Layer 2: full HTML page ──────────────────────────────────────────────
+  // N&J's Next.js shell hydrates from an Algolia hit but the fully-rendered
+  // page contains the complete spec block (engines, tanks, heads, hull
+  // config, designers), description prose, and the full image gallery —
+  // none of which come through Algolia. Fetch it and parse.
+  try {
+    const htmlRes = await fetch(url, {
+      headers: { "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/122.0 Safari/537.36" },
+      signal: AbortSignal.timeout(15000),
+      cache: "no-store",
+    });
+    if (htmlRes.ok) {
+      const html = await htmlRes.text();
+      augmentFromHtml(vessel, html);
+    }
+  } catch { /* HTML augment is best-effort; Algolia results stand alone */ }
 
+  return vessel;
+}
+
+/** Apply structured fields from an Algolia hit to the vessel. Only called
+ *  when Algolia returned a hit — for archived listings the vessel is filled
+ *  entirely from the HTML pass below. */
+function applyAlgoliaHit(vessel: VesselData, hit: Record<string, unknown>): void {
   const str = (k: string) => clean(String(hit[k] ?? ""));
   const num = (k: string) => { const n = parseFloat(String(hit[k] ?? "")); return isNaN(n) ? null : n; };
 
@@ -125,25 +162,6 @@ export async function scrapeNorthropJohnson(url: string): Promise<VesselData> {
   if (heroImg && /^https?:\/\//i.test(heroImg)) {
     vessel.images.push({ src: heroImg, alt: vessel.name });
   }
-
-  // ── Layer 2: full HTML page ──────────────────────────────────────────────
-  // N&J's Next.js shell hydrates from an Algolia hit but the fully-rendered
-  // page contains the complete spec block (engines, tanks, heads, hull
-  // config, designers), description prose, and the full image gallery —
-  // none of which come through Algolia. Fetch it and parse.
-  try {
-    const htmlRes = await fetch(url, {
-      headers: { "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/122.0 Safari/537.36" },
-      signal: AbortSignal.timeout(15000),
-      cache: "no-store",
-    });
-    if (htmlRes.ok) {
-      const html = await htmlRes.text();
-      augmentFromHtml(vessel, html);
-    }
-  } catch { /* HTML augment is best-effort; Algolia results stand alone */ }
-
-  return vessel;
 }
 
 /**
@@ -191,20 +209,24 @@ function augmentFromHtml(vessel: VesselData, html: string): void {
     }
   }
 
-  // Images — N&J's page shows a full gallery. Pull every images.northrop*
-  // URL that looks like a listing photo, strip render params (?w=&h=…),
-  // dedupe, cap at 60.
-  const seen = new Set(vessel.images.map(i => i.src));
+  // Images — N&J's page shows a full gallery. Every real photo has ~15
+  // responsive-size variants with different ?w=&ar=&fit= params; we key
+  // dedupe by the query-string-stripped URL so all variants collapse to
+  // the underlying file. Sweep both <img src/data-src> and a raw-HTML
+  // regex to catch CSS background-image and script hydration URLs.
+  const stripQ = (u: string) => u.split("?")[0];
+  const seen = new Set(vessel.images.map(i => stripQ(i.src)));
   const found: string[] = [];
   $("img[src], img[data-src]").each((_, img) => {
     const raw = $(img).attr("src") || $(img).attr("data-src") || "";
     if (/images\.northropandjohnson\.com\/yacht\//i.test(raw)) {
-      const canonical = raw.split("?")[0];
+      const canonical = stripQ(raw);
       if (!seen.has(canonical) && !found.includes(canonical)) found.push(canonical);
     }
   });
-  // Also scan the raw HTML for background-image URLs (some galleries use CSS).
-  const bgMatches = html.matchAll(/https?:\/\/images\.northropandjohnson\.com\/yacht\/[^\s"'?]+/gi);
+  // Raw-HTML sweep — the [^\s"'?]+ stops at the query string, so matches
+  // are already canonical. Same seen/found dedupe.
+  const bgMatches = html.matchAll(/https?:\/\/images\.northropandjohnson\.com\/yacht\/[^\s"'?]+\.(?:jpg|jpeg|png|webp)/gi);
   for (const m of bgMatches) {
     const url = m[0];
     if (!seen.has(url) && !found.includes(url)) found.push(url);

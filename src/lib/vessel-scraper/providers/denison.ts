@@ -61,7 +61,11 @@ function upscaleBoatsgroup(src: string): string {
 }
 
 function isJunk(src: string): boolean {
-  return /logo|icon|sprite|pixel|flag|avatar|favicon|\.svg|placeholder|language-flag|Arrow|Image-3\d\d/i.test(src);
+  // Denison's page includes site-wide marketing banners under the same
+  // wp-content path as vessel photos. Filter marketing-keyword filenames
+  // (Container, Worldwide, Charter, Video-Container etc.) — vessel photos
+  // are always named for the vessel (Excellence-*, Richmond-2010-*, etc.).
+  return /logo|icon|sprite|pixel|flag|avatar|favicon|\.svg|placeholder|language-flag|Arrow|Image-3\d\d|Walkthrough-Videos|-container|Worldwide|Charter\.webp|for-charter/i.test(src);
 }
 
 /** Pull a value after a label, stopping before the next label or end of section */
@@ -561,7 +565,12 @@ function parseDenison(url: string, html: string): VesselData {
     if (!raw) return;
     const decoded = raw.replace(/&amp;/g, "&");
     if (isJunk(decoded)) return;
-    if (!/cdn\.denisonyachtsales\.com\/images\/yachts-for-sale\//i.test(decoded)) return;
+    // Denison hosts listing photos on two paths:
+    //   • /images/yachts-for-sale/…   (current listings)
+    //   • /wp-content/uploads/YYYY/…  (legacy WordPress listings, e.g. Excellence)
+    // Case-insensitive host check because some pages return "cdn.DenisonYachtSales.com".
+    const isDenisonListing = /cdn\.denisonyachtsales\.com\/(?:images\/yachts-for-sale|wp-content\/uploads\/\d{4})\//i.test(decoded);
+    if (!isDenisonListing) return;
     // Upgrade thumbnail to original: _x500.webp → _original.webp
     const original = decoded.replace(/_x\d+(\.\w+)$/, "_original$1")
                              .replace(/_\d+x\d+(\.\w+)$/, "_original$1")
@@ -588,8 +597,11 @@ function parseDenison(url: string, html: string): VesselData {
     addBoatsgroupImg(dataSrc); addBoatsgroupImg(src);
   });
 
-  // Regex sweep of raw HTML for both CDNs
-  const denisonRe = /https:\/\/cdn\.denisonyachtsales\.com\/images\/yachts-for-sale\/[^\s"'&<>]+\.(?:webp|jpg|jpeg|png)/gi;
+  // Regex sweep of raw HTML for both CDNs. Denison photos live on either
+  // the modern /images/yachts-for-sale/ path or the legacy WordPress
+  // /wp-content/uploads/YYYY/ path — both go through addDenisonImg,
+  // which enforces the same "is this a real listing photo?" check.
+  const denisonRe = /https:\/\/cdn\.denisonyachtsales\.com\/(?:images\/yachts-for-sale|wp-content\/uploads\/\d{4})\/[^\s"'&<>]+\.(?:webp|jpg|jpeg|png)/gi;
   const bgFullRe  = /https:\/\/images\.boatsgroup\.com\/images\/[^\s"'&<>]+\.(?:jpg|jpeg|png|webp)/gi;
   const bgRszRe   = /https:\/\/images\.boatsgroup\.com\/resize\/[^\s"'&<>]+\.(?:jpg|jpeg|png|webp)[^\s"'&<>]*/gi;
   let mx: RegExpExecArray | null;
