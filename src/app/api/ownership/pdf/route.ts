@@ -265,9 +265,9 @@ export async function POST(req: NextRequest) {
   </table>
 
   ${m.capitalEvents?.disclaimer?`
-  <div style="margin:12px 0;padding:12px 14px;background:rgba(251,146,60,.07);border:1px solid rgba(251,146,60,.25);border-radius:8px;">
-    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#fb923c;margin-bottom:5px">Capital Events — Excluded from Annual Figure</div>
-    <div style="font-size:11px;color:#94a3b8;line-height:1.55">${m.capitalEvents.disclaimer}</div>
+  <div class="capital-box" style="margin:10px 0;padding:10px 13px;background:rgba(251,146,60,.07);border:1px solid rgba(251,146,60,.25);border-radius:8px;">
+    <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#fb923c;margin-bottom:4px">Capital Events — Excluded from Annual Figure</div>
+    <div style="font-size:10px;color:#94a3b8;line-height:1.5">${m.capitalEvents.disclaimer}</div>
   </div>`:""}
 
   <div class="analysis">
@@ -382,26 +382,29 @@ export async function POST(req: NextRequest) {
     const css = `
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#0d1117;color:#e2e8f0;font-family:'Helvetica Neue',Arial,sans-serif}
-.page{padding:18px 24px;max-width:860px;margin:0 auto}
-.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #b8933a50}
-.brand{font-size:11px;text-transform:uppercase;letter-spacing:0.15em;color:#b8933a;margin-bottom:4px}
-.vessel{font-size:19px;font-weight:700;color:#f1f5f9}
-.sub{font-size:10px;color:#64748b;margin-top:3px}
-.date{font-size:10px;color:#64748b;text-align:right}
-.scenarios{display:grid;gap:8px;margin-bottom:14px}
-.sc-card{border-radius:8px;padding:9px 14px;text-align:center}
+.page{padding:14px 22px;max-width:860px;margin:0 auto}
+.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #b8933a50}
+.brand{font-size:10px;text-transform:uppercase;letter-spacing:0.15em;color:#b8933a;margin-bottom:3px}
+.vessel{font-size:18px;font-weight:700;color:#f1f5f9}
+.sub{font-size:9px;color:#64748b;margin-top:2px}
+.date{font-size:9px;color:#64748b;text-align:right}
+.scenarios{display:grid;gap:8px;margin-bottom:12px}
+.sc-card{border-radius:8px;padding:8px 14px;text-align:center}
 .sc-label{font-size:9px;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:2px}
-.sc-val{font-size:16px;font-weight:700}
-.sc-sub{font-size:9px;color:#64748b;margin-top:2px}
-table{width:100%;border-collapse:collapse;margin-bottom:12px}
+.sc-val{font-size:15px;font-weight:700}
+.sc-sub{font-size:9px;color:#64748b;margin-top:1px}
+table{width:100%;border-collapse:collapse;margin-bottom:10px}
 th{padding:5px 6px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;text-align:right;border-bottom:1px solid #b8933a40}
 th:first-child{text-align:left;padding-left:12px}
-tr{page-break-inside:avoid}
-.a-section{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:9px 11px;margin-bottom:7px;page-break-inside:avoid}
+tr{page-break-inside:avoid;break-inside:avoid}
+thead{display:table-header-group}
+p{orphans:4;widows:4}
+.a-section{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:8px 11px;margin-bottom:7px;page-break-inside:avoid;break-inside:avoid}
 .a-title{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#b8933a;margin-bottom:4px}
-.a-body{font-size:10px;color:#94a3b8;line-height:1.55;white-space:pre-wrap}
-.analysis{margin-top:10px}
-.footer{margin-top:12px;padding-top:8px;border-top:1px solid #21262d;font-size:9px;color:#475569;display:flex;justify-content:space-between}
+.a-body{font-size:10px;color:#94a3b8;line-height:1.5;white-space:pre-wrap;orphans:4;widows:4}
+.analysis{margin-top:10px;page-break-inside:auto}
+.capital-box{page-break-inside:avoid;break-inside:avoid}
+.footer{margin-top:10px;padding-top:8px;border-top:1px solid #21262d;font-size:9px;color:#475569;display:flex;justify-content:space-between;page-break-inside:avoid}
 `;
 
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>${css}</style></head><body>${page1}${page2}${page3}</body></html>`;
@@ -409,7 +412,7 @@ tr{page-break-inside:avoid}
     const browser = await puppeteer.launch({ args: ["--no-sandbox","--disable-setuid-sandbox"] });
     const pg = await browser.newPage();
     await pg.setContent(html, { waitUntil: "networkidle0" });
-    const pdf = await pg.pdf({ format: "A4", margin: {top:"14mm",bottom:"14mm",left:"10mm",right:"10mm"}, printBackground: true });
+    const pdf = await pg.pdf({ format: "A4", margin: {top:"22mm",bottom:"22mm",left:"12mm",right:"12mm"}, printBackground: true });
     await browser.close();
 
     const safeName = (m.vesselName || "ownership-budget").replace(/[^a-zA-Z0-9\s-]/g,"").replace(/\s+/g,"-").toLowerCase();
