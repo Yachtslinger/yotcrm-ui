@@ -658,6 +658,30 @@ const KNOWN_MAKES_SET = [
     "Yellowfin", "Zeelander",
 ];
 
+/** Fallback: pull a yacht-listing URL (and boat details from its slug) straight from the body. */
+function extractBoatFromBody(body) {
+    const result = { boatMake: '', boatModel: '', boatYear: '', boatLength: '', listingUrl: '' };
+    if (!body) return result;
+    const text = body.replace(/<[^>]+>/g, ' ');
+    const urlRe = /https?:\/\/(?:[a-z0-9-]+\.)*(?:yachtworld\.com\/yacht\/|rightboat\.com\/[^\s"'<>]*boats?-for-sale\/|denisonyachting\.com\/(?:yacht|e3t)\/|boattrader\.com\/boat\/|yatco\.com\/[^\s"'<>]*yacht|jamesedition\.com\/[^\s"'<>]*yacht)[^\s)"'<>\]]*/i;
+    const um = text.match(urlRe);
+    if (!um) return result;
+    result.listingUrl = um[0].replace(/[.,;:)\]]+$/, '');
+    // Parse boat from a clean listing slug (skip opaque tracking URLs like /e3t/).
+    if (/\/(?:yacht|boat|boats?-for-sale)\//i.test(result.listingUrl)) {
+        let slug = result.listingUrl.split(/[?#]/)[0].replace(/\/+$/, '').split('/').pop() || '';
+        slug = decodeURIComponent(slug).replace(/-\d{5,}$/, '').replace(/[-_]+/g, ' ').trim();
+        if (slug) {
+            const parsed = parseBoatDescription(slug);
+            result.boatMake = parsed.make;
+            result.boatModel = parsed.model;
+            result.boatYear = parsed.year;
+            result.boatLength = parsed.length;
+        }
+    }
+    return result;
+}
+
 function extractBoatFromSubject(subject) {
     const result = { boatMake: '', boatModel: '', boatYear: '', boatLength: '' };
     if (!subject) return result;
@@ -804,6 +828,16 @@ function parseEmail(headers, body, emailType) {
     if (!lead.name) {
         const fwdName = body.match(/From:\s*"?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)"?\s*[<\n]/i);
         if (fwdName) lead.name = fwdName[1].trim();
+    }
+
+    // ── FALLBACK: scan forwarded body for a yacht-listing URL (+ boat from its slug) ──
+    if (!lead.listingUrl || !(lead.boatMake || lead.boatModel || lead.boatYear)) {
+        const fromBody = extractBoatFromBody(body);
+        if (!lead.listingUrl && fromBody.listingUrl) lead.listingUrl = fromBody.listingUrl;
+        if (!lead.boatMake && fromBody.boatMake) lead.boatMake = fromBody.boatMake;
+        if (!lead.boatModel && fromBody.boatModel) lead.boatModel = fromBody.boatModel;
+        if (!lead.boatYear && fromBody.boatYear) lead.boatYear = fromBody.boatYear;
+        if (!lead.boatLength && fromBody.boatLength) lead.boatLength = fromBody.boatLength;
     }
 
     return lead;
