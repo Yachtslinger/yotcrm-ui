@@ -1233,13 +1233,13 @@ export default function OwnershipPage() {
                           <tbody>
                             {/* Revenue block */}
                             <tr><td colSpan={4} style={{padding:"10px 0 3px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",color:"#38bdf8"}}>Revenue</td></tr>
-                            {[
-                              ["Gross Charter Revenue",s=>s.gross,false],
-                              [`Less: Broker Commission (${charterCommissionPct}%)`,s=>-s.commission,false],
-                            ].map(([label,fn,bold])=>(
+                            {([
+                              ["Gross Charter Revenue",(s: typeof scenarios[number])=>s.gross,false],
+                              [`Less: Broker Commission (${charterCommissionPct}%)`,(s: typeof scenarios[number])=>-s.commission,false],
+                            ] as [string, (s: typeof scenarios[number]) => number, boolean][]).map(([label,fn,bold])=>(
                               <tr key={label as string} style={{borderBottom:"1px solid rgba(255,255,255,.04)"}}>
                                 <td style={{padding:"5px 0",fontSize:12,color:bold?"#38bdf8":"var(--foreground)",fontWeight:bold?700:400}}>{label as string}</td>
-                                {scenarios.map(s=><td key={s.label} style={{padding:"5px 10px",textAlign:"right",fontSize:12,color:(fn as (s:typeof scenarios[0])=>number)(s)<0?"#f87171":"var(--foreground)"}}>{r5c((fn as (s:typeof scenarios[0])=>number)(s))}</td>)}
+                                {scenarios.map(s=><td key={s.label} style={{padding:"5px 10px",textAlign:"right",fontSize:12,color:fn(s)<0?"#f87171":"var(--foreground)"}}>{r5c(fn(s))}</td>)}
                               </tr>
                             ))}
                             <tr style={{borderBottom:"1px solid rgba(56,189,248,.4)"}}>
@@ -1249,20 +1249,20 @@ export default function OwnershipPage() {
 
                             {/* Additional costs block */}
                             <tr><td colSpan={4} style={{padding:"10px 0 3px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",color:"#f87171"}}>Additional Charter Costs</td></tr>
-                            {[
-                              ["Fuel Overage (charter profile uses more hrs)",s=>-s.weeklyFuelOverage*s.weeks,"20% above operating baseline for charter weeks"],
-                              ["Wear & Maintenance Premium",s=>-s.weeklyWear*s.weeks,`$${Math.round(weeklyWear).toLocaleString()}/wk — charter accelerates wear on all systems`],
-                              ["Charter Insurance Loading",s=>-insuranceLoading,"Additional premium for commercial charter use"],
-                              ["Flag / USCG Charter Compliance",s=>-compliance,"Annual certification for charter operations — flag, USCG COI, or MCA"],
-                              ["Marketing & Listing Fees",s=>-marketing,"Central agency listing, boat shows, photography/video refresh"],
-                              ...(repoCost>0?[["Repositioning Costs",s=>-repoCost,"Fuel, crew time, and transient marina for positioning voyages"]]:[]),
-                            ].map(([label,fn,desc])=>(
+                            {([
+                              ["Fuel Overage (charter profile uses more hrs)",(s: typeof scenarios[number])=>-s.weeklyFuelOverage*s.weeks,"20% above operating baseline for charter weeks"],
+                              ["Wear & Maintenance Premium",(s: typeof scenarios[number])=>-s.weeklyWear*s.weeks,`$${Math.round(weeklyWear).toLocaleString()}/wk — charter accelerates wear on all systems`],
+                              ["Charter Insurance Loading",(_s: typeof scenarios[number])=>-insuranceLoading,"Additional premium for commercial charter use"],
+                              ["Flag / USCG Charter Compliance",(_s: typeof scenarios[number])=>-compliance,"Annual certification for charter operations — flag, USCG COI, or MCA"],
+                              ["Marketing & Listing Fees",(_s: typeof scenarios[number])=>-marketing,"Central agency listing, boat shows, photography/video refresh"],
+                              ...(repoCost>0?[["Repositioning Costs",(_s: typeof scenarios[number])=>-repoCost,"Fuel, crew time, and transient marina for positioning voyages"] as [string, (s: typeof scenarios[number]) => number, string]]:[]),
+                            ] as [string, (s: typeof scenarios[number]) => number, string][]).map(([label,fn,desc])=>(
                               <tr key={label as string} style={{borderBottom:"1px solid rgba(255,255,255,.04)"}}>
                                 <td style={{padding:"5px 0",fontSize:12,color:"var(--foreground)"}}>
                                   <div>{label as string}</div>
                                   <div style={{fontSize:10,color:"var(--navy-400)",marginTop:1}}>{desc as string}</div>
                                 </td>
-                                {scenarios.map(s=><td key={s.label} style={{padding:"5px 10px",textAlign:"right",fontSize:12,color:"#f87171"}}>{r5c((fn as (s:typeof scenarios[0])=>number)(s))}</td>)}
+                                {scenarios.map(s=><td key={s.label} style={{padding:"5px 10px",textAlign:"right",fontSize:12,color:"#f87171"}}>{r5c(fn(s))}</td>)}
                               </tr>
                             ))}
                             <tr style={{borderBottom:"1px solid rgba(248,113,113,.4)"}}>

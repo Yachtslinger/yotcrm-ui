@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
       WHERE segment='buyer' ${statusClause}
         AND LOWER(TRIM(email)) NOT IN (SELECT email FROM campaign_suppressions)
         AND LOWER(TRIM(email)) NOT IN (SELECT email FROM campaign_sends WHERE slug=@slug)`;
-    const totalEligible = d.prepare(`SELECT COUNT(*) c FROM (${eligibleSql})`).get({ slug }).c as number;
+    const totalEligible = (d.prepare(`SELECT COUNT(*) c FROM (${eligibleSql})`).get({ slug }) as { c: number }).c;
     const recips = d.prepare(`${eligibleSql} LIMIT @lim`).all({ slug, lim: limit }).map((r: any) => r.e);
 
     if (dryRun) {
@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
       await new Promise(r => setTimeout(r, 600));
     }
 
-    const remaining = d.prepare(`SELECT COUNT(*) c FROM (${eligibleSql})`).get({ slug }).c as number;
+    const remaining = (d.prepare(`SELECT COUNT(*) c FROM (${eligibleSql})`).get({ slug }) as { c: number }).c;
     d.close();
     return NextResponse.json({ ok: true, group, sent, failed, remainingInGroup: remaining });
   } catch (err: any) {

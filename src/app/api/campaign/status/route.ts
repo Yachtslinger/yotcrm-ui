@@ -19,12 +19,12 @@ export async function GET(req: NextRequest) {
     d.exec(`CREATE TABLE IF NOT EXISTS campaign_suppressions (email TEXT PRIMARY KEY, source TEXT, created_at TEXT)`);
 
     const sent = d.prepare("SELECT email, sent_at FROM campaign_sends WHERE slug=? ORDER BY sent_at").all(slug) as { email: string; sent_at: string }[];
-    const remaining = d.prepare(`
+    const remaining = (d.prepare(`
       SELECT COUNT(*) c FROM (
         SELECT DISTINCT LOWER(TRIM(email)) e FROM leads
         WHERE segment='buyer' AND email_status='verified'
           AND LOWER(TRIM(email)) NOT IN (SELECT email FROM campaign_suppressions)
-          AND LOWER(TRIM(email)) NOT IN (SELECT email FROM campaign_sends WHERE slug=@slug))`).get({ slug }).c as number;
+          AND LOWER(TRIM(email)) NOT IN (SELECT email FROM campaign_sends WHERE slug=@slug))`).get({ slug }) as { c: number }).c;
     d.close();
 
     if (fmt === "csv") {
