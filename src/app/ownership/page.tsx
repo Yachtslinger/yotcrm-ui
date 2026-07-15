@@ -339,7 +339,8 @@ export default function OwnershipPage() {
   const [vesselLoaFt, setVesselLoaFt] = React.useState(100);
 
   const [baseCrewCount, setBaseCrewCount] = React.useState(5);
-  const [adjustCrewCount, setAdjustCrewCount] = React.useState(5);
+  // Per-scenario crew counts — Low / Mid / High independently
+  const [adjustCrewCounts, setAdjustCrewCounts] = React.useState<[number,number,number]>([5,5,5]);
   const [perCrewRates, setPerCrewRates] = React.useState<PerCrew|null>(null);
   type ExtraPos = { key:string; label:string; salMid:number; checked:boolean };
   const [extraPositions, setExtraPositions] = React.useState<ExtraPos[]>([]);
@@ -365,9 +366,12 @@ export default function OwnershipPage() {
     const hasOverride = overrides[`${path}.low`]!==undefined || overrides[`${path}.mid`]!==undefined || overrides[`${path}.high`]!==undefined;
     let base: Scenario;
     if (!hasOverride && CREW_PER_PERSON.includes(path) && baseCrewCount > 0) {
-      // Scale proportionally with crew count (unless user has manually overridden)
-      const scale = adjustCrewCount / baseCrewCount;
-      base = {low: s.low*scale, mid: s.mid*scale, high: s.high*scale};
+      // Scale each scenario independently by its own crew count
+      base = {
+        low:  s.low  * (adjustCrewCounts[0] / baseCrewCount),
+        mid:  s.mid  * (adjustCrewCounts[1] / baseCrewCount),
+        high: s.high * (adjustCrewCounts[2] / baseCrewCount),
+      };
     } else if (path === "operations.fuels") {
       const ratio = baseHours>0 ? adjustHours/baseHours : 1;
       base = {low: s.low*ratio, mid: s.mid*ratio, high: s.high*ratio};
@@ -383,35 +387,42 @@ export default function OwnershipPage() {
     return{low:adjustCharterWeeks*wg*0.60,mid:adjustCharterWeeks*wg*0.78,high:adjustCharterWeeks*wg*0.92};
   },[adjustCharterWeeks,vesselLoaFt]);
 
-  // crewDelta — SALARY ONLY for slider changes; per-person support auto-scales via getEff
-  // Extra position toggles still get full salary+support (those people aren't in the model at all)
+  // crewDelta — per-scenario crew counts, salary-only delta for slider changes
+  // Per-person support (food, medical, etc.) auto-scales via getEff per scenario
   const crewDelta: Scenario = React.useMemo(()=>{
     if (!perCrewRates) return {low:0,mid:0,high:0};
     const r5l=(n:number)=>Math.round(n/5000)*5000;
-    // sp only used for extra position toggles
+    // sp used for extra position toggles only
     const sp={
       low:  r5l(perCrewRates.foodDaily.low *365)+perCrewRates.health.low +perCrewRates.travel.low +perCrewRates.uniform.low +perCrewRates.training.low,
       mid:  r5l(perCrewRates.foodDaily.mid *365)+perCrewRates.health.mid +perCrewRates.travel.mid +perCrewRates.uniform.mid +perCrewRates.training.mid,
       high: r5l(perCrewRates.foodDaily.high*365)+perCrewRates.health.high+perCrewRates.travel.high+perCrewRates.uniform.high+perCrewRates.training.high,
     };
-    const delta=adjustCrewCount-baseCrewCount;
-    let d:Scenario={low:0,mid:0,high:0};
-    // Slider: SALARY ONLY — support handled by getEff scaling above
-    if (delta<0) {
-      const named=perCrewRates.namedSalaries??[];
-      for (let i=baseCrewCount-1;i>=Math.max(adjustCrewCount,0);i--) {
-        const pos=named[i]??perCrewRates.salJr;
-        d.low-=pos.low; d.mid-=pos.mid; d.high-=pos.high;
+    // Compute salary delta independently for each scenario's crew count
+    const computeDelta = (targetCount:number, sc:"low"|"mid"|"high"):number => {
+      const delta = targetCount - baseCrewCount;
+      if (delta === 0) return 0;
+      const named = perCrewRates.namedSalaries ?? [];
+      if (delta < 0) {
+        let d = 0;
+        for (let i = baseCrewCount-1; i >= Math.max(targetCount, 0); i--) {
+          d -= (named[i] ?? perCrewRates.salJr)[sc];
+        }
+        return d;
       }
-    } else if (delta>0) {
-      d={low:delta*perCrewRates.salJr.low, mid:delta*perCrewRates.salJr.mid, high:delta*perCrewRates.salJr.high};
-    }
-    // Extra toggles: full cost (not in model base)
+      return delta * perCrewRates.salJr[sc];
+    };
+    const d:Scenario = {
+      low:  computeDelta(adjustCrewCounts[0], "low"),
+      mid:  computeDelta(adjustCrewCounts[1], "mid"),
+      high: computeDelta(adjustCrewCounts[2], "high"),
+    };
+    // Extra position toggles: full cost (not in model base, so include support)
     extraPositions.filter(p=>p.checked).forEach(pos=>{
       d.low+=r5l(pos.salMid*0.82)+sp.low; d.mid+=pos.salMid+sp.mid; d.high+=r5l(pos.salMid*1.18)+sp.high;
     });
     return d;
-  },[adjustCrewCount,baseCrewCount,perCrewRates,extraPositions]);
+  },[adjustCrewCounts,baseCrewCount,perCrewRates,extraPositions]);
 
   function grandTotals(m:CostModel):Scenario {
     const effSal=m.crew.salaries.breakdown?.length
@@ -484,7 +495,7 @@ export default function OwnershipPage() {
       setBaseHours(patternMid); setAdjustHours(patternMid); setAdjustCharterWeeks(charterWeeks);
       const meta=data.model._meta;
       const cc=meta?.crewCount??data.model.crew?.salaries?.breakdown?.length??5;
-      setBaseCrewCount(cc); setAdjustCrewCount(cc);
+      setBaseCrewCount(cc); setAdjustCrewCounts([cc,cc,cc]);
       setPerCrewRates(meta?.perCrew??null);
       const lm=meta?.loa_m??40;
       setExtraPositions([
@@ -869,28 +880,45 @@ export default function OwnershipPage() {
                   </div>
                 </div>
 
-                {/* Crew slider — goes to 0 */}
+                {/* Per-scenario crew sliders */}
                 {segment!=="small"&&perCrewRates&&(
                   <div className="mt-4 pt-4" style={{borderTop:"1px solid rgba(255,255,255,.06)"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                      <span className="text-xs font-bold uppercase tracking-widest" style={{color:"var(--brass-400)"}}>Crew Configuration</span>
-                      {(adjustCrewCount!==baseCrewCount||extraPositions.some(p=>p.checked))&&<span className="text-xs" style={{color:"#fb923c"}}>{crewDelta.mid>=0?"+":""}{fmt(crewDelta.mid)}/yr mid vs model</span>}
-                    </div>
-                    <div style={{marginBottom:10}}>
-                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                        <label className="text-xs" style={{color:"var(--navy-400)"}}>Total Crew</label>
-                        <span className="text-xs font-bold" style={{color:adjustCrewCount===0?"#f87171":"var(--foreground)"}}>
-                          {adjustCrewCount===0?"Owner-operated — no crew cost":`${adjustCrewCount} crew`}
-                        </span>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                      <div>
+                        <span className="text-xs font-bold uppercase tracking-widest" style={{color:"var(--brass-400)"}}>Crew by Scenario</span>
+                        <p className="text-xs mt-0.5" style={{color:"var(--navy-400)"}}>Set a different crew count for each cost scenario independently</p>
                       </div>
-                      {/* Slider goes to 0 */}
-                      <input type="range" min={0} max={14} step={1} value={adjustCrewCount} onChange={e=>setAdjustCrewCount(Number(e.target.value))} style={{width:"100%",accentColor:"#a78bfa"}}/>
-                      <div style={{display:"flex",justifyContent:"space-between"}}>
-                        <span style={{fontSize:10,color:"#f87171"}}>0 (no crew)</span>
-                        <span style={{fontSize:10,color:"var(--navy-400)"}}>model base: {baseCrewCount}</span>
-                        <span style={{fontSize:10,color:"var(--navy-400)"}}>14</span>
-                      </div>
+                      {adjustCrewCounts.some((n,i)=>n!==baseCrewCount)&&(
+                        <button onClick={()=>setAdjustCrewCounts([baseCrewCount,baseCrewCount,baseCrewCount])}
+                          style={{fontSize:10,color:"var(--navy-400)",background:"none",border:"1px solid rgba(148,163,184,.3)",borderRadius:6,padding:"3px 8px",cursor:"pointer"}}>
+                          Reset all
+                        </button>
+                      )}
                     </div>
+                    {/* Three sliders — one per scenario */}
+                    {([["low","LOW","#4ade80"],["mid","MID","#facc15"],["high","HIGH","#f87171"]] as [string,string,string][]).map(([sc,label,color],i)=>{
+                      const count = adjustCrewCounts[i];
+                      const diff = count - baseCrewCount;
+                      return(
+                        <div key={sc} className="mb-3">
+                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                            <label style={{fontSize:10,fontWeight:700,color,textTransform:"uppercase",letterSpacing:"0.08em"}}>{label} SCENARIO</label>
+                            <span style={{fontSize:11,fontWeight:700,color:count===0?"#f87171":"var(--foreground)"}}>
+                              {count===0?"Owner-operated":`${count} crew`}
+                              {diff!==0&&<span style={{color,marginLeft:5,fontSize:10}}>({diff>0?"+":""}{diff} vs base)</span>}
+                            </span>
+                          </div>
+                          <input type="range" min={0} max={14} step={1} value={count}
+                            onChange={e=>{const v=Number(e.target.value);setAdjustCrewCounts(prev=>{const n=[...prev] as [number,number,number];n[i]=v;return n;});}}
+                            style={{width:"100%",accentColor:color,marginBottom:2}}/>
+                          <div style={{display:"flex",justifyContent:"space-between"}}>
+                            <span style={{fontSize:9,color:"#f87171"}}>0</span>
+                            <span style={{fontSize:9,color:"var(--navy-400)"}}>base: {baseCrewCount}</span>
+                            <span style={{fontSize:9,color:"var(--navy-400)"}}>14</span>
+                          </div>
+                        </div>
+                      );
+                    })}
                     <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
                       {extraPositions.map(pos=>(
                         <button key={pos.key} onClick={()=>setExtraPositions(prev=>prev.map(p=>p.key===pos.key?{...p,checked:!p.checked}:p))}
@@ -1010,9 +1038,9 @@ export default function OwnershipPage() {
                           <Row {...rp("__charter",`Charter Revenue (${adjustCharterWeeks} wks est. net)`,{low:-charterRevenue.low,mid:-charterRevenue.mid,high:-charterRevenue.high})}/>
                           <Row path="__net" label="NET ANNUAL COST" effective={netCost} bold show={showScenarios} overrides={overrides} onOverride={handleOverride} onResetRow={resetRow}/>
                         </>}
-                        {(adjustCrewCount!==baseCrewCount||extraPositions.some(p=>p.checked))&&(
+                        {(adjustCrewCounts.some(n=>n!==baseCrewCount)||extraPositions.some(p=>p.checked))&&(
                           <tr><td colSpan={colCount(showScenarios)} style={{paddingTop:8,fontSize:11,color:"#a78bfa"}}>
-                            ★ Crew: {adjustCrewCount===0?"owner-operated, no crew cost":`${adjustCrewCount} crew`}{extraPositions.filter(p=>p.checked).map(p=>` + ${p.label}`).join("")} · {crewDelta.mid>=0?"+":""}{fmt(crewDelta.mid)}/yr mid vs model
+                            ★ Crew per scenario: Low {adjustCrewCounts[0]} · Mid {adjustCrewCounts[1]} · High {adjustCrewCounts[2]}{extraPositions.filter(p=>p.checked).map(p=>` + ${p.label}`).join("")}{crewDelta.mid!==0&&` · Mid delta: ${crewDelta.mid>=0?"+":""}${fmt(crewDelta.mid)}/yr`}
                           </td></tr>
                         )}
                         {hiddenCount>0&&(
