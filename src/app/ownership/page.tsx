@@ -721,8 +721,11 @@ export default function OwnershipPage() {
             </label>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
               <span style={{fontSize:13,color:"var(--navy-400)"}}>$</span>
-              <input type="number" min={100000} max={500000000} step={100000} value={agreedHullValue??""} placeholder="e.g. 4500000"
-                onChange={e=>setAgreedHullValue(e.target.value?Math.max(100000,Number(e.target.value)):undefined)}
+              <input type="text" inputMode="numeric" value={agreedHullValue??""} placeholder="e.g. 4500000"
+                onChange={e=>{
+                  const raw=e.target.value.replace(/[^0-9]/g,"");
+                  setAgreedHullValue(raw?Number(raw):undefined);
+                }}
                 className="rounded-lg text-sm px-3 py-2"
                 style={{background:"var(--input,#1e293b)",border:"1px solid var(--border)",color:"var(--foreground)",width:160}}/>
               {agreedHullValue&&<span className="text-xs font-semibold" style={{color:"var(--brass-400)"}}>${(agreedHullValue/1_000_000).toFixed(2)}M</span>}
