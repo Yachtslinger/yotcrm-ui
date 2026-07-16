@@ -234,28 +234,6 @@ section{padding:100px 0;}
 .refit-row:last-child{border-bottom:none;}
 .refit-key{font-family:'Cinzel',serif;font-size:10px;letter-spacing:.18em;color:var(--gold-bright);text-transform:uppercase;line-height:1.6;}
 .refit-val{font-size:14.5px;font-weight:400;color:var(--cream);line-height:1.65;}
-/* Print-only cover page — full-bleed hero for the PDF, hidden on the web. */
-.pdf-cover{display:none;}
-@media print{
-  .pdf-cover{display:flex;flex-direction:column;justify-content:flex-end;align-items:flex-start;
-    height:100vh;width:100vw;position:relative;overflow:hidden;color:var(--cream);
-    padding:0 0 90px 90px;page-break-after:always;background:var(--navy-deepest);}
-  .pdf-cover-bg{position:absolute;inset:0;z-index:0;}
-  .pdf-cover-bg img{width:100%;height:100%;object-fit:cover;}
-  .pdf-cover-overlay{position:absolute;inset:0;z-index:1;
-    background:linear-gradient(180deg,rgba(11,26,43,.15) 0%,rgba(11,26,43,.55) 60%,rgba(11,26,43,.92) 100%);}
-  .pdf-cover-content{position:relative;z-index:2;}
-  .pdf-cover-eyebrow{font-family:'Cinzel',serif;font-size:11px;letter-spacing:.32em;color:var(--gold-warm);text-transform:uppercase;margin-bottom:24px;}
-  .pdf-cover-title{font-family:'Cormorant Garamond',serif;font-size:96px;font-weight:300;line-height:.95;color:var(--white);margin-bottom:20px;letter-spacing:-.01em;}
-  .pdf-cover-title em{font-style:italic;color:var(--gold-pale);}
-  .pdf-cover-subtitle{font-size:18px;color:var(--cream-dim);font-weight:300;letter-spacing:.05em;}
-  /* On PDF, hero section becomes redundant with the cover page — hide the scroll indicator. */
-  .hero-scroll{display:none;}
-  /* Force section breaks between major blocks so PDFs paginate cleanly. */
-  section{page-break-inside:avoid;}
-  .specs,.gallery{page-break-before:auto;}
-  nav{display:none;}
-}
 .contact{background:var(--navy-deep);position:relative;overflow:hidden;}
 .contact::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 50%,rgba(184,147,58,.07) 0%,transparent 65%);pointer-events:none;}
 .contact-inner{position:relative;text-align:center;}
@@ -299,15 +277,6 @@ footer{background:var(--navy-deep);border-top:1px solid var(--divider);padding:3
     <li><a href="#contact">Contact</a></li>
   </ul>
 </nav>
-<section class="pdf-cover">
-  ${heroImg ? `<div class="pdf-cover-bg"><img src="${esc(heroImg)}" alt="${esc(vessel.name)}"></div>` : ""}
-  <div class="pdf-cover-overlay"></div>
-  <div class="pdf-cover-content">
-    <p class="pdf-cover-eyebrow">${esc(vessel.builder || "")}${vessel.year ? ` · ${vessel.year}` : ""}</p>
-    <h1 class="pdf-cover-title"><em>${esc(vessel.name)}</em></h1>
-    <p class="pdf-cover-subtitle">${[vessel.loa, vessel.location].filter(Boolean).join(" · ")}</p>
-  </div>
-</section>
 <section class="hero">
   <div class="hero-bg"><img src="${esc(heroImg)}" alt="${esc(vessel.name)}"></div>
   <div class="hero-overlay"></div>

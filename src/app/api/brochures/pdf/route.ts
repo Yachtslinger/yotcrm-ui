@@ -1,9 +1,15 @@
 // GET /api/brochures/pdf?slug=...
-// Generates a PDF using Puppeteer by rendering the brochure HTML directly
-// (no internal HTTP request — avoids auth/network issues on Railway).
+// Generates a PDF using Puppeteer with the dedicated PDF template.
+//
+// Uses brochure-pdf-template (print-first: A4 landscape, real cover page,
+// no nav/tabs/interactive elements, all images eager-loaded) — not the
+// web brochure template. The two have different constraints (paginated
+// print vs. scrolling interactive web) and were previously fighting over
+// one template, which produced blank cover pages, tab buttons printed as
+// PDF elements, and empty gallery grids where lazy images never loaded.
 import { NextRequest, NextResponse } from "next/server";
 import { getBrochure, DEFAULT_BROKERS } from "@/lib/brochure-storage";
-import { generateBrochureHTML } from "@/lib/brochure-template";
+import { generatePdfBrochureHTML } from "@/lib/brochure-pdf-template";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
@@ -18,13 +24,7 @@ export async function GET(req: NextRequest) {
   const row = getBrochure(safeSlug);
   if (!row) return NextResponse.json({ error: "Brochure not found" }, { status: 404 });
 
-  const html = generateBrochureHTML(row.vessel, row.brokers || DEFAULT_BROKERS);
-
-  // Determine base URL so relative assets resolve correctly
-  const envBase = process.env.NEXT_PUBLIC_BASE_URL;
-  const requestHost = req.headers.get("host") || "";
-  const protocol = requestHost.includes("railway.app") ? "https" : "http";
-  const baseUrl = envBase || (requestHost ? `${protocol}://${requestHost}` : `http://localhost:${process.env.PORT || 8080}`);
+  const html = generatePdfBrochureHTML(row.vessel, row.brokers || DEFAULT_BROKERS);
 
   let browser: import("puppeteer").Browser | undefined;
   try {
@@ -36,27 +36,36 @@ export async function GET(req: NextRequest) {
     });
 
     const page = await browser.newPage();
-    page.setDefaultNavigationTimeout(45000);
-    await page.setViewport({ width: 1440, height: 900 });
+    page.setDefaultNavigationTimeout(60000);
+    // A4 landscape at 96dpi: 1123 × 794. Matching the viewport to the print
+    // size means the DOM lays out exactly as the printed pages will.
+    await page.setViewport({ width: 1123, height: 794, deviceScaleFactor: 2 });
 
-    // Use setContent with the base URL so fonts/images load
-    await page.setContent(html, { waitUntil: "networkidle0", timeout: 40000 });
+    await page.setContent(html, { waitUntil: "networkidle0", timeout: 60000 });
 
-    // Let fonts/images settle
-    await new Promise(r => setTimeout(r, 2500));
-
-    // Freeze animations, reveal all scroll-reveal elements
-    await page.addStyleTag({
-      content: `*, *::before, *::after { animation: none !important; transition: none !important; }
-        .reveal { opacity: 1 !important; transform: none !important; }
-        nav { position: relative !important; }`,
+    // Belt-and-suspenders wait for images. networkidle0 usually suffices but
+    // a large gallery can have late-arriving CDN responses; force an explicit
+    // decode of every img before we snapshot.
+    await page.evaluate(async () => {
+      const imgs = Array.from(document.images);
+      await Promise.all(imgs.map(img => img.complete && img.naturalHeight > 0
+        ? Promise.resolve()
+        : new Promise<void>(res => {
+            img.addEventListener("load",  () => res(), { once: true });
+            img.addEventListener("error", () => res(), { once: true });
+          })
+      ));
     });
+
+    // Small settle for fonts to fully render after all images resolve.
+    await new Promise(r => setTimeout(r, 800));
 
     const pdf = await page.pdf({
       format: "A4",
       landscape: true,
       printBackground: true,
       margin: { top: 0, right: 0, bottom: 0, left: 0 },
+      preferCSSPageSize: true,
     });
 
     await browser.close();
