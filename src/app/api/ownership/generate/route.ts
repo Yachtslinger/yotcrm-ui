@@ -119,7 +119,7 @@ function calcFuelHierarchy(opts:{
     const rangeHrs = rangeNm/cruiseSpeed;
     const rangeGph = (fuelCapacityGal*0.90)/rangeHrs;
     // Cross-check against HP formula — range figures are often optimistic
-    const loads:{[k:string]:[number,number,number]}={displacement:[0.30,0.38,0.52],semi:[0.48,0.60,0.76],planing:[0.65,0.78,0.90]};
+    const loads:{[k:string]:[number,number,number]}={displacement:[0.22,0.32,0.48],semi:[0.35,0.52,0.72],planing:[0.52,0.68,0.88]};
     const hpMidLoad=(loads[hullType]??loads.semi)[1];
     const hpGph = hpTotal>0 ? (hpTotal*hpMidLoad*0.40)/7.2 : 0;
     const useGph = (hpGph===0||rangeGph>=hpGph*0.70) ? rangeGph : hpGph*0.85;
@@ -131,7 +131,7 @@ function calcFuelHierarchy(opts:{
 
   // Priority 3 — HP physics formula
   if (hpTotal>0) {
-    const loads:{[k:string]:[number,number,number]}={displacement:[0.30,0.38,0.52],semi:[0.48,0.60,0.76],planing:[0.65,0.78,0.90]};
+    const loads:{[k:string]:[number,number,number]}={displacement:[0.22,0.32,0.48],semi:[0.35,0.52,0.72],planing:[0.52,0.68,0.88]};
     const load=loads[hullType]??loads.semi;
     const gph=(i:number)=>(hpTotal*load[i]*0.40)/7.2;
     const midGph=Math.round(gph(1));
@@ -178,13 +178,16 @@ function parseAskingPrice(price:string|undefined|null):number|null{
 function dockageBreakdown(lft:number,port:string){
   const p=port.toLowerCase();
   let rates:[number,number,number];
-  if(p.includes("mediterr")||p.includes(" med"))rates=[65,105,185];
-  else if(p.includes("florida")||p.includes("east"))rates=[45,70,115];
-  else if(p.includes("gulf"))rates=[30,50,82];
-  else if(p.includes("caribbean"))rates=[32,52,88];
-  else if(p.includes("pacific")||p.includes("alaska"))rates=[25,42,70];
-  else if(p.includes("worldwide")||p.includes("expedi"))rates=[45,75,135];
-  else rates=[45,70,115];
+  // Low = private dock / mooring ball / budget municipal
+  // Mid = standard full-service private marina
+  // High = premium mega-yacht facility, peak-season rates
+  if(p.includes("mediterr")||p.includes(" med"))rates=[40,105,210];
+  else if(p.includes("florida")||p.includes("east"))rates=[18,68,125];
+  else if(p.includes("gulf"))rates=[14,52,95];
+  else if(p.includes("caribbean"))rates=[15,55,105];
+  else if(p.includes("pacific")||p.includes("alaska"))rates=[18,45,82];
+  else if(p.includes("worldwide")||p.includes("expedi"))rates=[22,78,155];
+  else rates=[18,68,125];
   const hb={low:r5(lft*rates[0]*12),mid:r5(lft*rates[1]*12),high:r5(lft*rates[2]*12)};
   const tr={low:r5(hb.low*0.18),mid:r5(hb.mid*0.18),high:r5(hb.high*0.18)};
   const pd={low:r5(hb.low*0.10),mid:r5(hb.mid*0.10),high:r5(hb.high*0.10)};
@@ -294,7 +297,7 @@ function crewPresetPositions(preset:string,lft:number):{keys:string[];isDayRate:
 function crewSupportCosts(ftc:number,total:number,isLux:boolean){
   const r1l=(n:number)=>Math.round(n/1000)*1000; void isLux;
   return{
-    foodBeverage:{low:r5(ftc*15*365),mid:r5(ftc*23*365),high:r5(ftc*36*365)},
+    foodBeverage:{low:r5(ftc*10*365),mid:r5(ftc*16*365),high:r5(ftc*26*365)}, // $10/$16/$26 per person/day
     crewHealth:{low:r5(ftc*4500),mid:r5(ftc*6000),high:r5(ftc*8500)},
     recruitment:{low:r1l(total*2500),mid:r1l(total*4000),high:r1l(total*7500)},
     travel:{low:r1l(ftc*3500),mid:r1l(ftc*5200),high:r1l(ftc*9000)},

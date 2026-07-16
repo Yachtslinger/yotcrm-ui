@@ -325,6 +325,13 @@ export default function OwnershipPage() {
   const [error, setError]       = React.useState("");
   const [model, setModel]       = React.useState<CostModel|null>(null);
   const [pdfLoading, setPdfLoading] = React.useState(false);
+  // Position index map — maps crew role name → index in breakdown
+  // getEff uses this to zero salary for positions above each scenario's crew count
+  const positionIndexMap = React.useMemo(() => {
+    if (!model) return {} as Record<string,number>;
+    const bd = (model.crew?.salaries?.breakdown ?? []) as {role:string}[];
+    return Object.fromEntries(bd.map((r,i) => [r.role, i]));
+  }, [model]);
 
   const [activeTab, setActiveTab] = React.useState<"table"|"analysis">("table");
   const [showScenarios, setShowScenarios] = React.useState<ShowScenarios>({low:false,mid:true,high:false});
@@ -365,13 +372,24 @@ export default function OwnershipPage() {
     if (excludedPaths.has(path)) return {low:0,mid:0,high:0};
     const hasOverride = overrides[`${path}.low`]!==undefined || overrides[`${path}.mid`]!==undefined || overrides[`${path}.high`]!==undefined;
     let base: Scenario;
+
+    // Salary rows: zero out positions above each scenario's crew count
+    if (path.startsWith("crew.salaries.") && !hasOverride) {
+      const role = path.replace("crew.salaries.","");
+      const posIdx = positionIndexMap[role] ?? 999;
+      return {
+        low:  posIdx < adjustCrewCounts[0] ? (overrides[`${path}.low`]  ?? s.low)  : 0,
+        mid:  posIdx < adjustCrewCounts[1] ? (overrides[`${path}.mid`]  ?? s.mid)  : 0,
+        high: posIdx < adjustCrewCounts[2] ? (overrides[`${path}.high`] ?? s.high) : 0,
+      };
+    }
+
     if (!hasOverride && CREW_PER_PERSON.includes(path) && baseCrewCount > 0) {
       // Scale each scenario independently by its own crew count
-      base = {
-        low:  s.low  * (adjustCrewCounts[0] / baseCrewCount),
-        mid:  s.mid  * (adjustCrewCounts[1] / baseCrewCount),
-        high: s.high * (adjustCrewCounts[2] / baseCrewCount),
-      };
+      const s0 = adjustCrewCounts[0] / baseCrewCount;
+      const s1 = adjustCrewCounts[1] / baseCrewCount;
+      const s2 = adjustCrewCounts[2] / baseCrewCount;
+      base = { low: s.low*s0, mid: s.mid*s1, high: s.high*s2 };
     } else if (path === "operations.fuels") {
       const ratio = baseHours>0 ? adjustHours/baseHours : 1;
       base = {low: s.low*ratio, mid: s.mid*ratio, high: s.high*ratio};
@@ -398,24 +416,17 @@ export default function OwnershipPage() {
       mid:  r5l(perCrewRates.foodDaily.mid *365)+perCrewRates.health.mid +perCrewRates.travel.mid +perCrewRates.uniform.mid +perCrewRates.training.mid,
       high: r5l(perCrewRates.foodDaily.high*365)+perCrewRates.health.high+perCrewRates.travel.high+perCrewRates.uniform.high+perCrewRates.training.high,
     };
-    // Compute salary delta independently for each scenario's crew count
-    const computeDelta = (targetCount:number, sc:"low"|"mid"|"high"):number => {
+    // Salary delta: only for ADDING crew above base count
+    // Removal is now handled by getEff zeroing salary rows for removed positions
+    const computeAddDelta = (targetCount:number, sc:"low"|"mid"|"high"):number => {
       const delta = targetCount - baseCrewCount;
-      if (delta === 0) return 0;
-      const named = perCrewRates.namedSalaries ?? [];
-      if (delta < 0) {
-        let d = 0;
-        for (let i = baseCrewCount-1; i >= Math.max(targetCount, 0); i--) {
-          d -= (named[i] ?? perCrewRates.salJr)[sc];
-        }
-        return d;
-      }
+      if (delta <= 0) return 0; // removals handled by getEff position-awareness
       return delta * perCrewRates.salJr[sc];
     };
     const d:Scenario = {
-      low:  computeDelta(adjustCrewCounts[0], "low"),
-      mid:  computeDelta(adjustCrewCounts[1], "mid"),
-      high: computeDelta(adjustCrewCounts[2], "high"),
+      low:  computeAddDelta(adjustCrewCounts[0], "low"),
+      mid:  computeAddDelta(adjustCrewCounts[1], "mid"),
+      high: computeAddDelta(adjustCrewCounts[2], "high"),
     };
     // Extra position toggles: full cost (not in model base, so include support)
     extraPositions.filter(p=>p.checked).forEach(pos=>{
