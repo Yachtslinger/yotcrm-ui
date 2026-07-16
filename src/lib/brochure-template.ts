@@ -47,10 +47,32 @@ export function generateBrochureHTML(vessel: VesselData, brokers: BrokerInfo[]):
   const customIntro = (vessel as any).customIntro as string | undefined;
   const customFields = (vessel as any).customFields as { key: string; value: string }[] | undefined || [];
 
+  // Description: prose paragraphs. Was capped at 4 — real listings routinely
+  // run 6-10 paragraphs (broker overview + boat-specific sections + closing
+  // pitch); 4 truncated real content and made brochures feel thin. 12 is a
+  // safe ceiling that still fits the section visually.
   const descHtml = vessel.description
-    ? vessel.description.split("\n\n").filter(p => p.trim()).slice(0, 4)
+    ? vessel.description.split("\n\n").filter(p => p.trim()).slice(0, 12)
         .map(p => `<p class="section-body reveal">${esc(p.trim())}</p>`).join("")
     : `<p class="section-body reveal">${esc(vessel.name)} — a distinguished motor yacht combining advanced naval engineering with refined luxury.</p>`;
+
+  // Highlights: the scraper pulls 30-60 feature bullets from every source
+  // (PDFs, HTML pages, list-of-works documents) and stores them in
+  // vessel.features. Prior template ignored this entirely — losing arguably
+  // the most valuable prose data. Render them as a proper section, with
+  // short-line bullets in a 2-column grid.
+  const featureBullets = (vessel.features || [])
+    .map(f => f.trim())
+    .filter(f => f.length >= 6 && f.length <= 200)
+    .slice(0, 40);
+
+  // Recent-upgrades block: pull refit + service data out of the spec grid
+  // and give it its own section — buyers scan this first on used-boat
+  // listings. Only rendered when any of the three fields is populated.
+  const refitYear     = (vessel as any).refitYear     as string | undefined;
+  const refitDetails  = (vessel as any).refitDetails  as string | undefined;
+  const lastService   = (vessel as any).lastService   as string | undefined;
+  const hasRefitData  = !!(refitYear || refitDetails || lastService);
 
   const brokerCards = brokers.map(b => `
     <div class="broker-card">
@@ -201,6 +223,39 @@ section{padding:100px 0;}
 .spec-key{font-family:'Cinzel',serif;font-size:9px;letter-spacing:.15em;color:var(--gold-warm);text-transform:uppercase;line-height:1.6;}
 .spec-val{font-size:13.5px;font-weight:400;color:var(--cream);line-height:1.6;hyphens:none;}
 .spec-header{grid-column:1/-1;background:var(--navy-deep)!important;padding:14px 26px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:.2em;color:var(--gold-bright);text-transform:uppercase;border-top:2px solid var(--divider);font-weight:700;}
+/* Highlights & Key Features — bulleted grid, rendered before Gallery. */
+.highlights{background:var(--navy-panel);}
+.highlights-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 42px;margin-top:20px;}
+.highlight-item{display:flex;gap:14px;align-items:flex-start;font-size:14px;line-height:1.55;color:var(--cream);padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04);}
+.highlight-item::before{content:'';flex-shrink:0;width:5px;height:5px;margin-top:9px;background:var(--gold-warm);border-radius:50%;}
+/* Recent Upgrades block — narrative treatment for refit/service data. */
+.refit-block{background:linear-gradient(135deg,rgba(184,147,58,.06),rgba(184,147,58,.02));border:1px solid rgba(184,147,58,.18);padding:36px 42px;margin-top:32px;}
+.refit-row{display:grid;grid-template-columns:180px 1fr;padding:12px 0;border-bottom:1px solid rgba(184,147,58,.12);}
+.refit-row:last-child{border-bottom:none;}
+.refit-key{font-family:'Cinzel',serif;font-size:10px;letter-spacing:.18em;color:var(--gold-bright);text-transform:uppercase;line-height:1.6;}
+.refit-val{font-size:14.5px;font-weight:400;color:var(--cream);line-height:1.65;}
+/* Print-only cover page — full-bleed hero for the PDF, hidden on the web. */
+.pdf-cover{display:none;}
+@media print{
+  .pdf-cover{display:flex;flex-direction:column;justify-content:flex-end;align-items:flex-start;
+    height:100vh;width:100vw;position:relative;overflow:hidden;color:var(--cream);
+    padding:0 0 90px 90px;page-break-after:always;background:var(--navy-deepest);}
+  .pdf-cover-bg{position:absolute;inset:0;z-index:0;}
+  .pdf-cover-bg img{width:100%;height:100%;object-fit:cover;}
+  .pdf-cover-overlay{position:absolute;inset:0;z-index:1;
+    background:linear-gradient(180deg,rgba(11,26,43,.15) 0%,rgba(11,26,43,.55) 60%,rgba(11,26,43,.92) 100%);}
+  .pdf-cover-content{position:relative;z-index:2;}
+  .pdf-cover-eyebrow{font-family:'Cinzel',serif;font-size:11px;letter-spacing:.32em;color:var(--gold-warm);text-transform:uppercase;margin-bottom:24px;}
+  .pdf-cover-title{font-family:'Cormorant Garamond',serif;font-size:96px;font-weight:300;line-height:.95;color:var(--white);margin-bottom:20px;letter-spacing:-.01em;}
+  .pdf-cover-title em{font-style:italic;color:var(--gold-pale);}
+  .pdf-cover-subtitle{font-size:18px;color:var(--cream-dim);font-weight:300;letter-spacing:.05em;}
+  /* On PDF, hero section becomes redundant with the cover page — hide the scroll indicator. */
+  .hero-scroll{display:none;}
+  /* Force section breaks between major blocks so PDFs paginate cleanly. */
+  section{page-break-inside:avoid;}
+  .specs,.gallery{page-break-before:auto;}
+  nav{display:none;}
+}
 .contact{background:var(--navy-deep);position:relative;overflow:hidden;}
 .contact::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 50%,rgba(184,147,58,.07) 0%,transparent 65%);pointer-events:none;}
 .contact-inner{position:relative;text-align:center;}
@@ -236,6 +291,7 @@ footer{background:var(--navy-deep);border-top:1px solid var(--divider);padding:3
     <li><a href="javascript:void(0)" onclick="window.history.length>1&&document.referrer?window.history.back():window.location.href='/brochures'" style="opacity:.6;font-size:9px;">← Back</a></li>
     <li><button onclick="if(navigator.share){navigator.share({title:document.title,url:window.location.href}).catch(function(){});}else{navigator.clipboard&&navigator.clipboard.writeText(window.location.href).then(function(){alert('Link copied!');});}" style="font-family:Cinzel,serif;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--gold-warm);background:rgba(184,147,58,.12);border:1px solid rgba(184,147,58,.3);padding:7px 16px;cursor:pointer;border-radius:0;display:flex;align-items:center;gap:7px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>Share</button></li>
     <li><a href="#intro">Overview</a></li>
+    ${featureBullets.length > 0 || hasRefitData ? `<li><a href="#highlights">Highlights</a></li>` : ""}
     <li><a href="#gallery">Gallery</a></li>
     ${gaImages.length > 0 ? `<li><a href="#arrangements">Arrangements</a></li>` : ""}
     ${videos.length > 0 ? `<li><a href="#videos">Videos</a></li>` : ""}
@@ -243,6 +299,15 @@ footer{background:var(--navy-deep);border-top:1px solid var(--divider);padding:3
     <li><a href="#contact">Contact</a></li>
   </ul>
 </nav>
+<section class="pdf-cover">
+  ${heroImg ? `<div class="pdf-cover-bg"><img src="${esc(heroImg)}" alt="${esc(vessel.name)}"></div>` : ""}
+  <div class="pdf-cover-overlay"></div>
+  <div class="pdf-cover-content">
+    <p class="pdf-cover-eyebrow">${esc(vessel.builder || "")}${vessel.year ? ` · ${vessel.year}` : ""}</p>
+    <h1 class="pdf-cover-title"><em>${esc(vessel.name)}</em></h1>
+    <p class="pdf-cover-subtitle">${[vessel.loa, vessel.location].filter(Boolean).join(" · ")}</p>
+  </div>
+</section>
 <section class="hero">
   <div class="hero-bg"><img src="${esc(heroImg)}" alt="${esc(vessel.name)}"></div>
   <div class="hero-overlay"></div>
@@ -291,6 +356,25 @@ ${customIntro || customFields.length > 0 ? `
     </div>
   </div>
 </section>
+${featureBullets.length > 0 || hasRefitData ? `
+<section class="highlights" id="highlights">
+  <div class="container">
+    <p class="section-eyebrow reveal">Highlights</p>
+    <div class="gold-rule reveal"></div>
+    <h2 class="section-title reveal">Key <em>Features</em></h2>
+    ${featureBullets.length > 0 ? `
+    <div class="highlights-grid reveal">
+      ${featureBullets.map(f => `<div class="highlight-item">${esc(f)}</div>`).join("")}
+    </div>` : ""}
+    ${hasRefitData ? `
+    <div class="refit-block reveal">
+      <p class="section-eyebrow" style="margin-bottom:12px;">Refit &amp; Recent Service</p>
+      ${refitYear    ? `<div class="refit-row"><div class="refit-key">Refit Year</div><div class="refit-val">${esc(refitYear)}</div></div>`       : ""}
+      ${refitDetails ? `<div class="refit-row"><div class="refit-key">Refit Details</div><div class="refit-val">${esc(refitDetails)}</div></div>` : ""}
+      ${lastService  ? `<div class="refit-row"><div class="refit-key">Last Service</div><div class="refit-val">${esc(lastService)}</div></div>`   : ""}
+    </div>` : ""}
+  </div>
+</section>` : ""}
 <section class="gallery" id="gallery">
   <div class="container">
     <p class="section-eyebrow reveal">Photo Gallery</p>
