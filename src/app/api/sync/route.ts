@@ -188,6 +188,8 @@ export async function POST(req: Request) {
         }
 
         // ── Boats: drop/recreate (no mutable fields, keyed to leads) ──
+        // Guarded: absent/empty boats in a partial (chunked) sync must NOT wipe the table
+        if (boats.length > 0) {
         db.exec(`
           DROP TABLE IF EXISTS boats;
           CREATE TABLE boats (
@@ -208,6 +210,7 @@ export async function POST(req: Request) {
             b.length||'', b.price||'', b.location||'', b.listing_url||'',
             b.source_email||'', b.added_at||new Date().toISOString());
         }
+        } // end boats guard
 
         // ── Todos: merge — add new, preserve Railway-side completions ──
         // Ensure todos table + new columns exist
