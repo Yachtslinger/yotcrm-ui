@@ -13,6 +13,9 @@ export async function GET() {
     const batch = db.prepare(`SELECT id, first_name, last_name, email, phone, company, notes,
         suggested_category, prospect_score, suggest_reason, last_contacted_at
       FROM leads WHERE category IS NULL
+        AND first_name NOT LIKE 'Received:%' AND first_name NOT LIKE 'Delivered-To%'
+        AND first_name NOT LIKE 'X-%' AND first_name NOT LIKE 'DKIM%'
+        AND first_name NOT LIKE 'Authentication%' AND first_name NOT LIKE 'Content-%'
       ORDER BY prospect_score DESC NULLS LAST, length(COALESCE(notes,'')) DESC
       LIMIT 25`).all();
     const remaining = (db.prepare(`SELECT COUNT(*) n FROM leads WHERE category IS NULL`).get() as {n:number}).n;
