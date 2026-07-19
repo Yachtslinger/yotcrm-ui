@@ -20,6 +20,20 @@ export default function MatchBoardPage() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [meta, setMeta] = useState({ buyerCount: 0, listingCount: 0 });
   const [loading, setLoading] = useState(true);
+  const [botMsg, setBotMsg] = useState<string>("");
+  const [botBusy, setBotBusy] = useState(false);
+
+  const runDraftBot = async () => {
+    setBotBusy(true); setBotMsg("");
+    try {
+      const r = await fetch("/api/draft-bot", { method: "POST" });
+      const j = await r.json();
+      setBotMsg(j.note ? j.note :
+        j.drafted > 0 ? `✉️ ${j.drafted} drafts written — review & send in Bot Queue` :
+        `No new matches ≥70 to draft (${j.candidatesAboveThreshold ?? 0} candidates, all handled)`);
+    } catch { setBotMsg("Draft bot failed — try again"); }
+    setBotBusy(false);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -49,10 +63,17 @@ export default function MatchBoardPage() {
             <Anchor className="w-6 h-6" />
             <h1 className="text-2xl font-semibold">Match board</h1>
           </div>
-          <button className="btn-secondary flex items-center gap-1.5" onClick={load}>
-            <RefreshCw className="w-4 h-4" /> Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button className="btn-primary flex items-center gap-1.5" disabled={botBusy} onClick={runDraftBot}
+              title="Writes outreach emails for matches scoring 70+ (approved profiles only) into the Bot Queue — you review and send">
+              ✉️ {botBusy ? "Drafting…" : "Draft emails"}
+            </button>
+            <button className="btn-secondary flex items-center gap-1.5" onClick={load}>
+              <RefreshCw className="w-4 h-4" /> Refresh
+            </button>
+          </div>
         </div>
+        {botMsg && <p className="text-sm mb-2 text-amber-600">{botMsg} {botMsg.includes("Bot Queue") && <a href="/botqueue" className="underline">Open Bot Queue →</a>}</p>}
         <p className="text-sm opacity-70 mb-5">
           {matches.length} matches · {meta.buyerCount} buyers with profiles · {meta.listingCount} listings (45 days).
           Amber rows are from <a href="/profile-review" className="underline">unapproved draft profiles</a> — approve to make them real.
