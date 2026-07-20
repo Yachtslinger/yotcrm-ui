@@ -13,14 +13,23 @@ import {
 import Dossier from "../Dossier";
 import ClientNotesPanel from "../ClientNotesPanel";
 
+// Temperature pins — write to pinned_temperature (the real system; feeds Match Board ranking).
+// "Auto" clears the pin so temperature decays from last contact instead.
 const STATUS_OPTIONS = [
-  { value: "new", label: "New", color: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300" },
-  { value: "hot", label: "Hot", color: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300" },
+  { value: "hot", label: "🔥 Hot", color: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300" },
   { value: "warm", label: "Warm", color: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300" },
-  { value: "cold", label: "Cold", color: "bg-gray-200 text-gray-700 dark:bg-gray-700/40 dark:text-gray-300" },
-  { value: "nurture", label: "Nurture", color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300" },
-  { value: "client", label: "✓ Client", color: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300" },
-  { value: "other", label: "Other", color: "bg-slate-100 text-slate-600 dark:bg-slate-700/40 dark:text-slate-300" },
+  { value: "cool", label: "Cool", color: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300" },
+  { value: "cold", label: "🧊 Cold", color: "bg-gray-200 text-gray-700 dark:bg-gray-700/40 dark:text-gray-300" },
+  { value: "", label: "Auto", color: "bg-slate-100 text-slate-600 dark:bg-slate-700/40 dark:text-slate-300" },
+];
+
+const CATEGORY_OPTIONS = [
+  { value: "active_buyer", label: "Buyer", color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300" },
+  { value: "owner_seller", label: "Seller", color: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300" },
+  { value: "past_client", label: "✓ Past client", color: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300" },
+  { value: "co_broker", label: "Industry", color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300" },
+  { value: "vendor", label: "Vendor", color: "bg-slate-100 text-slate-600 dark:bg-slate-700/40 dark:text-slate-300" },
+  { value: "dead_dnc", label: "Dead / DNC", color: "bg-neutral-200 text-neutral-600 dark:bg-neutral-700/40 dark:text-neutral-300" },
 ];
 
 type Props = {
@@ -360,15 +369,32 @@ function LeadDetailPageClient({ id }: { id: string }) {
       const res = await fetch(`/api/clients/${encodeURIComponent(decodedId)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ pinned_temperature: newStatus || null }),
       });
       if (!res.ok) throw new Error("Update failed");
-      setLead({ ...lead, status: newStatus });
-      if (form) setForm({ ...form, status: newStatus });
-      toast(`Status updated to ${newStatus}`);
+      setLead({ ...lead, pinned_temperature: newStatus || null } as typeof lead);
+      toast(newStatus ? `Pinned ${newStatus}` : "Temperature set to auto (decays from last contact)");
     } catch (err) {
       console.error(err);
-      toast("Failed to update status", "error");
+      toast("Failed to update temperature", "error");
+    }
+  };
+
+  const handleCategoryChange = async (newCategory: string) => {
+    if (!lead) return;
+    try {
+      const decodedId = decodeURIComponent(id);
+      const res = await fetch(`/api/clients/${encodeURIComponent(decodedId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category: newCategory }),
+      });
+      if (!res.ok) throw new Error("Update failed");
+      setLead({ ...lead, category: newCategory } as typeof lead);
+      toast(`Category set`);
+    } catch (err) {
+      console.error(err);
+      toast("Failed to update category", "error");
     }
   };
 
@@ -450,10 +476,10 @@ function LeadDetailPageClient({ id }: { id: string }) {
             <div>
               <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-50">{name}</h1>
               <p className="text-gray-600 dark:text-gray-400 mt-1 text-sm">{lead.source || "Unknown source"}</p>
-              {/* Status Pills */}
+              {/* Temperature pins (feeds Match Board ranking) */}
               <div className="flex flex-wrap gap-2 mt-3">
                 {STATUS_OPTIONS.map((s) => {
-                  const active = (lead.status || "other").toLowerCase() === s.value;
+                  const active = ((lead as any).pinned_temperature || "") === s.value;
                   return (
                     <button
                       key={s.value}
@@ -466,6 +492,22 @@ function LeadDetailPageClient({ id }: { id: string }) {
                       style={{ minHeight: "44px" }}
                     >
                       {s.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Category chips (who they are — People view) */}
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {CATEGORY_OPTIONS.map((c) => {
+                  const active = ((lead as any).category || "") === c.value;
+                  return (
+                    <button key={c.value} onClick={() => handleCategoryChange(c.value)}
+                      className={`text-xs font-medium rounded-full px-3 py-1.5 transition-all ${
+                        active
+                          ? `${c.color} ring-1 ring-offset-1 ring-blue-400 dark:ring-offset-neutral-900`
+                          : "bg-gray-50 text-gray-400 dark:bg-neutral-800/60 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-neutral-700"
+                      }`}>
+                      {c.label}
                     </button>
                   );
                 })}

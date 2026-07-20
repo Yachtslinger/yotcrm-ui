@@ -508,6 +508,8 @@ export async function updateContact(id: string, updates: Partial<ContactFlat>): 
       "identity_confidence", "identity_verifications", "manual_corrections",
       "court_records", "professional_history", "relatives", "additional_properties", "reverify_status",
       "broker_notes",
+      // People-view: temperature pin + category (leads rework)
+      "pinned_temperature", "category", "profile_status",
       // Buyer criteria
       "budget_min", "budget_max", "loa_min", "loa_max", "year_min", "year_max",
       "make_preference", "preferred_location", "vessel_type_pref", "flybridge_pref",
