@@ -88,6 +88,9 @@ export type Contact = ContactRecord & { id: string };
 
 // Backward compat: flat boat fields for table view (uses first boat)
 export type ContactFlat = Contact & {
+  pinned_temperature?: string | null;
+  category?: string | null;
+  profile_status?: string | null;
   boat_make?: string;
   boat_model?: string;
   boat_year?: string;
