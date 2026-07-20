@@ -21,7 +21,6 @@ const NAV_ITEMS = [
   { href: "/todos",     label: "To Do",       Icon: CheckSquare,     color: "#d97706", group: "core" },
   { href: "/botqueue",  label: "Bot Queue",   Icon: Zap,             color: "#7c3aed", group: "core" },
   { href: "/campaigns/new", label: "Campaigns", Icon: Mail,          color: "#0e7490", group: "core" },
-  { href: "/buyers",    label: "Buyers",      Icon: Search,          color: "#6366f1", group: "listings" },
   { href: "/listings",  label: "My Listings", Icon: Briefcase,       color: "#b45e0b", group: "listings" },
 
   { href: "/brochures",  label: "E-Brochures",  Icon: BookOpen,        color: "#c9a55c", group: "listings" },

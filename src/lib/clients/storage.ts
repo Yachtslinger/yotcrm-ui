@@ -164,6 +164,7 @@ export type LeadFilters = {
   page?: number; pageSize?: number;
   search?: string; status?: string; source?: string;
   intelFilter?: string; boatFilter?: string; sortBy?: string;
+  category?: string; // 'all' | 'uncategorized' | any leads.category value
 };
 
 export async function readContactsPaginated(opts: LeadFilters = {}): Promise<{
@@ -174,7 +175,7 @@ export async function readContactsPaginated(opts: LeadFilters = {}): Promise<{
   const db = getDb();
   try {
     const { page=1, pageSize=100, search="", status="all", source="all",
-            intelFilter="all", boatFilter="", sortBy="newest" } = opts;
+            intelFilter="all", boatFilter="", sortBy="newest", category="all" } = opts;
     const offset = (Math.max(1, page) - 1) * pageSize;
 
     const hasIntel = !!db.prepare(
@@ -186,6 +187,10 @@ export async function readContactsPaginated(opts: LeadFilters = {}): Promise<{
 
     if (status && status !== "all") {
       conds.push("LOWER(l.status) = ?"); params.push(status.toLowerCase());
+    }
+    if (category && category !== "all") {
+      if (category === "uncategorized") conds.push("l.category IS NULL");
+      else { conds.push("l.category = ?"); params.push(category); }
     }
     if (source && source !== "all") {
       conds.push("LOWER(l.source) = ?"); params.push(source.toLowerCase());

@@ -103,6 +103,17 @@ export default function ClientsPage(): React.ReactElement {
   const [showScreenshotModal, setShowScreenshotModal] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return new URLSearchParams(window.location.search).get("category") || "all";
+    }
+    return "all";
+  });
+  const CATEGORY_CHIPS: [string, string][] = [
+    ["all", "All"], ["active_buyer", "Buyers"], ["owner_seller", "Sellers"],
+    ["past_client", "Past clients"], ["co_broker", "Industry"], ["vendor", "Vendors"],
+    ["uncategorized", "Unsorted"], ["dead_dnc", "Dead"],
+  ];
   const [search, setSearch] = useState("");
   const [enriching, setEnriching] = useState<Set<string>>(new Set());
   const [sourceFilter, setSourceFilter] = useState<string>("all");
@@ -124,14 +135,14 @@ export default function ClientsPage(): React.ReactElement {
 
   const buildUrl = useCallback((overrides: Record<string, any> = {}) => {
     const p = { page, status: statusFilter, source: sourceFilter, intelFilter,
-                boatFilter, sortBy, search, ...overrides };
+                boatFilter, sortBy, search, category: categoryFilter, ...overrides };
     const q = new URLSearchParams({
       page: String(p.page), pageSize: String(PAGE_SIZE),
       status: p.status, source: p.source, intelFilter: p.intelFilter,
-      boatFilter: p.boatFilter, sortBy: p.sortBy, search: p.search,
+      boatFilter: p.boatFilter, sortBy: p.sortBy, search: p.search, category: p.category,
     });
     return `/api/clients?${q.toString()}`;
-  }, [page, statusFilter, sourceFilter, intelFilter, boatFilter, sortBy, search]);
+  }, [page, statusFilter, sourceFilter, intelFilter, boatFilter, sortBy, search, categoryFilter]);
 
   const fetchContacts = useCallback(async (url?: string, retries = 2) => {
     try {
@@ -165,7 +176,7 @@ export default function ClientsPage(): React.ReactElement {
     setIsLoading(true);
     fetchContacts(buildUrl({ page: 1 })).finally(() => setIsLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, sourceFilter, intelFilter, boatFilter, sortBy]);
+  }, [statusFilter, sourceFilter, intelFilter, boatFilter, sortBy, categoryFilter]);
 
   // Search: debounce 350ms
   useEffect(() => {
@@ -289,6 +300,20 @@ export default function ClientsPage(): React.ReactElement {
         </div>
       }
     >
+
+      {/* ═══ Category Chips (who they are — the People view) ═══ */}
+      <div className="mb-3 flex gap-1.5 flex-wrap">
+        {CATEGORY_CHIPS.map(([val, label]) => (
+          <button key={val}
+            className={`px-3 py-1 rounded-full text-xs border transition ${
+              categoryFilter === val
+                ? "bg-[var(--navy-800,#0a2e5c)] text-white border-transparent"
+                : "opacity-70 hover:opacity-100"}`}
+            onClick={() => setCategoryFilter(val)}>
+            {label}
+          </button>
+        ))}
+      </div>
 
       {/* ═══ Search + Filter Bar ═══ */}
       <div className="mb-4 space-y-3">

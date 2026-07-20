@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
         intelFilter: searchParams.get("intelFilter") || "all",
         boatFilter:  searchParams.get("boatFilter")  || "",
         sortBy:      searchParams.get("sortBy")      || "newest",
+        category:    searchParams.get("category")    || "all",
       });
       return NextResponse.json({
         ok: true,
