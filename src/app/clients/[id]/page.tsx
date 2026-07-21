@@ -512,6 +512,15 @@ function LeadDetailPageClient({ id }: { id: string }) {
                   );
                 })}
               </div>
+              {/* Client brief — AI-distilled from text/email history */}
+              {(lead as any).dossier && (
+                <div className="mt-3 rounded-lg border border-amber-200 dark:border-amber-800/40 bg-amber-50/60 dark:bg-amber-900/10 p-3 max-w-2xl">
+                  <div className="text-[11px] font-semibold tracking-wide text-amber-700 dark:text-amber-400 mb-1">
+                    📇 CLIENT BRIEF <span className="font-normal opacity-70">— from message history</span>
+                  </div>
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{(lead as any).dossier}</p>
+                </div>
+              )}
             </div>
             <div className="flex gap-2 flex-wrap">
               {lead.email && (

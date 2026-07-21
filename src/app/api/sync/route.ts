@@ -106,6 +106,7 @@ export async function POST(req: Request) {
         try { db.exec("ALTER TABLE leads ADD COLUMN suggested_category TEXT"); } catch {}
         try { db.exec("ALTER TABLE leads ADD COLUMN prospect_score REAL"); } catch {}
         try { db.exec("ALTER TABLE leads ADD COLUMN suggest_reason TEXT"); } catch {}
+        try { db.exec("ALTER TABLE leads ADD COLUMN dossier TEXT"); } catch {}
 
         // Upsert leads: insert new ones, update non-mutable fields on existing ones.
         // NEVER overwrite: status, notes, dismissed_listing_ids, last_contacted_at, broker_notes
@@ -123,9 +124,9 @@ export async function POST(req: Request) {
             broker_notes, dismissed_listing_ids, last_contacted_at,
             budget_min, budget_max, loa_min, loa_max, year_min, year_max, make_preference, vessel_type_pref,
             category, pinned_temperature, profile_status, profile_confidence_json, profile_source_ref,
-            suggested_category, prospect_score, suggest_reason,
+            suggested_category, prospect_score, suggest_reason, dossier,
             created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             first_name=excluded.first_name, last_name=excluded.last_name,
             email=excluded.email, phone=excluded.phone, tags=excluded.tags,
@@ -162,6 +163,7 @@ export async function POST(req: Request) {
             suggested_category=COALESCE(excluded.suggested_category, suggested_category),
             prospect_score=COALESCE(excluded.prospect_score, prospect_score),
             suggest_reason=COALESCE(excluded.suggest_reason, suggest_reason),
+            dossier=COALESCE(excluded.dossier, dossier),
             last_contacted_at=CASE WHEN excluded.last_contacted_at > COALESCE(leads.last_contacted_at,'')
               THEN excluded.last_contacted_at ELSE leads.last_contacted_at END,
             updated_at=excluded.updated_at
@@ -184,7 +186,7 @@ export async function POST(req: Request) {
             l.year_min ?? null, l.year_max ?? null, l.make_preference ?? null, l.vessel_type_pref ?? null,
             l.category ?? null, l.pinned_temperature ?? null, l.profile_status || 'none',
             l.profile_confidence_json || '{}', l.profile_source_ref ?? null,
-            l.suggested_category ?? null, l.prospect_score ?? null, l.suggest_reason ?? null,
+            l.suggested_category ?? null, l.prospect_score ?? null, l.suggest_reason ?? null, l.dossier ?? null,
             l.created_at||new Date().toISOString(), l.updated_at||new Date().toISOString()
           );
         }

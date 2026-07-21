@@ -15,6 +15,7 @@ export function ensureLeadsSchema(db: Database) {
   add(`ALTER TABLE leads ADD COLUMN suggested_category TEXT`);
   add(`ALTER TABLE leads ADD COLUMN prospect_score REAL`);
   add(`ALTER TABLE leads ADD COLUMN suggest_reason TEXT`);
+  add(`ALTER TABLE leads ADD COLUMN dossier TEXT`);
   add(`CREATE TABLE IF NOT EXISTS match_board_actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     parsed_listing_id INTEGER NOT NULL, lead_id INTEGER NOT NULL,
