@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { buildDigest, formatDigestSMS } from "@/lib/notes/digest";
 import { sendSMS } from "@/lib/sms";
 import { logMorningSend } from "@/lib/health";
+import { buildIntelBrief } from "@/lib/morning-intel";
 
 export const runtime = "nodejs";
 
@@ -32,7 +33,14 @@ export async function POST(req: Request) {
     if (!to) continue; // skip if number not configured
 
     const items   = buildDigest(broker.assignee);
-    const message = formatDigestSMS(items, broker.assignee);
+    let message = formatDigestSMS(items, broker.assignee);
+    // Intel section (matches, price cuts, drafts) — Will's brief only, hard-capped lines
+    if (broker.assignee === "will") {
+      try {
+        const intel = buildIntelBrief();
+        if (intel) message = `${message}\n—\n${intel}`;
+      } catch (e) { console.warn("[cron/morning] intel brief failed:", e); }
+    }
     const result  = await sendSMS(to, message);
 
     logMorningSend(
