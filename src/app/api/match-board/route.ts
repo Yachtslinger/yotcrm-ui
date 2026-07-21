@@ -16,9 +16,22 @@ export async function GET() {
         budget_min, budget_max, loa_min, loa_max, year_min, year_max, make_preference, vessel_type_pref,
         pinned_temperature, last_contacted_at
       FROM leads WHERE category='active_buyer' AND profile_status IN ('approved','draft')`).all() as Buyer[];
+    // Price drops (last 14 days): listing_id -> most recent negative delta
+    let priceDrops = new Map<number, number>();
+    let hasDrops = false;
+    try {
+      priceDrops = new Map((db.prepare(`SELECT parsed_listing_id pid, MIN(delta) d
+        FROM listing_price_events WHERE delta < 0 AND observed_at >= datetime('now','-14 days')
+        GROUP BY parsed_listing_id`).all() as {pid:number;d:number}[]).map(r => [r.pid, r.d]));
+      hasDrops = true;
+    } catch {} // table appears with first detected drop
+
     const listingsRaw = db.prepare(`SELECT id, make, model, year, loa, asking_price, location,
         listing_url, vessel_type, created_at
-      FROM parsed_listings WHERE created_at >= datetime('now','-45 days')
+      FROM parsed_listings
+      WHERE created_at >= datetime('now','-45 days')
+        ${hasDrops ? `OR id IN (SELECT parsed_listing_id FROM listing_price_events
+                   WHERE delta < 0 AND observed_at >= datetime('now','-14 days'))` : ""}
       ORDER BY created_at DESC`).all() as Listing[];
     const listings = dedupeListings(listingsRaw);
     const acted = new Set((db.prepare(`SELECT parsed_listing_id||'-'||lead_id k FROM match_board_actions`)
@@ -33,9 +46,10 @@ export async function GET() {
       const temp = temperature(b);
       const final = pts * mult;               // match quality gate stays pure
       if (final < 45) continue;
-      const rank = final * TEMP_WEIGHT[temp]; // temperature shapes ordering, not existence
+      const drop = priceDrops.get(l.id) ?? 0;
+      const rank = final * TEMP_WEIGHT[temp] * (drop < 0 ? 1.25 : 1); // motivated seller floats
       rows.push({ buyerId: b.id, buyer: `${b.first_name} ${b.last_name}`.trim(),
-        pending: b.profile_status === "draft", temp, rank,
+        pending: b.profile_status === "draft", temp, rank, priceDrop: drop < 0 ? drop : null,
         listingId: l.id, boat: [l.year, l.make, l.model].filter(Boolean).join(" "),
         loa: l.loa, price: l.asking_price, location: l.location, url: l.listing_url,
         score: Math.round(final), reasons });

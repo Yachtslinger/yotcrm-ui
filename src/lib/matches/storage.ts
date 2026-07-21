@@ -233,8 +233,22 @@ export function insertListing(batchId: number, listing: Partial<ParsedListing> &
 
     // Check for duplicate by URL or content hash
     if (listing.listing_url) {
-      const existing = db.prepare("SELECT id FROM parsed_listings WHERE listing_url = ?").get(listing.listing_url) as any;
+      const existing = db.prepare("SELECT id, asking_price FROM parsed_listings WHERE listing_url = ?").get(listing.listing_url) as any;
       if (existing) {
+        // ── Price-drop detection: same boat, new price → record the event (motivated-seller signal) ──
+        const oldP = parseFloat(String(existing.asking_price || "").replace(/[^0-9.]/g, ""));
+        const newP = parseFloat(String(listing.asking_price || "").replace(/[^0-9.]/g, ""));
+        if (!isNaN(oldP) && !isNaN(newP) && oldP > 0 && newP > 0 && Math.round(oldP) !== Math.round(newP)) {
+          db.exec(`CREATE TABLE IF NOT EXISTS listing_price_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            parsed_listing_id INTEGER NOT NULL,
+            old_price INTEGER, new_price INTEGER, delta INTEGER,
+            observed_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+          db.prepare(`INSERT INTO listing_price_events (parsed_listing_id, old_price, new_price, delta)
+            VALUES (?, ?, ?, ?)`).run(existing.id, Math.round(oldP), Math.round(newP), Math.round(newP - oldP));
+          db.prepare("UPDATE parsed_listings SET asking_price = ? WHERE id = ?")
+            .run(listing.asking_price || "", existing.id);
+        }
         // Tag with additional section if different
         if (listing.section) {
           const current = db.prepare("SELECT section FROM parsed_listings WHERE id = ?").get(existing.id) as any;

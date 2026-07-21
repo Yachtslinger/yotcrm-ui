@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import PageShell from "../components/PageShell";
 import { Anchor, X, Send, RefreshCw } from "lucide-react";
 
-type Match = { buyerId: number; buyer: string; pending: boolean; temp: string; listingId: number;
+type Match = { buyerId: number; buyer: string; pending: boolean; temp: string; priceDrop?: number|null; listingId: number;
   boat: string; loa: number|null; price: number|null; location: string|null;
   url: string|null; score: number; reasons: string[] };
 
@@ -102,7 +102,10 @@ export default function MatchBoardPage() {
                       {m.loa ? `${Math.round(m.loa)}ft` : ""}{m.price ? ` · $${(m.price/1e6).toFixed(2)}M` : ""}{m.location ? ` · ${m.location}` : ""}
                     </span>
                   </div>
-                  <div className="text-xs opacity-60 truncate">{m.reasons.join(" · ")}</div>
+                  <div className="text-xs opacity-60 truncate">
+                    {m.priceDrop ? <span className="text-emerald-600 font-medium mr-1.5">💰 price cut ${Math.abs(m.priceDrop/1000).toFixed(0)}K</span> : null}
+                    {m.reasons.join(" · ")}
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <span className="text-sm font-semibold w-10 text-right">{m.score}</span>
