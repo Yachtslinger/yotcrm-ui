@@ -119,7 +119,7 @@ export async function POST(req: Request) {
          make_preference, vessel_type_pref, profile_confidence_json,
          profile_status, profile_source_ref, last_contacted_at, created_at, updated_at)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))`).run(
-        first, last, isEmail ? handle : "", isEmail ? "" : handle, "imessage",
+        first, last, isEmail ? handle : null, isEmail ? "" : handle, "imessage",
         cat, temp, ex.dossier || "",
         ex.budget_min ?? "", ex.budget_max ?? "", ex.loa_min ?? "", ex.loa_max ?? "",
         ex.year_min ?? "", ex.year_max ?? "", ex.make_preference ?? "", ex.vessel_type_pref ?? "",
