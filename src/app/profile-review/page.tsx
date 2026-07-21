@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import PageShell from "../components/PageShell";
+import TextExtracts from "./TextExtracts";
 import { Check, SkipForward, ClipboardCheck } from "lucide-react";
 
 type Draft = {
@@ -69,6 +70,7 @@ export default function ProfileReviewPage() {
           {drafts.length} drafts to review · {approvedCount} approved · {gapCount} buyers with no profile yet.
           Field borders show AI confidence: green high, yellow medium, red low — check red ones against the inquiry.
         </p>
+        <TextExtracts />
         {loading && <p className="opacity-60">Loading drafts…</p>}
         {!loading && drafts.length === 0 && (
           <div className="rounded-lg border p-6 text-center opacity-80">
