@@ -323,7 +323,20 @@ export function appendCorrection(extractionId: number, correction: { field: stri
 // ── Contact match log ────────────────────────────────────────────────────────
 export function logContactMatch(data: { message_id: number; lead_id: number | null; match_method: string; confidence: number }) {
   initCommsTables(); const db = getDb();
-  try { db.prepare("INSERT INTO comms_contact_matches (message_id, lead_id, match_method, confidence) VALUES (?,?,?,?)").run(data.message_id, data.lead_id, data.match_method, data.confidence); }
+  try {
+    db.prepare("INSERT INTO comms_contact_matches (message_id, lead_id, match_method, confidence) VALUES (?,?,?,?)").run(data.message_id, data.lead_id, data.match_method, data.confidence);
+    // ── Touch stamp: a matched message IS a contact event. Forward-only — never moves a date backward.
+    if (data.lead_id) {
+      try {
+        const msg = db.prepare("SELECT COALESCE(sent_at, received_at) d FROM comms_messages WHERE id = ?").get(data.message_id) as { d: string } | undefined;
+        if (msg?.d) {
+          db.prepare(`UPDATE leads SET last_contacted_at = ?
+            WHERE id = ? AND (last_contacted_at IS NULL OR last_contacted_at = '' OR last_contacted_at < ?)`)
+            .run(msg.d, data.lead_id, msg.d);
+        }
+      } catch {} // stamping must never break message ingest
+    }
+  }
   finally { db.close(); }
 }
 export function getContactMatches(messageId: number): { lead_id: number | null; match_method: string; confidence: number }[] {

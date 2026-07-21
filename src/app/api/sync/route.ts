@@ -162,6 +162,8 @@ export async function POST(req: Request) {
             suggested_category=COALESCE(excluded.suggested_category, suggested_category),
             prospect_score=COALESCE(excluded.prospect_score, prospect_score),
             suggest_reason=COALESCE(excluded.suggest_reason, suggest_reason),
+            last_contacted_at=CASE WHEN excluded.last_contacted_at > COALESCE(leads.last_contacted_at,'')
+              THEN excluded.last_contacted_at ELSE leads.last_contacted_at END,
             updated_at=excluded.updated_at
             -- NOT updating: notes, status, broker_notes, dismissed_listing_ids, last_contacted_at
         `);
