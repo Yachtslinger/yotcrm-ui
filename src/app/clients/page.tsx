@@ -619,6 +619,27 @@ export default function ClientsPage(): React.ReactElement {
         </div>
       )}
 
+      {/* ═══ Pagination ═══ */}
+      {total > PAGE_SIZE && (
+        <div className="mt-4 mb-8 flex items-center justify-center gap-3 flex-wrap">
+          <button className="btn-secondary text-sm disabled:opacity-40" disabled={page <= 1 || isLoading}
+            onClick={() => goToPage(page - 1)}>← Prev</button>
+          <span className="text-sm opacity-70">
+            Page {page} of {Math.max(1, Math.ceil(total / PAGE_SIZE))} · {total.toLocaleString()} leads
+          </span>
+          <button className="btn-secondary text-sm disabled:opacity-40"
+            disabled={page >= Math.ceil(total / PAGE_SIZE) || isLoading}
+            onClick={() => goToPage(page + 1)}>Next →</button>
+          <select value={page} disabled={isLoading}
+            className="text-sm rounded border px-2 py-1 bg-transparent"
+            onChange={(e) => goToPage(Number(e.target.value))}>
+            {Array.from({ length: Math.max(1, Math.ceil(total / PAGE_SIZE)) }, (_, i) => i + 1).map(p => (
+              <option key={p} value={p}>Jump to page {p}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       <ScreenshotUploadModal
         isOpen={showScreenshotModal}
         onClose={() => setShowScreenshotModal(false)}
