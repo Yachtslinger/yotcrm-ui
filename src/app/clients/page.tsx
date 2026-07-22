@@ -111,7 +111,7 @@ export default function ClientsPage(): React.ReactElement {
   });
   const CATEGORY_CHIPS: [string, string][] = [
     ["all", "All"], ["active_buyer", "Buyers"], ["owner_seller", "Sellers"],
-    ["past_client", "Past clients"], ["co_broker", "Industry"], ["vendor", "Vendors"],
+    ["past_client", "Past clients"], ["co_broker", "Brokers"], ["vendor", "Vendors"],
     ["uncategorized", "Unsorted"], ["dead_dnc", "Dead"],
   ];
   const [search, setSearch] = useState("");

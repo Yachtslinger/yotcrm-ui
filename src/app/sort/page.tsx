@@ -14,7 +14,7 @@ type QItem = {
 
 const CATS: [string, string, string][] = [
   ["active_buyer", "Buyer", "1"], ["owner_seller", "Seller", "2"], ["past_client", "Past client", "3"],
-  ["co_broker", "Co-broker", "4"], ["vendor", "Vendor", "5"], ["dead_dnc", "Dead / DNC", "6"],
+  ["co_broker", "Broker", "4"], ["vendor", "Vendor", "5"], ["dead_dnc", "Dead / DNC", "6"],
 ];
 
 export default function SortPage() {

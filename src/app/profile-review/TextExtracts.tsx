@@ -14,7 +14,7 @@ type Extract = {
 
 const CATS: [string, string][] = [
   ["active_buyer", "Buyer"], ["owner_seller", "Seller"], ["past_client", "Past client"],
-  ["co_broker", "Co-broker"], ["vendor", "Vendor"], ["dead_dnc", "Dead"],
+  ["co_broker", "Broker"], ["vendor", "Vendor"], ["dead_dnc", "Dead"],
 ];
 const CAT_ALIAS: Record<string, string> = { seller: "owner_seller", industry: "co_broker" };
 const TEMPS: [string, string][] = [["hot", "🔥 Hot"], ["warm", "Warm"], ["cool", "Cool"], ["cold", "🧊 Cold"]];

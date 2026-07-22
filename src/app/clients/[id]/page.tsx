@@ -28,7 +28,7 @@ const CATEGORY_OPTIONS = [
   { value: "active_buyer", label: "Buyer", color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300" },
   { value: "owner_seller", label: "Seller", color: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300" },
   { value: "past_client", label: "✓ Past client", color: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300" },
-  { value: "co_broker", label: "Industry", color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300" },
+  { value: "co_broker", label: "Broker", color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300" },
   { value: "vendor", label: "Vendor", color: "bg-slate-100 text-slate-600 dark:bg-slate-700/40 dark:text-slate-300" },
   { value: "dead_dnc", label: "Dead / DNC", color: "bg-neutral-200 text-neutral-600 dark:bg-neutral-700/40 dark:text-neutral-300" },
 ];
