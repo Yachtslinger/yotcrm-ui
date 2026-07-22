@@ -54,7 +54,7 @@ export async function POST(req: Request) {
   try {
     const conds = [
       `COALESCE(l.phone,'') != ''`,
-      `COALESCE(l.category,'') NOT IN ('dead_dnc','vendor')`,
+      `COALESCE(l.category,'') NOT IN ('dead_dnc','vendor','co_broker')`,
       // not already assigned in the last 30 days
       `l.id NOT IN (SELECT i.lead_id FROM call_batch_items i JOIN call_batches b ON b.id=i.batch_id
                     WHERE b.created_at >= datetime('now','-30 days'))`,
