@@ -25,6 +25,7 @@ export default function TextExtracts() {
   const [items, setItems] = useState<Extract[]>([]);
   const [cats, setCats] = useState<Record<number, string>>({});
   const [temps, setTemps] = useState<Record<number, string>>({});
+  const [edits, setEdits] = useState<Record<number, Record<string, string>>>({});
   const [busy, setBusy] = useState<number | null>(null);
   const [approved, setApproved] = useState(0);
   const [loaded, setLoaded] = useState(false);
@@ -50,6 +51,7 @@ export default function TextExtracts() {
         id, action,
         category: cats[id] || CAT_ALIAS[it?.category_suggestion || ""] || it?.category_suggestion || null,
         temperature: temps[id] || it?.temperature || null,
+        overrides: edits[id] || {},
       }),
     });
     setItems(p => p.filter(x => x.id !== id));
@@ -75,18 +77,18 @@ export default function TextExtracts() {
       {items.map(it => {
         const selCat = cats[it.id] || CAT_ALIAS[it.category_suggestion || ""] || it.category_suggestion || "";
         const selTemp = temps[it.id] || it.temperature || "";
-        const crit = [
-          (it.budget_min || it.budget_max) && `${fmtMoney(it.budget_min) || "?"}–${fmtMoney(it.budget_max) || "?"}`,
-          (it.loa_min || it.loa_max) && `${it.loa_min || "?"}–${it.loa_max || "?"} ft`,
-          (it.year_min || it.year_max) && `${it.year_min || "?"}–${it.year_max || "?"}`,
-          it.make_preference, it.vessel_type_pref,
-        ].filter(Boolean);
+        const ed = edits[it.id] || {};
+        const val = (k: string, orig: unknown) => (k in ed ? ed[k] : (orig == null ? "" : String(orig)));
+        const setEd = (k: string, v: string) => setEdits(p => ({ ...p, [it.id]: { ...(p[it.id] || {}), [k]: v } }));
+        const inp = "rounded border px-2 py-1 text-xs bg-transparent w-full";
         return (
           <div key={it.id} className={`rounded-lg border mb-3 p-4 ${it.is_prospect ? "" : "opacity-60"}`}>
             <div className="flex items-start justify-between flex-wrap gap-2 mb-2">
-              <div>
-                <span className="font-medium">{it.display_name || it.handle_id}</span>
-                <span className="text-xs opacity-60 ml-2">
+              <div className="flex-1 min-w-[240px]">
+                <input className="font-medium rounded border px-2 py-1 text-sm bg-transparent w-full max-w-xs"
+                  value={val("display_name", it.display_name || "")} placeholder="Name"
+                  onChange={e => setEd("display_name", e.target.value)} />
+                <span className="text-xs opacity-60 block mt-1">
                   {it.handle_id} · {it.msg_count} msgs · last {it.last_msg_at}
                   {it.matched_lead_id === null && <span className="ml-1.5 text-emerald-600 font-semibold">NEW — not in CRM</span>}
                 </span>
@@ -103,12 +105,21 @@ export default function TextExtracts() {
                 </button>
               </div>
             </div>
-            <p className="text-sm bg-black/5 dark:bg-white/5 rounded p-3 mb-2 whitespace-pre-wrap">{it.dossier}</p>
-            {crit.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {crit.map((c, i) => <span key={i} className="text-xs rounded-full border px-2 py-0.5 opacity-80">{c}</span>)}
-              </div>
-            )}
+            <textarea className="text-sm bg-black/5 dark:bg-white/5 rounded p-3 mb-2 w-full min-h-[84px] border-0"
+              value={val("dossier", it.dossier || "")} placeholder="Dossier — who they are, what they want"
+              onChange={e => setEd("dossier", e.target.value)} />
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mb-2">
+              <input className={inp} inputMode="numeric" placeholder="Budget min $" value={val("budget_min", it.budget_min)} onChange={e => setEd("budget_min", e.target.value)} />
+              <input className={inp} inputMode="numeric" placeholder="Budget max $" value={val("budget_max", it.budget_max)} onChange={e => setEd("budget_max", e.target.value)} />
+              <input className={inp} inputMode="numeric" placeholder="LOA min ft" value={val("loa_min", it.loa_min)} onChange={e => setEd("loa_min", e.target.value)} />
+              <input className={inp} inputMode="numeric" placeholder="LOA max ft" value={val("loa_max", it.loa_max)} onChange={e => setEd("loa_max", e.target.value)} />
+              <input className={inp} inputMode="numeric" placeholder="Year min" value={val("year_min", it.year_min)} onChange={e => setEd("year_min", e.target.value)} />
+              <input className={inp} inputMode="numeric" placeholder="Year max" value={val("year_max", it.year_max)} onChange={e => setEd("year_max", e.target.value)} />
+              <input className={inp} placeholder="Make pref" value={val("make_preference", it.make_preference)} onChange={e => setEd("make_preference", e.target.value)} />
+              <input className={inp} placeholder="Vessel type" value={val("vessel_type_pref", it.vessel_type_pref)} onChange={e => setEd("vessel_type_pref", e.target.value)} />
+              <input className={inp} type="email" placeholder="+ email" value={val("email", "")} onChange={e => setEd("email", e.target.value)} />
+              <input className={inp} placeholder="+ phone" value={val("phone", "")} onChange={e => setEd("phone", e.target.value)} />
+            </div>
             <div className="flex flex-wrap gap-3 items-center">
               <div className="flex rounded-md border overflow-hidden">
                 {CATS.map(([v, label]) => (

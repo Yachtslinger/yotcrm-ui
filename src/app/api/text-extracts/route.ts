@@ -63,6 +63,34 @@ export async function POST(req: Request) {
     const ex = db.prepare(`SELECT * FROM lead_text_extracts WHERE id=?`).get(id) as Record<string, unknown> | undefined;
     if (!ex) return NextResponse.json({ error: "not found" }, { status: 404 });
 
+    // Will's edits override the extraction — applied to the record before approval
+    const ov = (body.overrides || {}) as Record<string, unknown>;
+    const numOv = (k: string) => {
+      const v = ov[k];
+      if (v === undefined || v === null || v === "") return null;
+      const n = Number(String(v).replace(/[^0-9.]/g, ""));
+      return isNaN(n) ? null : Math.round(n);
+    };
+    const strOv = (k: string) => {
+      const v = ov[k];
+      return typeof v === "string" && v.trim() !== "" ? v.trim() : null;
+    };
+    if (Object.keys(ov).length > 0) {
+      db.prepare(`UPDATE lead_text_extracts SET
+        display_name=COALESCE(?, display_name), dossier=COALESCE(?, dossier),
+        budget_min=?, budget_max=?, loa_min=?, loa_max=?, year_min=?, year_max=?,
+        make_preference=?, vessel_type_pref=?
+        WHERE id=?`).run(
+        strOv("display_name"), strOv("dossier"),
+        numOv("budget_min") ?? ex.budget_min, numOv("budget_max") ?? ex.budget_max,
+        numOv("loa_min") ?? ex.loa_min, numOv("loa_max") ?? ex.loa_max,
+        numOv("year_min") ?? ex.year_min, numOv("year_max") ?? ex.year_max,
+        strOv("make_preference") ?? ex.make_preference, strOv("vessel_type_pref") ?? ex.vessel_type_pref,
+        id);
+      Object.assign(ex, db.prepare(`SELECT * FROM lead_text_extracts WHERE id=?`).get(id) as Record<string, unknown>);
+    }
+    const ovEmail = strOv("email"), ovPhone = strOv("phone");
+
     if (action === "skip") {
       db.prepare(`UPDATE lead_text_extracts SET review_status='skipped' WHERE id=?`).run(id);
       return NextResponse.json({ ok: true, skipped: true });
@@ -89,6 +117,12 @@ export async function POST(req: Request) {
       .some(v => v !== null && v !== undefined && v !== "");
 
     if (leadId) {
+      if (ovEmail || ovPhone) {
+        db.prepare(`UPDATE leads SET
+          email = CASE WHEN COALESCE(email,'')='' THEN COALESCE(?, email) ELSE email END,
+          phone = CASE WHEN COALESCE(phone,'')='' THEN COALESCE(?, phone) ELSE phone END
+          WHERE id=?`).run(ovEmail, ovPhone, leadId);
+      }
       db.prepare(`UPDATE leads SET
         category = COALESCE(?, category),
         pinned_temperature = COALESCE(?, pinned_temperature),
@@ -109,6 +143,19 @@ export async function POST(req: Request) {
         ex.budget_min, ex.budget_max, ex.loa_min, ex.loa_max, ex.year_min, ex.year_max,
         ex.make_preference, ex.vessel_type_pref,
         hasCriteria ? 1 : 0, ex.last_msg_at || "", ex.last_msg_at || "", leadId);
+      // Explicit edits WIN over existing lead values — Will just reviewed this person
+      if (Object.keys(ov).length > 0) {
+        db.prepare(`UPDATE leads SET
+          budget_min=COALESCE(?,budget_min), budget_max=COALESCE(?,budget_max),
+          loa_min=COALESCE(?,loa_min), loa_max=COALESCE(?,loa_max),
+          year_min=COALESCE(?,year_min), year_max=COALESCE(?,year_max),
+          make_preference=COALESCE(?,make_preference), vessel_type_pref=COALESCE(?,vessel_type_pref),
+          dossier=COALESCE(?,dossier)
+          WHERE id=?`).run(
+          numOv("budget_min"), numOv("budget_max"), numOv("loa_min"), numOv("loa_max"),
+          numOv("year_min"), numOv("year_max"), strOv("make_preference"), strOv("vessel_type_pref"),
+          strOv("dossier"), leadId);
+      }
     } else {
       const nm = String(ex.display_name || "").trim();
       const parts = nm.includes("@") || /^\+?\d+$/.test(nm) ? ["", ""] : nm.split(/\s+/);
@@ -119,7 +166,7 @@ export async function POST(req: Request) {
          make_preference, vessel_type_pref, profile_confidence_json,
          profile_status, profile_source_ref, last_contacted_at, created_at, updated_at)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))`).run(
-        first, last, isEmail ? handle : null, isEmail ? "" : handle, "imessage",
+        first, last, ovEmail || (isEmail ? handle : null), ovPhone || (isEmail ? "" : handle), "imessage",
         cat, temp, ex.dossier || "",
         ex.budget_min ?? "", ex.budget_max ?? "", ex.loa_min ?? "", ex.loa_max ?? "",
         ex.year_min ?? "", ex.year_max ?? "", ex.make_preference ?? "", ex.vessel_type_pref ?? "",
