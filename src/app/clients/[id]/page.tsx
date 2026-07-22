@@ -11,6 +11,7 @@ import {
   Briefcase, DollarSign, Activity, User,
 } from "lucide-react";
 import Dossier from "../Dossier";
+import CallRecorder from "./CallRecorder";
 import ClientNotesPanel from "../ClientNotesPanel";
 
 // Temperature pins — write to pinned_temperature (the real system; feeds Match Board ranking).
@@ -521,6 +522,9 @@ function LeadDetailPageClient({ id }: { id: string }) {
                   <p className="text-sm leading-relaxed whitespace-pre-wrap">{(lead as any).dossier}</p>
                 </div>
               )}
+              <div className="max-w-2xl">
+                <CallRecorder leadId={Number(lead.id)} />
+              </div>
             </div>
             <div className="flex gap-2 flex-wrap">
               {lead.email && (
