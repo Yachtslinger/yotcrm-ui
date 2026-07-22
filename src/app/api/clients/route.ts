@@ -21,6 +21,8 @@ export async function GET(req: NextRequest) {
         boatFilter:  searchParams.get("boatFilter")  || "",
         sortBy:      searchParams.get("sortBy")      || "newest",
         category:    searchParams.get("category")    || "all",
+        budgetMin:   searchParams.get("budgetMin") ? Number(searchParams.get("budgetMin")) : null,
+        budgetMax:   searchParams.get("budgetMax") ? Number(searchParams.get("budgetMax")) : null,
       });
       return NextResponse.json({
         ok: true,

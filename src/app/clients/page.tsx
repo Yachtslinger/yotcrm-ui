@@ -120,6 +120,9 @@ export default function ClientsPage(): React.ReactElement {
   const [intelFilter, setIntelFilter] = useState<string>("all");
   const [boatFilter, setBoatFilter] = useState<string>("");
   const [sortBy, setSortBy] = useState<string>("newest");
+  const [budgetMin, setBudgetMin] = useState<string>("");
+  const [budgetMax, setBudgetMax] = useState<string>("");
+  const [batchSending, setBatchSending] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
   const [batchEnriching, setBatchEnriching] = useState(false);
@@ -135,14 +138,17 @@ export default function ClientsPage(): React.ReactElement {
 
   const buildUrl = useCallback((overrides: Record<string, any> = {}) => {
     const p = { page, status: statusFilter, source: sourceFilter, intelFilter,
-                boatFilter, sortBy, search, category: categoryFilter, ...overrides };
+                boatFilter, sortBy, search, category: categoryFilter,
+                budgetMin, budgetMax, ...overrides };
     const q = new URLSearchParams({
       page: String(p.page), pageSize: String(PAGE_SIZE),
       status: p.status, source: p.source, intelFilter: p.intelFilter,
       boatFilter: p.boatFilter, sortBy: p.sortBy, search: p.search, category: p.category,
     });
+    if (p.budgetMin) q.set("budgetMin", String(p.budgetMin));
+    if (p.budgetMax) q.set("budgetMax", String(p.budgetMax));
     return `/api/clients?${q.toString()}`;
-  }, [page, statusFilter, sourceFilter, intelFilter, boatFilter, sortBy, search, categoryFilter]);
+  }, [page, statusFilter, sourceFilter, intelFilter, boatFilter, sortBy, search, categoryFilter, budgetMin, budgetMax]);
 
   const fetchContacts = useCallback(async (url?: string, retries = 2) => {
     try {
@@ -176,7 +182,7 @@ export default function ClientsPage(): React.ReactElement {
     setIsLoading(true);
     fetchContacts(buildUrl({ page: 1 })).finally(() => setIsLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, sourceFilter, intelFilter, boatFilter, sortBy, categoryFilter]);
+  }, [statusFilter, sourceFilter, intelFilter, boatFilter, sortBy, categoryFilter, budgetMin, budgetMax]);
 
   // Search: debounce 350ms
   useEffect(() => {
@@ -317,6 +323,33 @@ export default function ClientsPage(): React.ReactElement {
           className="px-3 py-1 rounded-full text-xs border border-amber-400 text-amber-600 dark:text-amber-400 hover:bg-amber-500 hover:text-white transition font-medium">
           ⚡ Sort contacts
         </a>
+        <span className="inline-flex items-center gap-1 ml-2">
+          <input value={budgetMin} onChange={e => setBudgetMin(e.target.value.replace(/[^0-9]/g, ""))}
+            placeholder="Budget min" className="w-24 rounded-full border px-3 py-1 text-xs bg-transparent" inputMode="numeric" />
+          <span className="text-xs opacity-50">–</span>
+          <input value={budgetMax} onChange={e => setBudgetMax(e.target.value.replace(/[^0-9]/g, ""))}
+            placeholder="max" className="w-24 rounded-full border px-3 py-1 text-xs bg-transparent" inputMode="numeric" />
+          <button disabled={batchSending}
+            title="Random 30 from the current filter, emailed to Paolo (no repeats within 30 days)"
+            className="px-3 py-1 rounded-full text-xs border border-emerald-500 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-600 hover:text-white transition font-medium disabled:opacity-50"
+            onClick={async () => {
+              setBatchSending(true);
+              try {
+                const r = await fetch("/api/call-batch", { method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ count: 30,
+                    budgetMin: budgetMin ? Number(budgetMin) : null,
+                    budgetMax: budgetMax ? Number(budgetMax) : null,
+                    category: categoryFilter }) });
+                const j = await r.json();
+                if (j.ok) toast(`Call list #${j.batchId}: ${j.count} contacts ${j.emailed ? "emailed to Paolo" : "created (email failed — check RESEND key)"}`, "success");
+                else toast(j.error || "Batch failed", "error");
+              } catch { toast("Batch failed", "error"); }
+              setBatchSending(false);
+            }}>
+            {batchSending ? "Sending…" : "📞 30 → Paolo"}
+          </button>
+        </span>
       </div>
 
       {/* ═══ Search + Filter Bar ═══ */}

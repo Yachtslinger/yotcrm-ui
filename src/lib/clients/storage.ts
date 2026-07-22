@@ -169,6 +169,7 @@ export type LeadFilters = {
   search?: string; status?: string; source?: string;
   intelFilter?: string; boatFilter?: string; sortBy?: string;
   category?: string; // 'all' | 'uncategorized' | any leads.category value
+  budgetMin?: number | null; budgetMax?: number | null; // filter on profiled budget criteria (overlap)
 };
 
 export async function readContactsPaginated(opts: LeadFilters = {}): Promise<{
@@ -179,7 +180,8 @@ export async function readContactsPaginated(opts: LeadFilters = {}): Promise<{
   const db = getDb();
   try {
     const { page=1, pageSize=100, search="", status="all", source="all",
-            intelFilter="all", boatFilter="", sortBy="newest", category="all" } = opts;
+            intelFilter="all", boatFilter="", sortBy="newest", category="all",
+            budgetMin=null, budgetMax=null } = opts;
     const offset = (Math.max(1, page) - 1) * pageSize;
 
     const hasIntel = !!db.prepare(
@@ -206,6 +208,13 @@ export async function readContactsPaginated(opts: LeadFilters = {}): Promise<{
         EXISTS(SELECT 1 FROM boats bx WHERE bx.lead_id=l.id AND
           (LOWER(bx.make) LIKE ? OR LOWER(bx.model) LIKE ?)))`);
       params.push(t, t, t, t, t, t, t, t);
+    }
+    if (budgetMin != null || budgetMax != null) {
+      // Budget overlap against profiled criteria; leads with no budget data are excluded
+      conds.push(`((COALESCE(l.budget_min,'') != '' OR COALESCE(l.budget_max,'') != '')
+        AND COALESCE(CAST(l.budget_min AS INTEGER), 0) <= ?
+        AND COALESCE(CAST(l.budget_max AS INTEGER), 2000000000) >= ?)`);
+      params.push(budgetMax ?? 2000000000, budgetMin ?? 0);
     }
     if (boatFilter.trim()) {
       const bf = `%${boatFilter.toLowerCase()}%`;
