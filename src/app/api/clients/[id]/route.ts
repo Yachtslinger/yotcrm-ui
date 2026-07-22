@@ -41,6 +41,7 @@ export async function PUT(
       status: body.status ?? body.Status,
       pinned_temperature: body.pinned_temperature,
       category: body.category,
+      sorted_at: body.sorted_at,
       tags: body.tags,
       occupation: body.occupation,
       employer: body.employer,

@@ -313,6 +313,10 @@ export default function ClientsPage(): React.ReactElement {
             {label}
           </button>
         ))}
+        <a href="/sort"
+          className="px-3 py-1 rounded-full text-xs border border-amber-400 text-amber-600 dark:text-amber-400 hover:bg-amber-500 hover:text-white transition font-medium">
+          ⚡ Sort contacts
+        </a>
       </div>
 
       {/* ═══ Search + Filter Bar ═══ */}
