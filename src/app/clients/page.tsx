@@ -123,6 +123,18 @@ export default function ClientsPage(): React.ReactElement {
   const [budgetMin, setBudgetMin] = useState<string>("");
   const [budgetMax, setBudgetMax] = useState<string>("");
   const [batchSending, setBatchSending] = useState(false);
+  const [cellEdit, setCellEdit] = useState<{ id: string; field: "email" | "phone"; value: string } | null>(null);
+  const saveCell = async () => {
+    if (!cellEdit) return;
+    const { id, field, value } = cellEdit;
+    setCellEdit(null);
+    setContacts(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
+    try {
+      await fetch(`/api/clients/${encodeURIComponent(id)}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: value }) });
+    } catch { toast("Save failed", "error"); }
+  };
   const [showFilters, setShowFilters] = useState(false);
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
   const [batchEnriching, setBatchEnriching] = useState(false);
@@ -529,9 +541,33 @@ export default function ClientsPage(): React.ReactElement {
                       <div className="font-semibold text-sm text-[var(--navy-900)] dark:text-white">{name}</div>
                       {c.notes && <div className="text-xs text-[var(--navy-400)] mt-0.5 truncate max-w-[200px]">{c.notes}</div>}
                     </td>
-                    <td className="px-5 py-3.5">
-                      <div className="text-sm text-[var(--navy-700)] dark:text-[var(--navy-200)]">{c.email}</div>
-                      {c.phone && <div className="text-xs text-[var(--navy-400)] mt-0.5">{c.phone}</div>}
+                    <td className="px-5 py-3.5" onClick={(e) => e.stopPropagation()}>
+                      {cellEdit?.id === c.id && cellEdit.field === "email" ? (
+                        <input autoFocus className="text-sm rounded border px-1.5 py-0.5 w-full bg-transparent"
+                          value={cellEdit.value}
+                          onChange={(e) => setCellEdit({ id: c.id, field: "email", value: e.target.value })}
+                          onBlur={saveCell}
+                          onKeyDown={(e) => { if (e.key === "Enter") saveCell(); if (e.key === "Escape") setCellEdit(null); }} />
+                      ) : (
+                        <div className="text-sm text-[var(--navy-700)] dark:text-[var(--navy-200)] cursor-text hover:bg-black/5 dark:hover:bg-white/5 rounded px-1 -mx-1"
+                          title="Click to edit email"
+                          onClick={() => setCellEdit({ id: c.id, field: "email", value: c.email || "" })}>
+                          {c.email || <span className="opacity-40">+ email</span>}
+                        </div>
+                      )}
+                      {cellEdit?.id === c.id && cellEdit.field === "phone" ? (
+                        <input autoFocus className="text-xs rounded border px-1.5 py-0.5 w-full bg-transparent mt-0.5"
+                          value={cellEdit.value}
+                          onChange={(e) => setCellEdit({ id: c.id, field: "phone", value: e.target.value })}
+                          onBlur={saveCell}
+                          onKeyDown={(e) => { if (e.key === "Enter") saveCell(); if (e.key === "Escape") setCellEdit(null); }} />
+                      ) : (
+                        <div className="text-xs text-[var(--navy-400)] mt-0.5 cursor-text hover:bg-black/5 dark:hover:bg-white/5 rounded px-1 -mx-1"
+                          title="Click to edit phone"
+                          onClick={() => setCellEdit({ id: c.id, field: "phone", value: c.phone || "" })}>
+                          {c.phone || <span className="opacity-40">+ phone</span>}
+                        </div>
+                      )}
                     </td>
                     <td className="px-5 py-3.5 text-sm text-[var(--navy-700)] dark:text-[var(--navy-200)]">{boat || <span className="text-[var(--navy-400)]">—</span>}</td>
                     <td className="px-5 py-3.5 text-sm text-[var(--navy-400)]">{c.source || "—"}</td>
