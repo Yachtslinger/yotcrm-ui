@@ -117,7 +117,7 @@ export default function NewCampaign() {
   return (
     <div style={{ padding: "20px", fontFamily: "system-ui, sans-serif", color: "#111" }}>
       <h1 style={{ fontSize: 22, margin: 0, color: NAVY }}>Send a Listing Campaign</h1>
-      <p style={{ color: MUTE, marginTop: 3, marginBottom: 12, fontSize: 13 }}>Paste a URL, edit everything, preview live, then send to verified buyers. No Vertical Response.</p>
+      <p style={{ color: MUTE, marginTop: 3, marginBottom: 12, fontSize: 13 }}>Paste a URL, edit everything, preview live, then send to verified buyers. No Vertical Response. <a href="/campaigns/show" style={{ color: ORANGE }}>Boat show invite →</a></p>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
         <button style={btn("#f1f5f9", NAVY)} onClick={saveDraft} disabled={!draft || !!busy}>Save draft</button>

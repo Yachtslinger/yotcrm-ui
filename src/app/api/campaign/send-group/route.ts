@@ -42,13 +42,21 @@ export async function POST(req: NextRequest) {
     const d = new Database(DB);
     d.exec(`CREATE TABLE IF NOT EXISTS campaign_suppressions (email TEXT PRIMARY KEY, source TEXT DEFAULT 'unsubscribe', created_at TEXT NOT NULL)`);
     d.exec(`CREATE TABLE IF NOT EXISTS campaign_sends (slug TEXT, email TEXT, sent_at TEXT, PRIMARY KEY(slug,email))`);
+    d.exec(`CREATE TABLE IF NOT EXISTS campaign_topic_optouts (email TEXT NOT NULL, topic TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(email,topic))`);
 
     const statusClause = group === "verified" ? "AND email_status='verified'" : "";
+    // Boat-show / event sends also skip anyone who opted out of the 'events' topic
+    // (via /api/campaign/preferences) without touching their other subscriptions.
+    const isEvent = (draft && draft.kind === "boatshow") || type === "boatshow";
+    const topicClause = isEvent
+      ? "AND LOWER(TRIM(email)) NOT IN (SELECT email FROM campaign_topic_optouts WHERE topic='events')"
+      : "";
     const eligibleSql = `
       SELECT DISTINCT LOWER(TRIM(email)) e FROM leads
       WHERE segment='buyer' ${statusClause}
         AND LOWER(TRIM(email)) NOT IN (SELECT email FROM campaign_suppressions)
-        AND LOWER(TRIM(email)) NOT IN (SELECT email FROM campaign_sends WHERE slug=@slug)`;
+        AND LOWER(TRIM(email)) NOT IN (SELECT email FROM campaign_sends WHERE slug=@slug)
+        ${topicClause}`;
     const totalEligible = (d.prepare(`SELECT COUNT(*) c FROM (${eligibleSql})`).get({ slug }) as { c: number }).c;
     const recips = d.prepare(`${eligibleSql} LIMIT @lim`).all({ slug, lim: limit }).map((r: any) => r.e);
 
