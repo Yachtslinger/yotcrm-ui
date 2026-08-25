@@ -171,7 +171,15 @@ export async function POST(req: Request) {
             updated_at=excluded.updated_at
             -- NOT updating: notes, status, broker_notes, dismissed_listing_ids, last_contacted_at
         `);
+        // Tombstoned deletions: never re-add leads the broker deleted on Railway.
+        db.exec(`CREATE TABLE IF NOT EXISTS lead_deletions (id INTEGER PRIMARY KEY, email TEXT DEFAULT '', deleted_at TEXT NOT NULL)`);
+        const _delRows = db.prepare("SELECT id, email FROM lead_deletions").all() as { id: number; email: string }[];
+        const _delIds = new Set(_delRows.map(r => r.id));
+        const _delEmails = new Set(_delRows.map(r => (r.email || '').trim().toLowerCase()).filter(Boolean));
         for (const l of leads) {
+          if (_delIds.has(l.id)) continue;
+          const _em = (l.email || '').trim().toLowerCase();
+          if (_em && _delEmails.has(_em)) continue;
           upsertLead.run(
             l.id, l.first_name||'', l.last_name||'', l.email||null, l.phone||'',
             l.tags||'', l.notes||'', l.source||'', l.status||'new',

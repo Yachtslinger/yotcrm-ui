@@ -137,6 +137,7 @@ export default function ClientsPage(): React.ReactElement {
   };
   const [showFilters, setShowFilters] = useState(false);
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
+  const [batchDeleting, setBatchDeleting] = useState(false);
   const [batchEnriching, setBatchEnriching] = useState(false);
   // ── Pagination + server-side filter state (Phase 0 fix) ───────────────────
   const PAGE_SIZE = 100;
@@ -255,6 +256,33 @@ export default function ClientsPage(): React.ReactElement {
     await fetchContacts(buildUrl());
     setSelectedLeads(new Set()); setBatchEnriching(false);
     toast(`✅ Batch scan complete — ${done}/${ids.length} processed`);
+  };
+
+  const deleteOne = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("Delete this lead permanently? It won't come back on the next sync.")) return;
+    try {
+      const res = await fetch(`/api/clients/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (res.ok) {
+        setContacts(prev => prev.filter(c => c.id !== id));
+        setSelectedLeads(prev => { const s = new Set(prev); s.delete(id); return s; });
+        toast("🗑 Lead deleted");
+      } else toast("Delete failed", "error");
+    } catch { toast("Delete failed", "error"); }
+  };
+
+  const runBatchDelete = async () => {
+    if (selectedLeads.size === 0) return;
+    const ids = [...selectedLeads];
+    if (!confirm(`Delete ${ids.length} lead${ids.length > 1 ? "s" : ""} permanently? They won't come back on the next sync.`)) return;
+    setBatchDeleting(true);
+    let done = 0;
+    for (const id of ids) {
+      try { const res = await fetch(`/api/clients/${encodeURIComponent(id)}`, { method: "DELETE" }); if (res.ok) done++; } catch { /* continue */ }
+    }
+    await fetchContacts(buildUrl());
+    setSelectedLeads(new Set()); setBatchDeleting(false);
+    toast(`🗑 Deleted ${done}/${ids.length}`);
   };
 
   const runEnrich = async (id: string, e: React.MouseEvent) => {
@@ -488,6 +516,11 @@ export default function ClientsPage(): React.ReactElement {
             style={{ background: "var(--brass-500)" }}>
             {batchEnriching ? "⟳ Scanning…" : `🔍 Scan ${selectedLeads.size} Lead${selectedLeads.size > 1 ? "s" : ""}`}
           </button>
+          <button onClick={runBatchDelete} disabled={batchDeleting}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-all"
+            style={{ background: "var(--coral-500)" }}>
+            {batchDeleting ? "⟳ Deleting…" : `🗑 Delete ${selectedLeads.size}`}
+          </button>
           <button onClick={() => setSelectedLeads(new Set())} className="text-xs font-semibold" style={{ color: "var(--navy-400)" }}>Clear</button>
         </div>
       )}
@@ -520,6 +553,7 @@ export default function ClientsPage(): React.ReactElement {
                 <th className="px-5 py-3 text-left text-[10px] font-semibold text-[var(--navy-400)] uppercase tracking-widest">Source</th>
                 <th className="px-5 py-3 text-center text-[10px] font-semibold text-[var(--navy-400)] uppercase tracking-widest w-16">Intel</th>
                 <th className="px-5 py-3 text-left text-[10px] font-semibold text-[var(--navy-400)] uppercase tracking-widest">Status</th>
+                <th className="px-3 py-3 w-10"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--sand-200)] dark:divide-[var(--navy-800)]">
@@ -583,6 +617,10 @@ export default function ClientsPage(): React.ReactElement {
                         ))}
                       </select>
                     </td>
+                    <td className="px-3 py-3.5 text-center" onClick={(e) => e.stopPropagation()}>
+                      <button onClick={(e) => deleteOne(c.id, e)} title="Delete lead"
+                        className="text-[var(--navy-300)] hover:text-[var(--coral-500)] transition text-sm">🗑</button>
+                    </td>
                   </tr>
                 );
               })}
@@ -608,6 +646,8 @@ export default function ClientsPage(): React.ReactElement {
                       <span className={`badge badge-${status}`}>
                         {status.toUpperCase()}
                       </span>
+                      <button onClick={(e) => deleteOne(c.id, e)} title="Delete lead"
+                        className="text-[var(--navy-300)] hover:text-[var(--coral-500)] text-sm ml-0.5">🗑</button>
                     </div>
                   </div>
                   {boat && <div className="text-xs text-[var(--navy-400)] mt-0.5">{boat}</div>}

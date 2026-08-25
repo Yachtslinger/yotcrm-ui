@@ -556,8 +556,16 @@ export async function deleteContact(id: string): Promise<boolean> {
   const db = getDb();
   try {
     const numId = Number(id);
+    const row = db.prepare("SELECT email FROM leads WHERE id = ?").get(numId) as { email?: string } | undefined;
     db.prepare("DELETE FROM boats WHERE lead_id = ?").run(numId);
     const result = db.prepare("DELETE FROM leads WHERE id = ?").run(numId);
+    // Tombstone the deletion so the local->Railway sync never re-adds this lead.
+    db.exec(`CREATE TABLE IF NOT EXISTS lead_deletions (id INTEGER PRIMARY KEY, email TEXT DEFAULT '', deleted_at TEXT NOT NULL)`);
+    db.prepare("INSERT OR REPLACE INTO lead_deletions (id, email, deleted_at) VALUES (?, ?, datetime('now'))")
+      .run(numId, (row?.email || "").trim().toLowerCase());
+    // Best-effort cleanup of related enrichment rows.
+    try { db.prepare("DELETE FROM enrichment_profiles WHERE lead_id = ?").run(numId); } catch { /* table may not exist */ }
+    try { db.prepare("DELETE FROM enrichment_sources WHERE lead_id = ?").run(numId); } catch { /* table may not exist */ }
     return result.changes > 0;
   } finally {
     db.close();
