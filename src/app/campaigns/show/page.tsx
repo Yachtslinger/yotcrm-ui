@@ -17,12 +17,27 @@ const lbl: React.CSSProperties = { fontSize: 11, letterSpacing: 1, color: MUTE, 
 const inp: React.CSSProperties = { width: "100%", padding: "9px 10px", border: `1px solid ${LINE}`, borderRadius: 7, fontSize: 13, boxSizing: "border-box", marginBottom: 8 };
 const btn = (bg: string, fg = "#fff"): React.CSSProperties => ({ background: bg, color: fg, border: "none", borderRadius: 7, padding: "9px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" });
 
+// Major international shows (official sites) — the ones worth blasting, not tiny regionals.
+const MAJOR_SHOWS: { name: string; url: string }[] = [
+  { name: "Cannes Yachting Festival", url: "https://www.cannesyachtingfestival.com/" },
+  { name: "Monaco Yacht Show", url: "https://www.monacoyachtshow.com/" },
+  { name: "Fort Lauderdale International Boat Show", url: "https://www.flibs.com/" },
+  { name: "Palm Beach International Boat Show", url: "https://www.pbboatshow.com/" },
+  { name: "Miami International Boat Show", url: "https://www.miamiboatshow.com/" },
+  { name: "Genoa International Boat Show", url: "https://www.salonenautico.com/en/" },
+  { name: "boot Düsseldorf", url: "https://www.boot.com/" },
+  { name: "Newport International Boat Show", url: "https://www.newportboatshow.com/" },
+  { name: "Dubai International Boat Show", url: "https://www.boatshowdubai.com/" },
+  { name: "Singapore Yacht Show", url: "https://www.singaporeyachtshow.com/" },
+];
+
 export default function NewShowCampaign() {
   const [draft, setDraft] = useState<Draft>(() => createShowDraft());
   const [busy, setBusy] = useState("");
   const [testEmail, setTestEmail] = useState("wn@denisonyachting.com");
   const [audience, setAudience] = useState<number | null>(null);
   const [wave, setWave] = useState(50);
+  const [showUrl, setShowUrl] = useState("");
   const [log, setLog] = useState<string[]>([]);
   const say = (m: string) => setLog(l => [new Date().toLocaleTimeString() + " — " + m, ...l].slice(0, 10));
 
@@ -54,6 +69,34 @@ export default function NewShowCampaign() {
     const d = await post("/api/campaign/send-group", { slug, type: "boatshow", group: "verified", draft: { ...draft, slug }, dryRun: true });
     if (d.ok) { setAudience(d.remainingInGroup); say(`${d.remainingInGroup} verified buyers eligible for this invite`); }
     else say("Audience check failed: " + (d.error || "?"));
+  }
+  async function autofill() {
+    const u = showUrl.trim();
+    if (!u) { say("Pick a show or paste its website URL first"); return; }
+    setBusy("Reading show website…");
+    try {
+      const d = await post("/api/campaign/scrape-show-info", { url: u });
+      if (!d || d.ok === false) { say("Couldn't read that page: " + (d?.error || "?")); setBusy(""); return; }
+      const patch: any = {};
+      if (d.name) patch.name = d.name;
+      if (d.dates) patch.dates = d.dates;
+      if (d.hours) patch.hours = d.hours;
+      const venueBits = [d.venue, d.city, d.country].filter(Boolean).join(", ");
+      if (venueBits) patch.venue = venueBits;
+      setDraft(dr => {
+        const nextName = patch.name || dr.show!.name;
+        return {
+          ...dr,
+          slug: dr.slug && dr.slug.length ? dr.slug : slugify(nextName),
+          subject: ((!dr.subject || dr.subject === "You're invited — join us at the show") && nextName) ? `You're invited — join us at the ${nextName}` : dr.subject,
+          linkUrl: dr.linkUrl || u,
+          show: { ...(dr.show as any), ...patch },
+        };
+      });
+      const got = ["name", "dates", "hours", "venue"].filter(k => (d as any)[k]).map(k => k).join(", ");
+      say(got ? `Auto-filled (${d._source}): ${got}. Review before sending.` : "Read the page but couldn't find show details — fill them in manually.");
+    } catch (e: any) { say("Error: " + e.message); }
+    setBusy("");
   }
   async function sendTest() {
     setBusy("Sending test…");
@@ -87,6 +130,18 @@ export default function NewShowCampaign() {
 
       <div style={{ display: "flex", gap: 18, alignItems: "flex-start", flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 380px", minWidth: 340 }}>
+          <div style={{ ...card, borderColor: ORANGE }}>
+            <label style={lbl}>Auto-fill from the show website</label>
+            <select style={inp} value="" onChange={e => { if (e.target.value) setShowUrl(e.target.value); }}>
+              <option value="">Pick a major show…</option>
+              {MAJOR_SHOWS.map(m => <option key={m.url} value={m.url}>{m.name}</option>)}
+            </select>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input style={{ ...inp, marginBottom: 0 }} placeholder="https://www.monacoyachtshow.com" value={showUrl} onChange={e => setShowUrl(e.target.value)} />
+              <button style={btn(ORANGE)} onClick={autofill} disabled={!!busy}>Auto-fill</button>
+            </div>
+            <div style={{ fontSize: 11, color: MUTE, marginTop: 6 }}>Pulls the show name, dates, hours, venue &amp; city. Always review before sending — your edits win.</div>
+          </div>
           <div style={card}>
             <label style={lbl}>Show name</label>
             <input style={inp} placeholder="Fort Lauderdale International Boat Show 2026" value={s.name} onChange={e => setName(e.target.value)} />
