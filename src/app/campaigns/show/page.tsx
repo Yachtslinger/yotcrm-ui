@@ -81,19 +81,24 @@ export default function NewShowCampaign() {
       if (d.name) patch.name = d.name;
       if (d.dates) patch.dates = d.dates;
       if (d.hours) patch.hours = d.hours;
+      if (d.tagline) patch.tagline = d.tagline;
+      if (d.about) patch.about = d.about;
+      if (Array.isArray(d.highlights) && d.highlights.length) patch.highlights = d.highlights;
+      if (d.officialUrl) patch.showUrl = d.officialUrl;
       const venueBits = [d.venue, d.city, d.country].filter(Boolean).join(", ");
       if (venueBits) patch.venue = venueBits;
       setDraft(dr => {
         const nextName = patch.name || dr.show!.name;
         return {
           ...dr,
+          heroUrl: dr.heroUrl || d.image || "",
           slug: dr.slug && dr.slug.length ? dr.slug : slugify(nextName),
           subject: ((!dr.subject || dr.subject === "You're invited — join us at the show") && nextName) ? `You're invited — join us at the ${nextName}` : dr.subject,
-          linkUrl: dr.linkUrl || u,
+          linkUrl: dr.linkUrl || d.officialUrl || u,
           show: { ...(dr.show as any), ...patch },
         };
       });
-      const got = ["name", "dates", "hours", "venue"].filter(k => (d as any)[k]).map(k => k).join(", ");
+      const got = ["name", "dates", "hours", "venue", "about", "highlights", "image"].filter(k => { const v = (d as any)[k]; return Array.isArray(v) ? v.length : v; }).join(", ");
       say(got ? `Auto-filled (${d._source}): ${got}. Review before sending.` : "Read the page but couldn't find show details — fill them in manually.");
     } catch (e: any) { say("Error: " + e.message); }
     setBusy("");
@@ -178,6 +183,15 @@ export default function NewShowCampaign() {
           <div style={card}>
             <label style={lbl}>Personal note (optional — your own line)</label>
             <textarea style={{ ...inp, height: 90, resize: "vertical" }} placeholder="If you've been circling the 80–110' range, this is the one week you can see them side by side…" value={s.personalNote || ""} onChange={e => upShow({ personalNote: e.target.value })} />
+          </div>
+
+          <div style={card}>
+            <label style={lbl}>About the show (auto-filled — editable)</label>
+            <textarea style={{ ...inp, height: 70, resize: "vertical" }} placeholder="A short description of the show…" value={s.about || ""} onChange={e => upShow({ about: e.target.value })} />
+            <label style={lbl}>Show highlights (one per line — auto-filled)</label>
+            <textarea style={{ ...inp, height: 82, resize: "vertical" }} placeholder={"560+ boats on display\nDedicated superyacht area"} value={(s.highlights || []).join("\n")} onChange={e => upShow({ highlights: e.target.value.split("\n").map(x => x.trim()).filter(Boolean) })} />
+            <label style={lbl}>Show website link (optional)</label>
+            <input style={inp} placeholder="https://www.monacoyachtshow.com" value={s.showUrl || ""} onChange={e => upShow({ showUrl: e.target.value })} />
           </div>
 
           <div style={card}>

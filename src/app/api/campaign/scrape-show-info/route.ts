@@ -1,13 +1,12 @@
 export const runtime = "nodejs";
 /**
  * scrape-show-info/route.ts
- * POST { url } -> pulls boat-show details from the show's website.
- * Strategy (best-first):
- *   1. schema.org Event JSON-LD (name / startDate / endDate / location)
- *   2. AI extraction over the visible page text (callAI, cheap tier)
- *   3. Regex extraction over page text
- *   4. DuckDuckGo search fallback if the site blocks us
- * Returns full fields; the user's manual edits always win in the final email.
+ * POST { url } -> pulls rich boat-show details from the show's website.
+ * Best-first: og/meta tags + schema.org Event JSON-LD (deterministic),
+ * then AI extraction over the page text, then regex, then DDG search fallback.
+ * Returns: name, dates, hours, venue, city, country, address, tagline, about,
+ *          highlights[], image, officialUrl, ticketUrl, edition, organizer, notes.
+ * The user's manual edits always win in the final email.
  */
 import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
@@ -15,7 +14,10 @@ import { callAI } from "@/lib/ai-client";
 
 interface ShowInfo {
   name?: string; dates?: string; hours?: string; venue?: string;
-  city?: string; country?: string; notes?: string;
+  city?: string; country?: string; address?: string;
+  tagline?: string; about?: string; highlights?: string[];
+  image?: string; officialUrl?: string; ticketUrl?: string;
+  edition?: string; organizer?: string; notes?: string;
 }
 
 const BROWSER_HEADERS = {
@@ -26,6 +28,11 @@ const BROWSER_HEADERS = {
   "Upgrade-Insecure-Requests": "1",
 };
 
+function abs(base: string, u?: string): string {
+  if (!u) return "";
+  try { return new URL(u, base).href; } catch { return u; }
+}
+
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 function fmtISO(iso: string): { label: string; year: number } | null {
   const d = new Date(iso);
@@ -35,25 +42,35 @@ function fmtISO(iso: string): { label: string; year: number } | null {
 function fmtRange(startISO?: string, endISO?: string): string {
   const a = startISO ? fmtISO(startISO) : null;
   const b = endISO ? fmtISO(endISO) : null;
-  if (a && b) {
-    if (a.year === b.year) return `${a.label} – ${b.label}, ${a.year}`;
-    return `${a.label}, ${a.year} – ${b.label}, ${b.year}`;
-  }
+  if (a && b) return a.year === b.year ? `${a.label} – ${b.label}, ${a.year}` : `${a.label}, ${a.year} – ${b.label}, ${b.year}`;
   if (a) return `${a.label}, ${a.year}`;
   return "";
 }
 
-// ── 1. schema.org Event JSON-LD ──────────────────────────────────────────────
-function extractJsonLd($: cheerio.CheerioAPI): ShowInfo {
+// ── og:/meta tags (deterministic) ────────────────────────────────────────────
+function extractMeta($: cheerio.CheerioAPI, base: string): ShowInfo {
   const out: ShowInfo = {};
-  const blocks = $('script[type="application/ld+json"]');
+  const img = $('meta[property="og:image"]').attr("content") || $('meta[name="twitter:image"]').attr("content");
+  if (img) out.image = abs(base, img);
+  const desc = $('meta[property="og:description"]').attr("content") || $('meta[name="description"]').attr("content");
+  if (desc) out.about = desc.trim();
+  const ttl = $('meta[property="og:title"]').attr("content");
+  if (ttl) out.name = ttl.trim();
+  const u = $('meta[property="og:url"]').attr("content") || $('link[rel="canonical"]').attr("href");
+  if (u) out.officialUrl = abs(base, u);
+  return out;
+}
+
+// ── schema.org Event JSON-LD (deterministic) ─────────────────────────────────
+function extractJsonLd($: cheerio.CheerioAPI, base: string): ShowInfo {
+  const out: ShowInfo = {};
   const candidates: any[] = [];
-  blocks.each((_, el) => {
+  $('script[type="application/ld+json"]').each((_, el) => {
     try {
       const parsed = JSON.parse($(el).contents().text());
       const arr = Array.isArray(parsed) ? parsed : (parsed["@graph"] ? parsed["@graph"] : [parsed]);
       for (const item of arr) candidates.push(item);
-    } catch { /* ignore malformed json-ld */ }
+    } catch { /* ignore */ }
   });
   const ev = candidates.find(c => {
     const t = c && c["@type"];
@@ -61,140 +78,142 @@ function extractJsonLd($: cheerio.CheerioAPI): ShowInfo {
   });
   if (!ev) return out;
   if (ev.name) out.name = String(ev.name).trim();
+  if (ev.description) out.about = String(ev.description).trim();
   const range = fmtRange(ev.startDate, ev.endDate);
   if (range) out.dates = range;
-  const loc = ev.location;
-  const locObj = Array.isArray(loc) ? loc[0] : loc;
-  if (locObj) {
-    if (locObj.name) out.venue = String(locObj.name).trim();
-    const addr = locObj.address;
+  if (ev.url) out.officialUrl = abs(base, String(ev.url));
+  const img = Array.isArray(ev.image) ? ev.image[0] : (ev.image && typeof ev.image === "object" ? ev.image.url : ev.image);
+  if (img) out.image = abs(base, String(img));
+  if (ev.organizer) out.organizer = String(typeof ev.organizer === "object" ? ev.organizer.name : ev.organizer).trim();
+  const loc = Array.isArray(ev.location) ? ev.location[0] : ev.location;
+  if (loc) {
+    if (loc.name) out.venue = String(loc.name).trim();
+    const addr = loc.address;
     if (addr && typeof addr === "object") {
       if (addr.addressLocality) out.city = String(addr.addressLocality).trim();
       if (addr.addressCountry) out.country = String(typeof addr.addressCountry === "object" ? addr.addressCountry.name : addr.addressCountry).trim();
-    } else if (typeof addr === "string") {
-      out.city = addr.trim();
-    }
+      const line = [addr.streetAddress, addr.addressLocality, addr.addressRegion, addr.postalCode].filter(Boolean).join(", ");
+      if (line) out.address = line;
+    } else if (typeof addr === "string") out.address = addr.trim();
   }
   return out;
 }
 
-// ── 2. AI extraction ─────────────────────────────────────────────────────────
+// ── AI extraction ────────────────────────────────────────────────────────────
 async function aiExtract(bodyText: string): Promise<ShowInfo> {
-  const text = bodyText.slice(0, 6000);
-  const prompt = `You are extracting details about a boat show / yacht show from webpage text.
-Return ONLY a JSON object (no prose, no markdown) with these string keys:
-"name","dates","hours","venue","city","country","notes".
+  const prompt = `You are extracting details about a major boat show / yacht show from webpage text.
+Return ONLY a JSON object (no prose, no markdown) with these keys:
+"name","dates","hours","venue","city","country","address","tagline","about","highlights","ticketUrl","officialUrl","edition","organizer".
 Rules:
-- "dates": the show's date range INCLUDING the year, human readable, e.g. "September 9 – 14, 2026". Use ONLY dates explicitly present in the text. If none, "".
-- "hours": daily opening hours if stated, e.g. "10:00 AM – 7:00 PM", else "".
-- "venue": the venue / marina / port name.
-- "city","country": location if present.
-- "notes": one short sentence on anything notable (e.g. superyacht area, new feature), else "".
-Do NOT invent or guess any value. Use "" when it is not clearly present in the text.
+- "dates": date range INCLUDING the year, human readable e.g. "September 9 – 14, 2026". Only dates explicitly in the text. Else "".
+- "hours": daily opening hours if stated e.g. "10:00 AM – 7:00 PM", else "".
+- "venue": venue / marina / port name. "address": full street address if present.
+- "tagline": a punchy one-line descriptor (<= 90 chars), else "".
+- "about": a 1–2 sentence description of the show, else "".
+- "highlights": array of up to 4 SHORT bullet strings of notable facts (e.g. "560+ boats on display", "Dedicated superyacht extension"), else [].
+- "edition": e.g. "33rd edition" if stated, else "". "organizer": if stated, else "".
+- "ticketUrl","officialUrl": absolute URLs if clearly present, else "".
+Do NOT invent or guess. Use "" (or [] for highlights) when not clearly present.
 
 TEXT:
-${text}`;
+${bodyText.slice(0, 7000)}`;
   try {
-    const raw = await callAI(prompt, 400, { tier: "cheap" });
+    const raw = await callAI(prompt, 600, { tier: "cheap" });
     const m = raw.match(/\{[\s\S]*\}/);
     if (!m) return {};
     const j = JSON.parse(m[0]);
-    const clean = (v: any) => (typeof v === "string" ? v.trim() : "");
+    const str = (v: any) => (typeof v === "string" ? v.trim() : "");
+    const arr = (v: any) => Array.isArray(v) ? v.map(x => String(x).trim()).filter(Boolean).slice(0, 4) : [];
     return {
-      name: clean(j.name), dates: clean(j.dates), hours: clean(j.hours),
-      venue: clean(j.venue), city: clean(j.city), country: clean(j.country), notes: clean(j.notes),
+      name: str(j.name), dates: str(j.dates), hours: str(j.hours), venue: str(j.venue),
+      city: str(j.city), country: str(j.country), address: str(j.address),
+      tagline: str(j.tagline), about: str(j.about), highlights: arr(j.highlights),
+      ticketUrl: str(j.ticketUrl), officialUrl: str(j.officialUrl),
+      edition: str(j.edition), organizer: str(j.organizer),
     };
   } catch { return {}; }
 }
 
-// ── 3. Regex extraction (fallback) ───────────────────────────────────────────
+// ── regex date/hours fallback ────────────────────────────────────────────────
 function regexExtract(bodyText: string): ShowInfo {
   const info: ShowInfo = {};
   const thisYear = new Date().getFullYear();
-  const datePatterns = [
+  const pats = [
     /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}[\s–\-–]+(?:(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+)?\d{1,2},?\s+\d{4}/gi,
     /\d{1,2}\s*[–\-–]\s*\d{1,2}\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}/gi,
   ];
-  const allMatches: { text: string; year: number }[] = [];
-  for (const pat of datePatterns) {
-    const re = new RegExp(pat.source, pat.flags);
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(bodyText)) !== null) {
-      const y = m[0].match(/\d{4}/);
-      if (y) allMatches.push({ text: m[0].trim(), year: parseInt(y[0]) });
-    }
+  const all: { text: string; year: number }[] = [];
+  for (const pat of pats) {
+    const re = new RegExp(pat.source, pat.flags); let m: RegExpExecArray | null;
+    while ((m = re.exec(bodyText)) !== null) { const y = m[0].match(/\d{4}/); if (y) all.push({ text: m[0].trim(), year: parseInt(y[0]) }); }
   }
-  if (allMatches.length) {
-    const future = allMatches.filter(m => m.year >= thisYear).sort((a, b) => a.year - b.year);
-    info.dates = (future.length ? future[0] : allMatches.sort((a, b) => b.year - a.year)[0]).text;
+  if (all.length) {
+    const fut = all.filter(m => m.year >= thisYear).sort((a, b) => a.year - b.year);
+    info.dates = (fut.length ? fut[0] : all.sort((a, b) => b.year - a.year)[0]).text;
   }
-  const hoursMatch = bodyText.match(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*(?:[–\-–]|to)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)/i);
-  if (hoursMatch) info.hours = hoursMatch[0].trim();
+  const h = bodyText.match(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*(?:[–\-–]|to)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)/i);
+  if (h) info.hours = h[0].trim();
   return info;
 }
 
-// ── 4. DuckDuckGo fallback when a site blocks us ─────────────────────────────
 async function searchDDG(showName: string): Promise<string> {
   const y = new Date().getFullYear();
-  const q = encodeURIComponent(`"${showName}" ${y} OR ${y + 1} dates schedule venue hours`);
+  const q = encodeURIComponent(`"${showName}" ${y} OR ${y + 1} dates venue hours`);
   try {
-    const res = await fetch(`https://html.duckduckgo.com/html/?q=${q}`, {
-      headers: { ...BROWSER_HEADERS, "Referer": "https://duckduckgo.com/" },
-      signal: AbortSignal.timeout(8000),
-    });
+    const res = await fetch(`https://html.duckduckgo.com/html/?q=${q}`, { headers: { ...BROWSER_HEADERS, Referer: "https://duckduckgo.com/" }, signal: AbortSignal.timeout(8000) });
     if (!res.ok) return "";
     const $ = cheerio.load(await res.text());
     return $(".result__snippet, .result__title").map((_, el) => $(el).text()).get().join(" ");
   } catch { return ""; }
 }
 
-function merge(...parts: ShowInfo[]): ShowInfo {
-  const out: ShowInfo = {};
-  for (const p of parts) for (const k of Object.keys(p) as (keyof ShowInfo)[]) {
-    if (!out[k] && p[k]) out[k] = p[k];
-  }
-  return out;
-}
+function pick(...vals: (string | undefined)[]): string { for (const v of vals) if (v && v.trim()) return v.trim(); return ""; }
 
 export async function POST(req: NextRequest) {
   const { url } = await req.json();
-  if (!url || typeof url !== "string") {
-    return NextResponse.json({ ok: false, error: "url required" }, { status: 400 });
-  }
+  if (!url || typeof url !== "string") return NextResponse.json({ ok: false, error: "url required" }, { status: 400 });
 
-  let source = "direct";
-  let bodyText = "";
-  let jsonld: ShowInfo = {};
+  let source = "direct", bodyText = "", meta: ShowInfo = {}, jsonld: ShowInfo = {};
   try {
     const res = await fetch(url, { headers: BROWSER_HEADERS, redirect: "follow", signal: AbortSignal.timeout(12000) });
     if (res.ok) {
-      const $ = cheerio.load(await res.text());
-      jsonld = extractJsonLd($);
-      $("script, style, nav, footer, header, noscript, iframe").remove();
+      const html = await res.text();
+      const $ = cheerio.load(html);
+      meta = extractMeta($, url);
+      jsonld = extractJsonLd($, url);
+      $("script, style, nav, footer, header, noscript, iframe, svg").remove();
       bodyText = $("body").text().replace(/\s+/g, " ").trim();
     }
-  } catch { /* fall through to search */ }
+  } catch { /* fall through */ }
 
   if (bodyText.length < 400) {
     const host = (() => { try { return new URL(url).hostname.replace(/^www\./, "").replace(/\.[a-z.]+$/i, "").replace(/[^a-z]/gi, " ").trim(); } catch { return ""; } })();
-    const searchText = await searchDDG(host);
-    if (searchText) { bodyText = searchText; source = "search"; }
+    const t = await searchDDG(host);
+    if (t) { bodyText = t; source = "search"; }
   }
 
   const ai = bodyText ? await aiExtract(bodyText) : {};
   const rx = bodyText ? regexExtract(bodyText) : {};
-  const info = merge(jsonld, ai, rx);
 
-  return NextResponse.json({
+  const out = {
     ok: true,
-    name: info.name || "",
-    dates: info.dates || "",
-    hours: info.hours || "",
-    venue: info.venue || "",
-    city: info.city || "",
-    country: info.country || "",
-    notes: info.notes || "",
+    name: pick(jsonld.name, ai.name, meta.name),
+    dates: pick(jsonld.dates, ai.dates, rx.dates),
+    hours: pick(ai.hours, rx.hours),
+    venue: pick(jsonld.venue, ai.venue),
+    city: pick(jsonld.city, ai.city),
+    country: pick(jsonld.country, ai.country),
+    address: pick(jsonld.address, ai.address),
+    tagline: pick(ai.tagline),
+    about: pick(ai.about, jsonld.about, meta.about),
+    highlights: (ai.highlights && ai.highlights.length ? ai.highlights : []),
+    image: pick(jsonld.image, meta.image),
+    officialUrl: pick(jsonld.officialUrl, ai.officialUrl, meta.officialUrl, url),
+    ticketUrl: pick(ai.ticketUrl),
+    edition: pick(ai.edition),
+    organizer: pick(jsonld.organizer, ai.organizer),
     _source: source,
     _sawText: bodyText.length > 0,
-  });
+  };
+  return NextResponse.json(out);
 }

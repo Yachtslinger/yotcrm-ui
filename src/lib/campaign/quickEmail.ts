@@ -36,6 +36,7 @@ export type ShowInfo = {
   name: string; tagline?: string; dates: string; hours?: string;
   venue: string; ourLocation?: string; rsvpUrl?: string;
   eyebrow?: string; personalNote?: string;
+  about?: string; highlights?: string[]; showUrl?: string;
   featured?: ShowFeaturedYacht[];
 };
 
@@ -234,6 +235,17 @@ export function buildShowInviteFromDraft(dr: Draft, toEmail: string) {
   const note = (s.personalNote && s.personalNote.trim())
     ? `<tr><td style="padding:0 34px 4px;color:${INK};font-size:14px;line-height:1.75;font-family:Georgia,'Times New Roman',serif">${esc(s.personalNote)}</td></tr>`
     : "";
+  const about = (s.about && s.about.trim())
+    ? `<tr><td style="padding:0 34px 10px;color:${INK};font-size:13px;line-height:1.7;font-family:Georgia,'Times New Roman',serif">${esc(s.about)}</td></tr>`
+    : "";
+  const hl = (s.highlights || []).filter(x => x && String(x).trim());
+  const highlightsBlock = hl.length ? `<tr><td style="padding:2px 34px 10px">
+    <div style="color:${NAVY};font-size:12px;letter-spacing:2px;font-weight:bold;font-family:Arial,Helvetica,sans-serif;padding-bottom:6px">SHOW HIGHLIGHTS</div>
+    ${hl.map(x => `<div style="color:${INK};font-size:13px;line-height:1.7;padding:2px 0;font-family:Arial,Helvetica,sans-serif"><span style="color:${ORANGE}">&bull;</span> ${esc(x)}</div>`).join("")}
+  </td></tr>` : "";
+  const showLink = (s.showUrl && s.showUrl.trim())
+    ? `<div style="margin-top:8px"><a href="${esc(s.showUrl)}" style="color:${NAVY};font-size:12px;font-family:Arial,Helvetica,sans-serif">Visit the show website &rsaquo;</a></div>`
+    : "";
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;background:#eef2f6;font-family:Georgia,'Times New Roman',serif">
@@ -249,13 +261,16 @@ export function buildShowInviteFromDraft(dr: Draft, toEmail: string) {
   <tr><td style="padding:16px 34px 6px;color:${INK};font-size:14px;line-height:1.8">
     The ${esc(s.name || "show")} is almost here — and we'd love to see you there. If you're planning to come, or thinking about it, let's set aside time to walk a few boats together, away from the crowds. Tell us what you're looking for and we'll line it up.
   </td></tr>
+  ${about}
   ${note}
   <tr><td style="padding:10px 30px 16px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${NAVY}" style="background:${NAVY};border-radius:6px">
     <tr><td style="padding:6px 20px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${details}</table></td></tr>
   </table></td></tr>
+  ${highlightsBlock}
   <tr><td align="center" style="padding:2px 30px 10px">
     <a href="${esc(rsvp)}" style="background:${ORANGE};color:#fff;text-decoration:none;font-size:14px;padding:14px 40px;border-radius:5px;display:inline-block;font-weight:bold;font-family:Arial,Helvetica,sans-serif">RSVP / Reserve a time to meet</a>
     <div style="color:${MUTE};font-size:12px;margin-top:10px;font-family:Arial,Helvetica,sans-serif">Or just reply to this email and we'll hold a time for you.</div>
+    ${showLink}
   </td></tr>
   ${featuredBlock}
   ${brokersRows}
