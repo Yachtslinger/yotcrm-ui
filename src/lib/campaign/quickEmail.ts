@@ -10,8 +10,8 @@ export const BANNERS: Record<string, string> = {
   newsletter: "FEATURED LISTING", sold: "SOLD", openday: "OPEN FOR INSPECTION",
 };
 export const SUBJECTS: Record<string, (n: string, p: string) => string> = {
-  newlisting: (n, p) => `Just Listed: ${n}${p ? ` — ${p}` : ""}`,
-  pricedrop:  (n, p) => `Price Reduced: ${n}${p ? ` — now ${p}` : ""}`,
+  newlisting: (n, p) => `Just Listed: ${n}${p ? `, ${p}` : ""}`,
+  pricedrop:  (n, p) => `Price Reduced: ${n}${p ? `, now ${p}` : ""}`,
   newsletter: (n) => `Featured: ${n}`,
   sold:       (n) => `Sold: ${n}`,
   openday:    (n) => `Inspect ${n}`,
@@ -31,7 +31,7 @@ export type Draft = {
   show?: ShowInfo;
 };
 
-export type ShowFeaturedYacht = { label: string; url?: string };
+export type ShowFeaturedYacht = { label: string; url?: string; tag?: string };
 export type ShowInfo = {
   name: string; tagline?: string; dates: string; hours?: string;
   venue: string; ourLocation?: string; rsvpUrl?: string;
@@ -180,7 +180,7 @@ export function buildEmail(slug: string, type: string, vessel: any, toEmail: str
 export function createShowDraft(): Draft {
   return {
     slug: "", type: "boatshow", kind: "boatshow", bannerText: "YOU'RE INVITED",
-    subject: "You're invited — join us at the show",
+    subject: "You're invited: join us at the show",
     headline: "", specLine: "", location: "", price: "",
     description: "", heroUrl: "", linkUrl: "",
     gallery: [], specs: [], features: [], buttons: [],
@@ -211,10 +211,19 @@ export function buildShowInviteFromDraft(dr: Draft, toEmail: string) {
   const details = [detail("Dates", s.dates), detail("Hours", s.hours), detail("Venue", s.venue), detail("Find us", s.ourLocation)].join("");
 
   const feats = (s.featured || []).filter(f => f && f.label && f.label.trim());
-  const featuredBlock = feats.length ? `<tr><td style="padding:6px 34px 10px">
-    <div style="color:${NAVY};font-size:12px;letter-spacing:2px;font-weight:bold;font-family:Arial,Helvetica,sans-serif;padding-bottom:6px">ON DISPLAY</div>
-    ${feats.map(f => { const label = esc(f.label); const inner = (f.url && f.url.trim()) ? `<a href="${esc(f.url)}" style="color:${NAVY};text-decoration:none;font-weight:bold">${label} &rsaquo;</a>` : `<span style="color:${INK}">${label}</span>`;
-      return `<div style="font-size:13px;line-height:1.7;padding:4px 0;border-bottom:1px solid ${LINE};font-family:Arial,Helvetica,sans-serif">${inner}</div>`; }).join("")}
+  const chip = (t?: string) => {
+    const tag = (t || "").trim();
+    if (!tag) return "";
+    const isNew = tag.toLowerCase().includes("new");
+    const bg = isNew ? NAVY : ORANGE;
+    const fg = isNew ? "#ffffff" : "#0b1f3a";
+    return `<span style="display:inline-block;background:${bg};color:${fg};font-size:10px;font-weight:bold;letter-spacing:1px;padding:2px 7px;border-radius:3px;margin-right:9px;font-family:Arial,Helvetica,sans-serif">${esc(tag.toUpperCase())}</span>`;
+  };
+  const featuredBlock = feats.length ? `<tr><td style="padding:6px 34px 12px">
+    <div style="color:${ORANGE};font-size:11px;letter-spacing:2px;font-weight:bold;font-family:Arial,Helvetica,sans-serif">EXCLUSIVELY REPRESENTED BY US</div>
+    <div style="color:${NAVY};font-size:15px;font-weight:bold;font-family:Arial,Helvetica,sans-serif;padding:2px 0 8px">New construction &amp; brokerage on display</div>
+    ${feats.map(f => { const label = esc(f.label); const nameHtml = (f.url && f.url.trim()) ? `<a href="${esc(f.url)}" style="color:${NAVY};text-decoration:none;font-weight:bold">${label} &rsaquo;</a>` : `<span style="color:${INK};font-weight:bold">${label}</span>`;
+      return `<div style="font-size:13px;line-height:1.9;padding:5px 0;border-bottom:1px solid ${LINE};font-family:Arial,Helvetica,sans-serif">${chip(f.tag)}${nameHtml}</div>`; }).join("")}
   </td></tr>` : "";
 
   const brokersRows = (dr.brokers && dr.brokers.length ? dr.brokers : DEFAULT_BROKERS.slice(0, 1))
@@ -259,7 +268,7 @@ export function buildShowInviteFromDraft(dr: Draft, toEmail: string) {
     ${s.tagline ? `<div style="color:#64748b;font-size:13px;margin-top:8px;font-family:Arial,Helvetica,sans-serif">${esc(s.tagline)}</div>` : ""}
   </td></tr>
   <tr><td style="padding:16px 34px 6px;color:${INK};font-size:14px;line-height:1.8">
-    The ${esc(s.name || "show")} is almost here — and we'd love to see you there. If you're planning to come, or thinking about it, let's set aside time to walk a few boats together, away from the crowds. Tell us what you're looking for and we'll line it up.
+    The ${esc(s.name || "show")} is almost here, and we'd love to see you there. If you're planning to come, or thinking about it, let's set aside time to walk a few boats together, away from the crowds. Tell us what you're looking for and we'll line it up.
   </td></tr>
   ${about}
   ${note}

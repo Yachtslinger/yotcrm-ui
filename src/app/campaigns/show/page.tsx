@@ -17,7 +17,7 @@ const lbl: React.CSSProperties = { fontSize: 11, letterSpacing: 1, color: MUTE, 
 const inp: React.CSSProperties = { width: "100%", padding: "9px 10px", border: `1px solid ${LINE}`, borderRadius: 7, fontSize: 13, boxSizing: "border-box", marginBottom: 8 };
 const btn = (bg: string, fg = "#fff"): React.CSSProperties => ({ background: bg, color: fg, border: "none", borderRadius: 7, padding: "9px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" });
 
-// Major international shows (official sites) — the ones worth blasting, not tiny regionals.
+// Major international shows (official sites) - the ones worth blasting, not tiny regionals.
 const MAJOR_SHOWS: { name: string; url: string }[] = [
   { name: "Cannes Yachting Festival", url: "https://www.cannesyachtingfestival.com/" },
   { name: "Monaco Yacht Show", url: "https://www.monacoyachtshow.com/" },
@@ -39,7 +39,7 @@ export default function NewShowCampaign() {
   const [wave, setWave] = useState(50);
   const [showUrl, setShowUrl] = useState("");
   const [log, setLog] = useState<string[]>([]);
-  const say = (m: string) => setLog(l => [new Date().toLocaleTimeString() + " — " + m, ...l].slice(0, 10));
+  const say = (m: string) => setLog(l => [new Date().toLocaleTimeString() + " - " + m, ...l].slice(0, 10));
 
   const up = (patch: Partial<Draft>) => setDraft(d => ({ ...d, ...patch }));
   const upShow = (patch: Partial<NonNullable<Draft["show"]>>) => setDraft(d => ({ ...d, show: { ...(d.show as any), ...patch } }));
@@ -49,14 +49,14 @@ export default function NewShowCampaign() {
     setDraft(d => ({
       ...d,
       slug: d.slug && d.slug.length ? d.slug : slugify(name),
-      subject: (!d.subject || d.subject === "You're invited — join us at the show") ? `You're invited — join us at the ${name}` : d.subject,
+      subject: (!d.subject || d.subject === "You're invited: join us at the show") ? `You're invited: join us at the ${name}` : d.subject,
       show: { ...(d.show as any), name },
     }));
   }
 
   const feats = s.featured || [];
   function addFeat() { upShow({ featured: [...feats, { label: "", url: "" }] }); }
-  function setFeat(i: number, k: "label" | "url", v: string) { const f = feats.map(x => ({ ...x })); (f[i] as any)[k] = v; upShow({ featured: f }); }
+  function setFeat(i: number, k: "label" | "url" | "tag", v: string) { const f = feats.map(x => ({ ...x })); (f[i] as any)[k] = v; upShow({ featured: f }); }
   function delFeat(i: number) { upShow({ featured: feats.filter((_, j) => j !== i) }); }
   function toggleBroker(b: typeof DEFAULT_BROKERS[0]) {
     const has = draft.brokers.some(x => x.email === b.email);
@@ -93,13 +93,13 @@ export default function NewShowCampaign() {
           ...dr,
           heroUrl: dr.heroUrl || d.image || "",
           slug: dr.slug && dr.slug.length ? dr.slug : slugify(nextName),
-          subject: ((!dr.subject || dr.subject === "You're invited — join us at the show") && nextName) ? `You're invited — join us at the ${nextName}` : dr.subject,
+          subject: ((!dr.subject || dr.subject === "You're invited: join us at the show") && nextName) ? `You're invited: join us at the ${nextName}` : dr.subject,
           linkUrl: dr.linkUrl || d.officialUrl || u,
           show: { ...(dr.show as any), ...patch },
         };
       });
       const got = ["name", "dates", "hours", "venue", "about", "highlights", "image"].filter(k => { const v = (d as any)[k]; return Array.isArray(v) ? v.length : v; }).join(", ");
-      say(got ? `Auto-filled (${d._source}): ${got}. Review before sending.` : "Read the page but couldn't find show details — fill them in manually.");
+      say(got ? `Auto-filled (${d._source}): ${got}. Review before sending.` : "Read the page but couldn't find show details - fill them in manually.");
     } catch (e: any) { say("Error: " + e.message); }
     setBusy("");
   }
@@ -145,7 +145,7 @@ export default function NewShowCampaign() {
               <input style={{ ...inp, marginBottom: 0 }} placeholder="https://www.monacoyachtshow.com" value={showUrl} onChange={e => setShowUrl(e.target.value)} />
               <button style={btn(ORANGE)} onClick={autofill} disabled={!!busy}>Auto-fill</button>
             </div>
-            <div style={{ fontSize: 11, color: MUTE, marginTop: 6 }}>Pulls the show name, dates, hours, venue &amp; city. Always review before sending — your edits win.</div>
+            <div style={{ fontSize: 11, color: MUTE, marginTop: 6 }}>Pulls the show name, dates, hours, venue &amp; city. Always review before sending - your edits win.</div>
           </div>
           <div style={card}>
             <label style={lbl}>Show name</label>
@@ -156,7 +156,7 @@ export default function NewShowCampaign() {
             <input style={inp} value={s.eyebrow || ""} onChange={e => upShow({ eyebrow: e.target.value })} />
             <label style={lbl}>Subject line</label>
             <input style={inp} value={draft.subject} onChange={e => up({ subject: e.target.value })} />
-            <label style={lbl}>Slug (used to track who was sent — keep unique per show)</label>
+            <label style={lbl}>Slug (used to track who was sent - keep unique per show)</label>
             <input style={inp} value={draft.slug} onChange={e => up({ slug: slugify(e.target.value) })} placeholder="flibs-2026" />
           </div>
 
@@ -168,7 +168,7 @@ export default function NewShowCampaign() {
             <label style={lbl}>Venue</label>
             <input style={inp} placeholder="Bahia Mar Yachting Center, Fort Lauderdale, FL" value={s.venue} onChange={e => upShow({ venue: e.target.value })} />
             <label style={lbl}>Where to find you (booth / slip)</label>
-            <input style={inp} placeholder="Superyacht Village — Slip 812" value={s.ourLocation || ""} onChange={e => upShow({ ourLocation: e.target.value })} />
+            <input style={inp} placeholder="Superyacht Village - Slip 812" value={s.ourLocation || ""} onChange={e => upShow({ ourLocation: e.target.value })} />
           </div>
 
           <div style={card}>
@@ -176,30 +176,36 @@ export default function NewShowCampaign() {
             <input style={inp} placeholder="https://…/show-photo.jpg" value={draft.heroUrl} onChange={e => up({ heroUrl: e.target.value })} />
             <label style={lbl}>Hero click-through (optional)</label>
             <input style={inp} placeholder="https://www.denisonyachting.com/…" value={draft.linkUrl || ""} onChange={e => up({ linkUrl: e.target.value })} />
-            <label style={lbl}>RSVP link (optional — a scheduler URL; leave blank to use built-in RSVP)</label>
+            <label style={lbl}>RSVP link (optional - a scheduler URL; leave blank to use built-in RSVP)</label>
             <input style={inp} placeholder="https://calendly.com/…" value={s.rsvpUrl || ""} onChange={e => upShow({ rsvpUrl: e.target.value })} />
           </div>
 
           <div style={card}>
-            <label style={lbl}>Personal note (optional — your own line)</label>
+            <label style={lbl}>Personal note (optional - your own line)</label>
             <textarea style={{ ...inp, height: 90, resize: "vertical" }} placeholder="If you've been circling the 80–110' range, this is the one week you can see them side by side…" value={s.personalNote || ""} onChange={e => upShow({ personalNote: e.target.value })} />
           </div>
 
           <div style={card}>
-            <label style={lbl}>About the show (auto-filled — editable)</label>
+            <label style={lbl}>About the show (auto-filled - editable)</label>
             <textarea style={{ ...inp, height: 70, resize: "vertical" }} placeholder="A short description of the show…" value={s.about || ""} onChange={e => upShow({ about: e.target.value })} />
-            <label style={lbl}>Show highlights (one per line — auto-filled)</label>
+            <label style={lbl}>Show highlights (one per line - auto-filled)</label>
             <textarea style={{ ...inp, height: 82, resize: "vertical" }} placeholder={"560+ boats on display\nDedicated superyacht area"} value={(s.highlights || []).join("\n")} onChange={e => upShow({ highlights: e.target.value.split("\n").map(x => x.trim()).filter(Boolean) })} />
             <label style={lbl}>Show website link (optional)</label>
             <input style={inp} placeholder="https://www.monacoyachtshow.com" value={s.showUrl || ""} onChange={e => upShow({ showUrl: e.target.value })} />
           </div>
 
           <div style={card}>
-            <label style={lbl}>Yachts on display (optional)</label>
+            <label style={lbl}>Yachts on display, exclusively represented by us</label>
+            <div style={{ fontSize: 11, color: MUTE, marginBottom: 8 }}>Tag each as New Construction or Brokerage. Shown in the email under &ldquo;Exclusively represented by us.&rdquo;</div>
             {feats.map((f, i) => (
-              <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                <input style={{ ...inp, marginBottom: 0, flex: 2 }} placeholder="M/Y Serenity — 112' Westport" value={f.label} onChange={e => setFeat(i, "label", e.target.value)} />
-                <input style={{ ...inp, marginBottom: 0, flex: 2 }} placeholder="https://… (optional)" value={f.url || ""} onChange={e => setFeat(i, "url", e.target.value)} />
+              <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+                <select style={{ ...inp, marginBottom: 0, width: 130 }} value={f.tag || ""} onChange={e => setFeat(i, "tag", e.target.value)}>
+                  <option value="">Type…</option>
+                  <option value="New">New Construction</option>
+                  <option value="Brokerage">Brokerage</option>
+                </select>
+                <input style={{ ...inp, marginBottom: 0, flex: 2, minWidth: 150 }} placeholder="M/Y Serenity, 112' Westport" value={f.label} onChange={e => setFeat(i, "label", e.target.value)} />
+                <input style={{ ...inp, marginBottom: 0, flex: 2, minWidth: 150 }} placeholder="Listing link (optional)" value={f.url || ""} onChange={e => setFeat(i, "url", e.target.value)} />
                 <button style={btn("#f1f5f9", "#991b1b")} onClick={() => delFeat(i)}>✕</button>
               </div>
             ))}
@@ -211,7 +217,7 @@ export default function NewShowCampaign() {
             {DEFAULT_BROKERS.map(b => (
               <label key={b.email} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginBottom: 6 }}>
                 <input type="checkbox" checked={draft.brokers.some(x => x.email === b.email)} onChange={() => toggleBroker(b)} />
-                {b.name} — {b.email}
+                {b.name} - {b.email}
               </label>
             ))}
           </div>
@@ -224,7 +230,7 @@ export default function NewShowCampaign() {
             </div>
             <label style={lbl}>2 · Send to verified buyers</label>
             <div style={{ fontSize: 14, marginBottom: 6 }}>
-              Eligible now: <strong style={{ color: NAVY }}>{audience == null ? "—" : audience}</strong>
+              Eligible now: <strong style={{ color: NAVY }}>{audience == null ? "-" : audience}</strong>
               &nbsp; <button onClick={refreshAudience} style={{ ...btn("#f1f5f9", NAVY), padding: "4px 10px", fontSize: 12 }}>Check audience</button>
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
