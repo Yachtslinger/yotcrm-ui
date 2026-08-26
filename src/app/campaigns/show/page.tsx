@@ -38,6 +38,7 @@ export default function NewShowCampaign() {
   const [audience, setAudience] = useState<number | null>(null);
   const [wave, setWave] = useState(50);
   const [showUrl, setShowUrl] = useState("");
+  const [yachtUrls, setYachtUrls] = useState("");
   const [log, setLog] = useState<string[]>([]);
   const say = (m: string) => setLog(l => [new Date().toLocaleTimeString() + " - " + m, ...l].slice(0, 10));
 
@@ -58,6 +59,30 @@ export default function NewShowCampaign() {
   function addFeat() { upShow({ featured: [...feats, { label: "", url: "" }] }); }
   function setFeat(i: number, k: "label" | "url" | "tag", v: string) { const f = feats.map(x => ({ ...x })); (f[i] as any)[k] = v; upShow({ featured: f }); }
   function delFeat(i: number) { upShow({ featured: feats.filter((_, j) => j !== i) }); }
+  async function addFromLinks() {
+    const urls = yachtUrls.split(/[\s,]+/).map(u => u.trim()).filter(u => /^https?:\/\//.test(u));
+    if (!urls.length) { say("Paste one or more listing links first"); return; }
+    setBusy(`Reading ${urls.length} listing${urls.length > 1 ? "s" : ""}...`);
+    const added: { label: string; url: string; tag: string }[] = [];
+    for (const u of urls) {
+      let label = "";
+      try {
+        const d = await post("/api/brochures/preview", { url: u });
+        const v = d && d.vessel;
+        if (d && d.ok && v) {
+          const nm = (v.name && String(v.name).trim()) ? String(v.name).trim() : "";
+          const spec = [v.year, v.builder || v.make, v.model].map((x: any) => x && String(x).trim()).filter(Boolean).join(" ");
+          label = nm ? (v.loa && !nm.includes(String(v.loa)) ? `${nm}, ${v.loa}` : nm) : spec;
+        }
+      } catch { /* keep url, blank label */ }
+      added.push({ label, url: u, tag: "" });
+    }
+    upShow({ featured: [...feats, ...added] });
+    setYachtUrls("");
+    const named = added.filter(a => a.label).length;
+    say(`Added ${added.length} yacht${added.length > 1 ? "s" : ""} (${named} auto-named). Set New/Brokerage on each.`);
+    setBusy("");
+  }
   function toggleBroker(b: typeof DEFAULT_BROKERS[0]) {
     const has = draft.brokers.some(x => x.email === b.email);
     up({ brokers: has ? draft.brokers.filter(x => x.email !== b.email) : [...draft.brokers, b] });
@@ -196,7 +221,9 @@ export default function NewShowCampaign() {
 
           <div style={card}>
             <label style={lbl}>Yachts on display, exclusively represented by us</label>
-            <div style={{ fontSize: 11, color: MUTE, marginBottom: 8 }}>Tag each as New Construction or Brokerage. Shown in the email under &ldquo;Exclusively represented by us.&rdquo;</div>
+            <div style={{ fontSize: 11, color: MUTE, marginBottom: 8 }}>Drop in listing links below and click Pull. Names fill in automatically. Then tag each as New Construction or Brokerage. Shown in the email under &ldquo;Exclusively represented by us.&rdquo;</div>
+            <textarea style={{ ...inp, height: 62, resize: "vertical" }} placeholder="Paste one or more listing links (one per line)" value={yachtUrls} onChange={e => setYachtUrls(e.target.value)} />
+            <button style={{ ...btn(ORANGE), marginBottom: 12 }} onClick={addFromLinks} disabled={!!busy}>Pull from links</button>
             {feats.map((f, i) => (
               <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
                 <select style={{ ...inp, marginBottom: 0, width: 130 }} value={f.tag || ""} onChange={e => setFeat(i, "tag", e.target.value)}>
