@@ -11,6 +11,7 @@ export const runtime = "nodejs";
 import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 import { callAI } from "@/lib/ai-client";
+import { stealthFetch } from "@/lib/campaign/providers/stealthFetch";
 
 interface ShowInfo {
   name?: string; dates?: string; hours?: string; venue?: string;
@@ -135,23 +136,27 @@ ${bodyText.slice(0, 7000)}`;
 }
 
 // ── regex date/hours fallback ────────────────────────────────────────────────
+const MONTHS_ABBR: Record<string, string> = {
+  jan: "January", feb: "February", mar: "March", apr: "April", may: "May", jun: "June",
+  jul: "July", aug: "August", sep: "September", sept: "September", oct: "October", nov: "November", dec: "December",
+};
+function monthFull(m: string): string {
+  const k = m.toLowerCase().replace(/\.$/, "");
+  return MONTHS_ABBR[k] || MONTHS_ABBR[k.slice(0, 4)] || MONTHS_ABBR[k.slice(0, 3)] || (m.charAt(0).toUpperCase() + m.slice(1));
+}
+
 function regexExtract(bodyText: string): ShowInfo {
   const info: ShowInfo = {};
-  const thisYear = new Date().getFullYear();
-  const pats = [
-    /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}[\s–\-–]+(?:(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+)?\d{1,2},?\s+\d{4}/gi,
-    /\d{1,2}\s*[–\-–]\s*\d{1,2}\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}/gi,
-  ];
-  const all: { text: string; year: number }[] = [];
-  for (const pat of pats) {
-    const re = new RegExp(pat.source, pat.flags); let m: RegExpExecArray | null;
-    while ((m = re.exec(bodyText)) !== null) { const y = m[0].match(/\d{4}/); if (y) all.push({ text: m[0].trim(), year: parseInt(y[0]) }); }
+  const monthTok = "(?:jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z\\u00e9\\u00fb\\u00e0]*\\.?";
+  // "8 -13 sept. 2026"  |  "8-13 September 2026"  (day-day month year)
+  let m = bodyText.match(new RegExp("\\b(\\d{1,2})\\s*[\\u2013\\u2014\\-]\\s*(\\d{1,2})\\s+(" + monthTok + ")\\s+(\\d{4})", "i"));
+  if (m) info.dates = monthFull(m[3]) + " " + parseInt(m[1]) + " to " + parseInt(m[2]) + ", " + m[4];
+  // "September 8 - 13, 2026"  |  "October 30 - November 3, 2026"  (month first)
+  if (!info.dates) {
+    m = bodyText.match(new RegExp("\\b(" + monthTok + ")\\s+(\\d{1,2})\\s*[\\u2013\\u2014\\-]\\s*(?:(" + monthTok + ")\\s+)?(\\d{1,2}),?\\s+(\\d{4})", "i"));
+    if (m) info.dates = monthFull(m[1]) + " " + parseInt(m[2]) + " to " + (m[3] ? monthFull(m[3]) + " " : "") + parseInt(m[4]) + ", " + m[5];
   }
-  if (all.length) {
-    const fut = all.filter(m => m.year >= thisYear).sort((a, b) => a.year - b.year);
-    info.dates = (fut.length ? fut[0] : all.sort((a, b) => b.year - a.year)[0]).text;
-  }
-  const h = bodyText.match(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*(?:[–\-–]|to)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)/i);
+  const h = bodyText.match(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*(?:[–—\-]|to)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)/i);
   if (h) info.hours = h[0].trim();
   return info;
 }
@@ -185,6 +190,22 @@ export async function POST(req: NextRequest) {
       bodyText = $("body").text().replace(/\s+/g, " ").trim();
     }
   } catch { /* fall through */ }
+
+  // If the static HTML gave us no usable dates (JS-rendered or bot-blocked),
+  // render the page in a real browser and re-parse.
+  if (!jsonld.dates && !regexExtract(bodyText).dates) {
+    try {
+      const rendered = await stealthFetch(url);
+      if (rendered && rendered.length > 500) {
+        const $$ = cheerio.load(rendered);
+        jsonld = { ...extractJsonLd($$, url), ...jsonld };
+        meta = { ...extractMeta($$, url), ...meta };
+        $$("script, style, nav, footer, header, noscript, iframe, svg").remove();
+        const bt2 = $$("body").text().replace(/\s+/g, " ").trim();
+        if (bt2.length > bodyText.length) { bodyText = bt2; source = "rendered"; }
+      }
+    } catch { /* stealth optional */ }
+  }
 
   if (bodyText.length < 400) {
     const host = (() => { try { return new URL(url).hostname.replace(/^www\./, "").replace(/\.[a-z.]+$/i, "").replace(/[^a-z]/gi, " ").trim(); } catch { return ""; } })();
