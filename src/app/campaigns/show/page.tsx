@@ -56,6 +56,10 @@ export default function NewShowCampaign() {
   }
 
   const feats = s.featured || [];
+  const heros = s.heroImages || [];
+  function addHeroImg() { upShow({ heroImages: [...heros, ""] }); }
+  function setHeroImg(i: number, v: string) { const a = [...heros]; a[i] = v; upShow({ heroImages: a }); }
+  function delHeroImg(i: number) { upShow({ heroImages: heros.filter((_, j) => j !== i) }); }
   function addFeat() { upShow({ featured: [...feats, { label: "", url: "" }] }); }
   function setFeat(i: number, k: "label" | "url" | "tag" | "year" | "price", v: string) { const f = feats.map(x => ({ ...x })); (f[i] as any)[k] = v; upShow({ featured: f }); }
   function delFeat(i: number) { upShow({ featured: feats.filter((_, j) => j !== i) }); }
@@ -203,6 +207,14 @@ export default function NewShowCampaign() {
           <div style={card}>
             <label style={lbl}>Hero image URL</label>
             <input style={inp} placeholder="https://…/show-photo.jpg" value={draft.heroUrl} onChange={e => up({ heroUrl: e.target.value })} />
+            <label style={lbl}>More hero images (optional, stack under the main one)</label>
+            {heros.map((u, i) => (
+              <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                <input style={{ ...inp, marginBottom: 0, flex: 1 }} placeholder="https://…/another-photo.jpg" value={u} onChange={e => setHeroImg(i, e.target.value)} />
+                <button style={btn("#f1f5f9", "#991b1b")} onClick={() => delHeroImg(i)}>✕</button>
+              </div>
+            ))}
+            <button style={{ ...btn("#f1f5f9", NAVY), marginBottom: 10 }} onClick={addHeroImg}>+ Add hero image</button>
             <label style={lbl}>Hero click-through (optional)</label>
             <input style={inp} placeholder="https://www.denisonyachting.com/…" value={draft.linkUrl || ""} onChange={e => up({ linkUrl: e.target.value })} />
             <label style={lbl}>RSVP link (optional - a scheduler URL; leave blank to use built-in RSVP)</label>

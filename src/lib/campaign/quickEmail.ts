@@ -37,6 +37,7 @@ export type ShowInfo = {
   venue: string; ourLocation?: string; rsvpUrl?: string;
   eyebrow?: string; personalNote?: string;
   about?: string; highlights?: string[]; showUrl?: string;
+  heroImages?: string[];
   featured?: ShowFeaturedYacht[];
 };
 
@@ -202,6 +203,8 @@ export function buildShowInviteFromDraft(dr: Draft, toEmail: string) {
     : `${BASE}/api/campaign/rsvp?e=${encodeURIComponent(toEmail)}&show=${encodeURIComponent(slug)}`;
   const hero = dr.heroUrl || "https://via.placeholder.com/1200x600/0b1f3a/ffffff?text=Denison+Yachting";
   const eyebrow = (s.eyebrow || "YOU'RE INVITED").toUpperCase();
+  const heroExtra = (s.heroImages || []).map(u => (u || "").trim()).filter(Boolean).slice(0, 5)
+    .map(u => `<tr><td style="padding-top:2px">${dr.linkUrl ? `<a href="${esc(dr.linkUrl)}">` : ""}<img src="${esc(u)}" width="600" style="width:100%;display:block" alt="${esc(s.name)}">${dr.linkUrl ? "</a>" : ""}</td></tr>`).join("");
 
   const detail = (label: string, val?: string) => (val && String(val).trim())
     ? `<tr><td style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,.12)">
@@ -264,6 +267,7 @@ export function buildShowInviteFromDraft(dr: Draft, toEmail: string) {
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;background:#fff">
   <tr><td style="font-size:0;line-height:0"><img src="${BASE}/denison-header.png" alt="Denison Yachting" width="600" style="width:100%;height:auto;display:block;border:0"></td></tr>
   <tr><td>${dr.linkUrl ? `<a href="${esc(dr.linkUrl)}">` : ""}<img src="${esc(hero)}" width="600" style="width:100%;display:block" alt="${esc(s.name)}">${dr.linkUrl ? "</a>" : ""}</td></tr>
+  ${heroExtra}
   <tr><td align="center" style="background:${ORANGE};padding:9px;color:#fff;font-size:12px;letter-spacing:3px;font-family:Arial,Helvetica,sans-serif">${esc(eyebrow)}</td></tr>
   <tr><td align="center" style="padding:24px 30px 4px">
     <div style="color:${NAVY};font-size:28px;letter-spacing:.5px;line-height:1.25">${esc(s.name)}</div>
