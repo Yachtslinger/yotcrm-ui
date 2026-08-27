@@ -191,13 +191,13 @@ export default function NewShowCampaign() {
 
           <div style={card}>
             <div style={{ display: "flex", gap: 8 }}>
-              <div style={{ flex: 1 }}><label style={lbl}>Dates</label><input style={inp} placeholder="October 28 – November 1, 2026" value={s.dates} onChange={e => upShow({ dates: e.target.value })} /></div>
-              <div style={{ flex: 1 }}><label style={lbl}>Hours (optional)</label><input style={inp} placeholder="10 AM – 7 PM daily" value={s.hours || ""} onChange={e => upShow({ hours: e.target.value })} /></div>
+              <div style={{ flex: 1 }}><label style={lbl}>Dates</label><input style={inp} placeholder="Auto-filled from the link, or type here" value={s.dates} onChange={e => upShow({ dates: e.target.value })} /></div>
+              <div style={{ flex: 1 }}><label style={lbl}>Hours (optional)</label><input style={inp} placeholder="Optional, e.g. 10 AM to 7 PM" value={s.hours || ""} onChange={e => upShow({ hours: e.target.value })} /></div>
             </div>
             <label style={lbl}>Venue</label>
-            <input style={inp} placeholder="Bahia Mar Yachting Center, Fort Lauderdale, FL" value={s.venue} onChange={e => upShow({ venue: e.target.value })} />
+            <input style={inp} placeholder="Auto-filled from the link, or type here" value={s.venue} onChange={e => upShow({ venue: e.target.value })} />
             <label style={lbl}>Where to find you (booth / slip)</label>
-            <input style={inp} placeholder="Superyacht Village - Slip 812" value={s.ourLocation || ""} onChange={e => upShow({ ourLocation: e.target.value })} />
+            <input style={inp} placeholder="e.g. Superyacht Village, Slip 812" value={s.ourLocation || ""} onChange={e => upShow({ ourLocation: e.target.value })} />
           </div>
 
           <div style={card}>
@@ -211,7 +211,7 @@ export default function NewShowCampaign() {
 
           <div style={card}>
             <label style={lbl}>Personal note (optional - your own line)</label>
-            <textarea style={{ ...inp, height: 90, resize: "vertical" }} placeholder="If you've been circling the 80–110' range, this is the one week you can see them side by side…" value={s.personalNote || ""} onChange={e => upShow({ personalNote: e.target.value })} />
+            <textarea style={{ ...inp, height: 90, resize: "vertical" }} placeholder="Add a personal line, e.g. this is the one week to see new builds and brokerage side by side." value={s.personalNote || ""} onChange={e => upShow({ personalNote: e.target.value })} />
           </div>
 
           <div style={card}>

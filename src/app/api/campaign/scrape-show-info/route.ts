@@ -195,11 +195,23 @@ export async function POST(req: NextRequest) {
   const ai = bodyText ? await aiExtract(bodyText) : {};
   const rx = bodyText ? regexExtract(bodyText) : {};
 
+  // Targeted fallback: many show sites render dates via JavaScript, so a direct
+  // read misses them. If we still have no dates, search the web for them by name.
+  let searchDates = "";
+  let searchHours = "";
+  if (!pick(jsonld.dates, ai.dates, rx.dates)) {
+    const nm = pick(jsonld.name, ai.name, meta.name) || (() => { try { return new URL(url).hostname.replace(/^www\./, "").replace(/\.[a-z.]+$/i, "").replace(/[^a-z]/gi, " ").trim(); } catch { return ""; } })();
+    if (nm) {
+      const t = await searchDDG(nm);
+      if (t) { const r = regexExtract(t); searchDates = r.dates || ""; searchHours = r.hours || ""; }
+    }
+  }
+
   const out = {
     ok: true,
     name: pick(jsonld.name, ai.name, meta.name),
-    dates: pick(jsonld.dates, ai.dates, rx.dates),
-    hours: pick(ai.hours, rx.hours),
+    dates: pick(jsonld.dates, ai.dates, rx.dates, searchDates),
+    hours: pick(ai.hours, rx.hours, searchHours),
     venue: pick(jsonld.venue, ai.venue),
     city: pick(jsonld.city, ai.city),
     country: pick(jsonld.country, ai.country),
