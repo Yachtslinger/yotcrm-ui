@@ -31,7 +31,7 @@ export type Draft = {
   show?: ShowInfo;
 };
 
-export type ShowFeaturedYacht = { label: string; url?: string; tag?: string };
+export type ShowFeaturedYacht = { label: string; url?: string; tag?: string; year?: string; price?: string };
 export type ShowInfo = {
   name: string; tagline?: string; dates: string; hours?: string;
   venue: string; ourLocation?: string; rsvpUrl?: string;
@@ -223,7 +223,9 @@ export function buildShowInviteFromDraft(dr: Draft, toEmail: string) {
     <div style="color:${ORANGE};font-size:11px;letter-spacing:2px;font-weight:bold;font-family:Arial,Helvetica,sans-serif">EXCLUSIVELY REPRESENTED BY US</div>
     <div style="color:${NAVY};font-size:15px;font-weight:bold;font-family:Arial,Helvetica,sans-serif;padding:2px 0 8px">New construction &amp; brokerage on display</div>
     ${feats.map(f => { const label = esc(f.label); const nameHtml = (f.url && f.url.trim()) ? `<a href="${esc(f.url)}" style="color:${NAVY};text-decoration:none;font-weight:bold">${label} &rsaquo;</a>` : `<span style="color:${INK};font-weight:bold">${label}</span>`;
-      return `<div style="font-size:13px;line-height:1.9;padding:5px 0;border-bottom:1px solid ${LINE};font-family:Arial,Helvetica,sans-serif">${chip(f.tag)}${nameHtml}</div>`; }).join("")}
+      const sub = [f.year, f.price].map(x => (x || "").toString().trim()).filter(Boolean).join("&nbsp;&nbsp;&middot;&nbsp;&nbsp;");
+      const subHtml = sub ? `<div style="color:${MUTE};font-size:12px;margin-top:2px;font-family:Arial,Helvetica,sans-serif">${sub}</div>` : "";
+      return `<div style="padding:7px 0;border-bottom:1px solid ${LINE}"><div style="font-size:13px;line-height:1.6;font-family:Arial,Helvetica,sans-serif">${chip(f.tag)}${nameHtml}</div>${subHtml}</div>`; }).join("")}
   </td></tr>` : "";
 
   const brokersRows = (dr.brokers && dr.brokers.length ? dr.brokers : DEFAULT_BROKERS.slice(0, 1))

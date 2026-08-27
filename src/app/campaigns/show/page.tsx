@@ -57,25 +57,29 @@ export default function NewShowCampaign() {
 
   const feats = s.featured || [];
   function addFeat() { upShow({ featured: [...feats, { label: "", url: "" }] }); }
-  function setFeat(i: number, k: "label" | "url" | "tag", v: string) { const f = feats.map(x => ({ ...x })); (f[i] as any)[k] = v; upShow({ featured: f }); }
+  function setFeat(i: number, k: "label" | "url" | "tag" | "year" | "price", v: string) { const f = feats.map(x => ({ ...x })); (f[i] as any)[k] = v; upShow({ featured: f }); }
   function delFeat(i: number) { upShow({ featured: feats.filter((_, j) => j !== i) }); }
   async function addFromLinks() {
     const urls = yachtUrls.split(/[\s,]+/).map(u => u.trim()).filter(u => /^https?:\/\//.test(u));
     if (!urls.length) { say("Paste one or more listing links first"); return; }
     setBusy(`Reading ${urls.length} listing${urls.length > 1 ? "s" : ""}...`);
-    const added: { label: string; url: string; tag: string }[] = [];
+    const added: { label: string; url: string; tag: string; year: string; price: string }[] = [];
     for (const u of urls) {
-      let label = "";
+      let label = ""; let year = ""; let price = "";
       try {
         const d = await post("/api/brochures/preview", { url: u });
         const v = d && d.vessel;
         if (d && d.ok && v) {
           const nm = (v.name && String(v.name).trim()) ? String(v.name).trim() : "";
-          const spec = [v.year, v.builder || v.make, v.model].map((x: any) => x && String(x).trim()).filter(Boolean).join(" ");
-          label = nm ? (v.loa && !nm.includes(String(v.loa)) ? `${nm}, ${v.loa}` : nm) : spec;
+          const bl = [v.builder || v.make, v.loa].map((x: any) => x && String(x).trim()).filter(Boolean).join(" ");
+          label = nm ? (bl ? `${bl} "${nm}"` : `"${nm}"`) : [v.year, v.builder || v.make, v.model].map((x: any) => x && String(x).trim()).filter(Boolean).join(" ");
+          year = v.year ? String(v.year).trim() : "";
+          let pr = (v.price || v.askingPrice || "").toString().trim();
+          if (pr && /^[0-9]/.test(pr)) pr = "$" + pr;
+          price = pr;
         }
       } catch { /* keep url, blank label */ }
-      added.push({ label, url: u, tag: "" });
+      added.push({ label, url: u, tag: "", year, price });
     }
     upShow({ featured: [...feats, ...added] });
     setYachtUrls("");
@@ -231,7 +235,9 @@ export default function NewShowCampaign() {
                   <option value="New">New Construction</option>
                   <option value="Brokerage">Brokerage</option>
                 </select>
-                <input style={{ ...inp, marginBottom: 0, flex: 2, minWidth: 150 }} placeholder="M/Y Serenity, 112' Westport" value={f.label} onChange={e => setFeat(i, "label", e.target.value)} />
+                <input style={{ ...inp, marginBottom: 0, flex: 2, minWidth: 150 }} placeholder={'Rossinavi 163 "Flying Dagger III"'} value={f.label} onChange={e => setFeat(i, "label", e.target.value)} />
+                <input style={{ ...inp, marginBottom: 0, width: 78 }} placeholder="Year" value={f.year || ""} onChange={e => setFeat(i, "year", e.target.value)} />
+                <input style={{ ...inp, marginBottom: 0, width: 120 }} placeholder="Price" value={f.price || ""} onChange={e => setFeat(i, "price", e.target.value)} />
                 <input style={{ ...inp, marginBottom: 0, flex: 2, minWidth: 150 }} placeholder="Listing link (optional)" value={f.url || ""} onChange={e => setFeat(i, "url", e.target.value)} />
                 <button style={btn("#f1f5f9", "#991b1b")} onClick={() => delFeat(i)}>✕</button>
               </div>
