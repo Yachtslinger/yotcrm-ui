@@ -4,12 +4,35 @@
 // when the guest picks a time so it lands on the YotCRM calendar feed.
 import { NextRequest, NextResponse } from "next/server";
 import Database from "better-sqlite3";
-import { createEvent, generateICS } from "@/lib/calendar/storage";
+import { createEvent } from "@/lib/calendar/storage";
 
 export const runtime = "nodejs";
 const DB = process.env.DB_PATH || "/data/yotcrm.db";
 const BASE = process.env.YOTCRM_BASE_URL || "https://yotcrm-production.up.railway.app";
-const YOTBOT = process.env.YOTBOT_EMAIL || "yotbot@denisonyachting.com";
+const YOTBOT = process.env.YOTBOT_EMAIL || "theyotbot@gmail.com";
+
+// A proper iCalendar INVITE (METHOD:REQUEST). Emailed to theyotbot@gmail.com
+// (a real Gmail) it auto-lands on that Google Calendar; Will/Paolo get an
+// accept card. Floating local time keeps the wall-clock the guest picked.
+function icsDT(s: string) { return s.replace(/[-:]/g, "").replace(/\.\d+Z?$/, "").replace(/Z$/, ""); }
+function buildInviteICS(event: { id: number; title: string; start_at: string; end_at: string; location: string; notes: string }, guestName: string, guestEmail: string): string {
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z?$/, "Z");
+  const desc = (event.notes || "").replace(/\n/g, "\\n");
+  return [
+    "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//YotCRM//RSVP//EN", "METHOD:REQUEST", "CALSCALE:GREGORIAN",
+    "BEGIN:VEVENT", `UID:yotcrm-rsvp-${event.id}@denisonyachting.com`, `DTSTAMP:${stamp}`,
+    `DTSTART:${icsDT(event.start_at)}`, `DTEND:${icsDT(event.end_at)}`,
+    `SUMMARY:${event.title.replace(/\n/g, "\\n")}`,
+    event.location ? `LOCATION:${event.location.replace(/\n/g, "\\n")}` : "",
+    desc ? `DESCRIPTION:${desc}` : "",
+    "ORGANIZER;CN=Denison Yachting:mailto:theyotbot@gmail.com",
+    "ATTENDEE;CN=Will Noftsinger;ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:WN@DenisonYachting.com",
+    "ATTENDEE;CN=Paolo Ameglio;ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:PGA@DenisonYachting.com",
+    "ATTENDEE;CN=YotBot:mailto:theyotbot@gmail.com",
+    guestEmail ? `ATTENDEE;CN=${guestName.replace(/[,:;]/g, " ")};RSVP=TRUE:mailto:${guestEmail}` : "",
+    "STATUS:CONFIRMED", "SEQUENCE:0", "END:VEVENT", "END:VCALENDAR",
+  ].filter(Boolean).join("\r\n");
+}
 
 const NAVY = "#0b2a55", GOLD = "#c9a24b", INK = "#334155";
 const WILL = { name: "Will Noftsinger", title: "Yacht Broker, Denison Yachting", email: "WN@DenisonYachting.com", cell: "+18504613342", cellD: "(850) 461-3342", photo: "https://cdn.denisonyachtsales.com/images/denison-update/users/photos/69af22d913e91.jpg" };
@@ -116,7 +139,7 @@ async function sendNotify(subject: string, html: string, replyTo: string, ics?: 
     subject,
     html,
   };
-  if (ics) body.attachments = [{ filename: "meeting.ics", content: Buffer.from(ics).toString("base64") }];
+  if (ics) body.attachments = [{ filename: "invite.ics", content: Buffer.from(ics).toString("base64"), content_type: "text/calendar; method=REQUEST; charset=utf-8" }];
   try {
     await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -176,7 +199,7 @@ export async function POST(req: NextRequest) {
           assigned_users: ["will", "paolo"],
           actor: "rsvp",
         });
-        ics = generateICS(event);
+        ics = buildInviteICS(event, name, email);
         meetLabel = start.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
       }
     } catch { /* calendar optional */ }

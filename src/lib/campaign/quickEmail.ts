@@ -201,7 +201,7 @@ export function buildShowInviteFromDraft(dr: Draft, toEmail: string) {
   const rsvp = s.rsvpUrl && s.rsvpUrl.trim()
     ? s.rsvpUrl.trim()
     : `${BASE}/api/campaign/rsvp?e=${encodeURIComponent(toEmail)}&show=${encodeURIComponent(slug)}&sn=${encodeURIComponent(s.name || "")}&sd=${encodeURIComponent(s.dates || "")}&sl=${encodeURIComponent(s.venue || "")}`;
-  const YOTBOT_EMAIL = "yotbot@denisonyachting.com";
+  const YOTBOT_EMAIL = "theyotbot@gmail.com";
   const mailtoUs = `mailto:WN@DenisonYachting.com?cc=PGA@DenisonYachting.com,${YOTBOT_EMAIL}&subject=${encodeURIComponent((s.name || "Boat show") + " - let's connect")}&body=${encodeURIComponent("Hi Will and Paolo,\n\n")}`;
   const smsUs = "sms:+18504613342,+17862512588";
   const hero = dr.heroUrl || "https://via.placeholder.com/1200x600/0b1f3a/ffffff?text=Denison+Yachting";
