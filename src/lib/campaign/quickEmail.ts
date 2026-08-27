@@ -1,5 +1,5 @@
 // src/lib/campaign/quickEmail.ts
-// Draft-based branded campaign email. Pure functions — imported by BOTH the
+// Draft-based branded campaign email. Pure functions, imported by BOTH the
 // client editor (live preview) and the server (test/group send) so the preview
 // is byte-identical to what gets sent.
 const NAVY = "#0b1f3a", ORANGE = "#e57b2e", INK = "#3a4656", MUTE = "#94a3b8", LINE = "#e2e8f0";
