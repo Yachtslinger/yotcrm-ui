@@ -200,7 +200,10 @@ export function buildShowInviteFromDraft(dr: Draft, toEmail: string) {
   const prefs = `${BASE}/api/campaign/preferences?e=${encodeURIComponent(toEmail)}&topic=events`;
   const rsvp = s.rsvpUrl && s.rsvpUrl.trim()
     ? s.rsvpUrl.trim()
-    : `${BASE}/api/campaign/rsvp?e=${encodeURIComponent(toEmail)}&show=${encodeURIComponent(slug)}`;
+    : `${BASE}/api/campaign/rsvp?e=${encodeURIComponent(toEmail)}&show=${encodeURIComponent(slug)}&sn=${encodeURIComponent(s.name || "")}&sd=${encodeURIComponent(s.dates || "")}&sl=${encodeURIComponent(s.venue || "")}`;
+  const YOTBOT_EMAIL = "yotbot@denisonyachting.com";
+  const mailtoUs = `mailto:WN@DenisonYachting.com?cc=PGA@DenisonYachting.com,${YOTBOT_EMAIL}&subject=${encodeURIComponent((s.name || "Boat show") + " - let's connect")}&body=${encodeURIComponent("Hi Will and Paolo,\n\n")}`;
+  const smsUs = "sms:+18504613342,+17862512588";
   const hero = dr.heroUrl || "https://via.placeholder.com/1200x600/0b1f3a/ffffff?text=Denison+Yachting";
   const eyebrow = (s.eyebrow || "YOU'RE INVITED").toUpperCase();
   const heroExtra = (s.heroImages || []).map(u => (u || "").trim()).filter(Boolean).slice(0, 5)
@@ -285,6 +288,11 @@ export function buildShowInviteFromDraft(dr: Draft, toEmail: string) {
   <tr><td align="center" style="padding:2px 30px 10px">
     <a href="${esc(rsvp)}" style="background:${ORANGE};color:#fff;text-decoration:none;font-size:14px;padding:14px 40px;border-radius:5px;display:inline-block;font-weight:bold;font-family:Arial,Helvetica,sans-serif">RSVP / Reserve a time to meet</a>
     <div style="color:${MUTE};font-size:12px;margin-top:10px;font-family:Arial,Helvetica,sans-serif">Or just reply to this email and we'll hold a time for you.</div>
+    <div style="margin-top:12px">
+      <a href="${mailtoUs}" style="display:inline-block;border:1px solid ${NAVY};color:${NAVY};text-decoration:none;font-size:12px;padding:9px 16px;border-radius:5px;margin:3px;font-family:Arial,Helvetica,sans-serif">Email Will &amp; Paolo</a>
+      <a href="${smsUs}" style="display:inline-block;border:1px solid ${NAVY};color:${NAVY};text-decoration:none;font-size:12px;padding:9px 16px;border-radius:5px;margin:3px;font-family:Arial,Helvetica,sans-serif">Text Will's cell</a>
+    </div>
+    <div style="color:${MUTE};font-size:11px;margin-top:5px;font-family:Arial,Helvetica,sans-serif">Paolo and YotBot are copied automatically.</div>
     ${showLink}
   </td></tr>
   ${featuredBlock}
