@@ -60,6 +60,23 @@ export default function NewShowCampaign() {
   function addHeroImg() { upShow({ heroImages: [...heros, ""] }); }
   function setHeroImg(i: number, v: string) { const a = [...heros]; a[i] = v; upShow({ heroImages: a }); }
   function delHeroImg(i: number) { upShow({ heroImages: heros.filter((_, j) => j !== i) }); }
+  function moveHero(i: number, dir: number) { const a = [...heros]; const j = i + dir; if (j < 0 || j >= a.length) return; const t = a[i]; a[i] = a[j]; a[j] = t; upShow({ heroImages: a }); }
+  function makeMain(i: number) { const a = [...heros]; const chosen = a[i]; const oldMain = (draft.heroUrl || "").trim(); a.splice(i, 1); if (oldMain) a.unshift(oldMain); up({ heroUrl: chosen }); upShow({ heroImages: a }); }
+  async function uploadImage(file: File): Promise<string> {
+    const fd = new FormData(); fd.append("files", file);
+    const r = await fetch("/api/listings/upload", { method: "POST", body: fd });
+    const d = await r.json();
+    if (d && d.ok && d.files && d.files[0]) return `${location.origin}${d.files[0].url}`;
+    throw new Error((d && d.error) || "upload failed");
+  }
+  async function onMainHeroFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files && e.target.files[0]; if (!f) return;
+    setBusy("Uploading image..."); try { const url = await uploadImage(f); up({ heroUrl: url }); say("Image uploaded and hosted"); } catch (err: any) { say("Upload failed: " + err.message); } setBusy(""); e.target.value = "";
+  }
+  async function onAddHeroFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files && e.target.files[0]; if (!f) return;
+    setBusy("Uploading image..."); try { const url = await uploadImage(f); upShow({ heroImages: [...heros, url] }); say("Image uploaded and hosted"); } catch (err: any) { say("Upload failed: " + err.message); } setBusy(""); e.target.value = "";
+  }
   function addFeat() { upShow({ featured: [...feats, { label: "", url: "" }] }); }
   function setFeat(i: number, k: "label" | "url" | "tag" | "year" | "price", v: string) { const f = feats.map(x => ({ ...x })); (f[i] as any)[k] = v; upShow({ featured: f }); }
   function delFeat(i: number) { upShow({ featured: feats.filter((_, j) => j !== i) }); }
@@ -205,16 +222,26 @@ export default function NewShowCampaign() {
           </div>
 
           <div style={card}>
-            <label style={lbl}>Hero image URL</label>
-            <input style={inp} placeholder="https://…/show-photo.jpg" value={draft.heroUrl} onChange={e => up({ heroUrl: e.target.value })} />
-            <label style={lbl}>More hero images (optional, stack under the main one)</label>
+            <label style={lbl}>Hero image (main / first image)</label>
+            <input style={inp} placeholder="https://…/show-photo.jpg  or upload below" value={draft.heroUrl} onChange={e => up({ heroUrl: e.target.value })} />
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <label style={{ ...btn(ORANGE), cursor: "pointer", marginBottom: 0 }}>Upload JPG/PNG<input type="file" accept="image/*" onChange={onMainHeroFile} style={{ display: "none" }} /></label>
+              <span style={{ fontSize: 11, color: MUTE }}>Hosted by us, so it loads in every inbox.</span>
+            </div>
+            <label style={lbl}>More hero images (stack under the main one, reorder with the arrows)</label>
             {heros.map((u, i) => (
-              <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                <input style={{ ...inp, marginBottom: 0, flex: 1 }} placeholder="https://…/another-photo.jpg" value={u} onChange={e => setHeroImg(i, e.target.value)} />
+              <div key={i} style={{ display: "flex", gap: 4, marginBottom: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <button style={{ ...btn("#f1f5f9", NAVY), padding: "6px 9px" }} title="Move up" onClick={() => moveHero(i, -1)}>▲</button>
+                <button style={{ ...btn("#f1f5f9", NAVY), padding: "6px 9px" }} title="Move down" onClick={() => moveHero(i, 1)}>▼</button>
+                <input style={{ ...inp, marginBottom: 0, flex: 1, minWidth: 160 }} placeholder="https://…/another-photo.jpg" value={u} onChange={e => setHeroImg(i, e.target.value)} />
+                <button style={{ ...btn("#f1f5f9", NAVY), padding: "6px 9px" }} title="Make this the main image" onClick={() => makeMain(i)}>★</button>
                 <button style={btn("#f1f5f9", "#991b1b")} onClick={() => delHeroImg(i)}>✕</button>
               </div>
             ))}
-            <button style={{ ...btn("#f1f5f9", NAVY), marginBottom: 10 }} onClick={addHeroImg}>+ Add hero image</button>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
+              <button style={btn("#f1f5f9", NAVY)} onClick={addHeroImg}>+ Add image URL</button>
+              <label style={{ ...btn(ORANGE), cursor: "pointer", marginBottom: 0 }}>Upload &amp; add<input type="file" accept="image/*" onChange={onAddHeroFile} style={{ display: "none" }} /></label>
+            </div>
             <label style={lbl}>Hero click-through (optional)</label>
             <input style={inp} placeholder="https://www.denisonyachting.com/…" value={draft.linkUrl || ""} onChange={e => up({ linkUrl: e.target.value })} />
             <label style={lbl}>RSVP link (optional - a scheduler URL; leave blank to use built-in RSVP)</label>
