@@ -33,8 +33,8 @@ export default function NewCampaign() {
   const [draftId, setDraftId] = useState<number | null>(null);
   const say = (m: string) => setLog(l => [new Date().toLocaleTimeString() + " — " + m, ...l].slice(0, 10));
   const up = (patch: Partial<Draft>) => setDraft(d => (d ? { ...d, ...patch } : d));
-  useEffect(() => { fetch("/api/campaign/draft").then(r => r.json()).then(d => { if (d.ok) setDrafts(d.drafts); }).catch(() => {}); }, []);
-  async function loadDrafts() { const d = await fetch("/api/campaign/draft").then(r => r.json()); if (d.ok) setDrafts(d.drafts); }
+  useEffect(() => { fetch("/api/campaign/draft?kind=listing").then(r => r.json()).then(d => { if (d.ok) setDrafts(d.drafts); }).catch(() => {}); }, []);
+  async function loadDrafts() { const d = await fetch("/api/campaign/draft?kind=listing").then(r => r.json()); if (d.ok) setDrafts(d.drafts); }
   async function saveDraft() {
     if (!draft) return;
     const name = prompt("Name this draft:", draft.headline) || draft.headline || "Untitled";

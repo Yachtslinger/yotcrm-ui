@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { createShowDraft, buildEmailFromDraft, DEFAULT_BROKERS, type Draft } from "@/lib/campaign/quickEmail";
 
 const NAVY = "#0b1f3a", ORANGE = "#e57b2e", MUTE = "#64748b", LINE = "#e2e8f0";
@@ -39,12 +39,42 @@ export default function NewShowCampaign() {
   const [wave, setWave] = useState(50);
   const [showUrl, setShowUrl] = useState("");
   const [yachtUrls, setYachtUrls] = useState("");
+  const [draftId, setDraftId] = useState<number | null>(null);
+  const [drafts, setDrafts] = useState<any[]>([]);
   const [log, setLog] = useState<string[]>([]);
   const say = (m: string) => setLog(l => [new Date().toLocaleTimeString() + " - " + m, ...l].slice(0, 10));
 
   const up = (patch: Partial<Draft>) => setDraft(d => ({ ...d, ...patch }));
   const upShow = (patch: Partial<NonNullable<Draft["show"]>>) => setDraft(d => ({ ...d, show: { ...(d.show as any), ...patch } }));
   const s = draft.show!;
+
+  useEffect(() => { loadDrafts(); }, []);
+  async function loadDrafts() {
+    try { const d = await fetch("/api/campaign/draft?kind=boatshow").then(r => r.json()); if (d.ok) setDrafts(d.drafts || []); } catch { /* ignore */ }
+  }
+  async function saveDraft() {
+    const nm = prompt("Name this show draft:", s.name || draft.subject || "Untitled") || (s.name || "Untitled");
+    setBusy("Saving draft...");
+    const d = await post("/api/campaign/draft", { id: draftId, name: nm, draft });
+    if (d.ok) { setDraftId(d.id); say("Draft saved"); loadDrafts(); } else say("Save failed: " + (d.error || "?"));
+    setBusy("");
+  }
+  async function loadDraft(id: number) {
+    if (!id) return; setBusy("Loading draft...");
+    try {
+      const d = await fetch("/api/campaign/draft?id=" + id).then(r => r.json());
+      if (d.ok && d.draft) { setDraft({ ...createShowDraft(), ...d.draft }); setDraftId(d.id); setAudience(null); say("Loaded: " + d.name); }
+      else say("Load failed");
+    } catch (e: any) { say("Load failed: " + e.message); }
+    setBusy("");
+  }
+  function newDraft() { setDraft(createShowDraft()); setDraftId(null); setAudience(null); setShowUrl(""); setYachtUrls(""); say("Started a new show draft"); }
+  async function deleteDraft() {
+    if (!draftId) { say("Open a saved draft first to delete it"); return; }
+    if (!confirm("Delete this saved draft?")) return;
+    await fetch("/api/campaign/draft?id=" + draftId, { method: "DELETE" });
+    newDraft(); loadDrafts(); say("Draft deleted");
+  }
 
   function setName(name: string) {
     setDraft(d => ({
@@ -182,6 +212,17 @@ export default function NewShowCampaign() {
         Fill in the show details, preview live, send yourself a test, then send a warm-up wave to verified buyers.
         Unsubscribes, event opt-outs, and already-sent are skipped automatically. <a href="/campaigns/new" style={{ color: ORANGE }}>Listing campaign →</a>
       </p>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
+        <button style={btn("#f1f5f9", NAVY)} onClick={saveDraft} disabled={!!busy}>Save draft</button>
+        <select style={{ ...inp, marginBottom: 0, width: 260 }} value={draftId || ""} onChange={e => loadDraft(parseInt(e.target.value))}>
+          <option value="">Open a saved show draft...</option>
+          {drafts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+        <button style={btn("#f1f5f9", NAVY)} onClick={newDraft} disabled={!!busy}>New</button>
+        {draftId ? <button style={btn("#f1f5f9", "#991b1b")} onClick={deleteDraft} disabled={!!busy}>Delete</button> : null}
+        {draftId ? <span style={{ fontSize: 12, color: MUTE }}>editing saved draft</span> : null}
+      </div>
 
       <div style={{ display: "flex", gap: 18, alignItems: "flex-start", flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 380px", minWidth: 340 }}>

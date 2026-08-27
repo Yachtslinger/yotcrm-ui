@@ -10,6 +10,7 @@ function db() {
   const d = new Database(DB);
   d.exec(`CREATE TABLE IF NOT EXISTS campaign_drafts (
     id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, slug TEXT, blob TEXT, updated_at TEXT)`);
+  try { d.exec("ALTER TABLE campaign_drafts ADD COLUMN kind TEXT DEFAULT 'listing'"); } catch { /* exists */ }
   return d;
 }
 
@@ -23,7 +24,10 @@ export async function GET(req: NextRequest) {
       if (!row) return NextResponse.json({ ok: false, error: "not found" }, { status: 404 });
       return NextResponse.json({ ok: true, id: row.id, name: row.name, ...JSON.parse(row.blob || "{}") });
     }
-    const rows = d.prepare("SELECT id,name,slug,updated_at FROM campaign_drafts ORDER BY updated_at DESC LIMIT 100").all();
+    const kind = req.nextUrl.searchParams.get("kind");
+    const rows = kind
+      ? d.prepare("SELECT id,name,slug,kind,updated_at FROM campaign_drafts WHERE kind=? ORDER BY updated_at DESC LIMIT 100").all(kind)
+      : d.prepare("SELECT id,name,slug,kind,updated_at FROM campaign_drafts ORDER BY updated_at DESC LIMIT 100").all();
     d.close();
     return NextResponse.json({ ok: true, drafts: rows });
   } catch (e: any) { return NextResponse.json({ ok: false, error: e.message }, { status: 500 }); }
@@ -36,13 +40,15 @@ export async function POST(req: NextRequest) {
     if (!draft) return NextResponse.json({ ok: false, error: "draft required" }, { status: 400 });
     const blob = JSON.stringify({ draft, allImages: allImages || [] });
     const d = db();
+    const kind = draft && draft.kind === "boatshow" ? "boatshow" : "listing";
+    const dispName = name || draft.headline || (draft.show && draft.show.name) || "Untitled";
     let outId = id;
     if (id) {
-      d.prepare("UPDATE campaign_drafts SET name=?, slug=?, blob=?, updated_at=datetime('now') WHERE id=?")
-        .run(name || draft.headline || "Untitled", draft.slug || "", blob, id);
+      d.prepare("UPDATE campaign_drafts SET name=?, slug=?, blob=?, kind=?, updated_at=datetime('now') WHERE id=?")
+        .run(dispName, draft.slug || "", blob, kind, id);
     } else {
-      const r = d.prepare("INSERT INTO campaign_drafts (name,slug,blob,updated_at) VALUES (?,?,?,datetime('now'))")
-        .run(name || draft.headline || "Untitled", draft.slug || "", blob);
+      const r = d.prepare("INSERT INTO campaign_drafts (name,slug,blob,kind,updated_at) VALUES (?,?,?,?,datetime('now'))")
+        .run(dispName, draft.slug || "", blob, kind);
       outId = r.lastInsertRowid;
     }
     d.close();
