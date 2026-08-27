@@ -186,7 +186,7 @@ export async function POST(req: NextRequest) {
       const $ = cheerio.load(html);
       meta = extractMeta($, url);
       jsonld = extractJsonLd($, url);
-      $("script, style, nav, footer, header, noscript, iframe, svg").remove();
+      $("script, style, noscript, iframe, svg").remove();  // keep nav/header/footer: show dates often live in a header banner
       bodyText = $("body").text().replace(/\s+/g, " ").trim();
     }
   } catch { /* fall through */ }
@@ -200,7 +200,7 @@ export async function POST(req: NextRequest) {
         const $$ = cheerio.load(rendered);
         jsonld = { ...extractJsonLd($$, url), ...jsonld };
         meta = { ...extractMeta($$, url), ...meta };
-        $$("script, style, nav, footer, header, noscript, iframe, svg").remove();
+        $$("script, style, noscript, iframe, svg").remove();  // keep nav/header/footer: show dates often live in a header banner
         const bt2 = $$("body").text().replace(/\s+/g, " ").trim();
         if (bt2.length > bodyText.length) { bodyText = bt2; source = "rendered"; }
       }
