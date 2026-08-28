@@ -32,12 +32,14 @@ export type Draft = {
 };
 
 export type ShowFeaturedYacht = { label: string; url?: string; tag?: string; year?: string; price?: string };
+export type ShowImage = { url: string; pos: string };
 export type ShowInfo = {
   name: string; tagline?: string; dates: string; hours?: string;
   venue: string; ourLocation?: string; rsvpUrl?: string;
   eyebrow?: string; personalNote?: string;
   about?: string; highlights?: string[]; showUrl?: string;
-  heroImages?: string[];
+  heroImages?: string[];        // legacy: rendered at "top"
+  images?: ShowImage[];         // each image with a placement slot
   featured?: ShowFeaturedYacht[];
 };
 
@@ -206,8 +208,10 @@ export function buildShowInviteFromDraft(dr: Draft, toEmail: string) {
   const smsUs = "sms:+18504613342,+17862512588";
   const hero = dr.heroUrl || "https://via.placeholder.com/1200x600/0b1f3a/ffffff?text=Denison+Yachting";
   const eyebrow = (s.eyebrow || "YOU'RE INVITED").toUpperCase();
-  const heroExtra = (s.heroImages || []).map(u => (u || "").trim()).filter(Boolean).slice(0, 5)
-    .map(u => `<tr><td style="padding-top:2px">${dr.linkUrl ? `<a href="${esc(dr.linkUrl)}">` : ""}<img src="${esc(u)}" width="600" style="width:100%;display:block" alt="${esc(s.name)}">${dr.linkUrl ? "</a>" : ""}</td></tr>`).join("");
+  const allImages: { url: string; pos: string }[] = ((s.images && s.images.length) ? s.images : (s.heroImages || []).map(u => ({ url: u, pos: "top" })))
+    .map(i => ({ url: (i.url || "").trim(), pos: i.pos || "top" })).filter(i => i.url);
+  const imgRow = (u: string) => `<tr><td style="padding-top:2px">${dr.linkUrl ? `<a href="${esc(dr.linkUrl)}">` : ""}<img src="${esc(u)}" width="600" style="width:100%;display:block" alt="${esc(s.name)}">${dr.linkUrl ? "</a>" : ""}</td></tr>`;
+  const imagesAt = (pos: string) => allImages.filter(i => i.pos === pos).map(i => imgRow(i.url)).join("");
 
   const detail = (label: string, val?: string) => (val && String(val).trim())
     ? `<tr><td style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,.12)">
@@ -270,7 +274,7 @@ export function buildShowInviteFromDraft(dr: Draft, toEmail: string) {
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;background:#fff">
   <tr><td style="font-size:0;line-height:0"><img src="${BASE}/denison-header.png" alt="Denison Yachting" width="600" style="width:100%;height:auto;display:block;border:0"></td></tr>
   <tr><td>${dr.linkUrl ? `<a href="${esc(dr.linkUrl)}">` : ""}<img src="${esc(hero)}" width="600" style="width:100%;display:block" alt="${esc(s.name)}">${dr.linkUrl ? "</a>" : ""}</td></tr>
-  ${heroExtra}
+  ${imagesAt("top")}
   <tr><td align="center" style="background:${ORANGE};padding:9px;color:#fff;font-size:12px;letter-spacing:3px;font-family:Arial,Helvetica,sans-serif">${esc(eyebrow)}</td></tr>
   <tr><td align="center" style="padding:24px 30px 4px">
     <div style="color:${NAVY};font-size:28px;letter-spacing:.5px;line-height:1.25">${esc(s.name)}</div>
@@ -279,12 +283,17 @@ export function buildShowInviteFromDraft(dr: Draft, toEmail: string) {
   <tr><td style="padding:16px 34px 6px;color:${INK};font-size:14px;line-height:1.8">
     The ${esc(s.name || "show")} is almost here, and we'd love to see you there. If you're planning to come, or thinking about it, let's set aside time to walk a few boats together, away from the crowds. Tell us what you're looking for and we'll line it up.
   </td></tr>
+  ${imagesAt("after_intro")}
   ${about}
+  ${imagesAt("after_about")}
   ${note}
   <tr><td style="padding:10px 30px 16px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${NAVY}" style="background:${NAVY};border-radius:6px">
     <tr><td style="padding:6px 20px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${details}</table></td></tr>
   </table></td></tr>
+  ${imagesAt("after_details")}
   ${highlightsBlock}
+  ${imagesAt("after_highlights")}
+  ${imagesAt("before_rsvp")}
   <tr><td align="center" style="padding:2px 30px 10px">
     <a href="${esc(rsvp)}" style="background:${ORANGE};color:#fff;text-decoration:none;font-size:14px;padding:14px 40px;border-radius:5px;display:inline-block;font-weight:bold;font-family:Arial,Helvetica,sans-serif">RSVP / Reserve a time to meet</a>
     <div style="color:${MUTE};font-size:12px;margin-top:10px;font-family:Arial,Helvetica,sans-serif">Or just reply to this email and we'll hold a time for you.</div>
@@ -296,7 +305,9 @@ export function buildShowInviteFromDraft(dr: Draft, toEmail: string) {
     ${showLink}
   </td></tr>
   ${featuredBlock}
+  ${imagesAt("after_yachts")}
   ${brokersRows}
+  ${imagesAt("end")}
   <tr><td align="center" style="padding:14px 24px 22px;background:#f8fafc;color:${MUTE};font-size:11px;line-height:1.6;font-family:Arial,Helvetica,sans-serif">
     Denison Yachting &middot; 1550 SE 17th Street, Fort Lauderdale, FL<br>
     You're receiving this because you asked to hear from us about events and shows.<br>

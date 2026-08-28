@@ -63,8 +63,11 @@ export default function NewShowCampaign() {
     if (!id) return; setBusy("Loading draft...");
     try {
       const d = await fetch("/api/campaign/draft?id=" + id).then(r => r.json());
-      if (d.ok && d.draft) { setDraft({ ...createShowDraft(), ...d.draft }); setDraftId(d.id); setAudience(null); say("Loaded: " + d.name); }
-      else say("Load failed");
+      if (d.ok && d.draft) {
+        const dd = d.draft;
+        if (dd.show && dd.show.heroImages && !dd.show.images) { dd.show.images = dd.show.heroImages.map((u: string) => ({ url: u, pos: "top" })); }
+        setDraft({ ...createShowDraft(), ...dd }); setDraftId(d.id); setAudience(null); say("Loaded: " + d.name);
+      } else say("Load failed");
     } catch (e: any) { say("Load failed: " + e.message); }
     setBusy("");
   }
@@ -86,12 +89,22 @@ export default function NewShowCampaign() {
   }
 
   const feats = s.featured || [];
-  const heros = s.heroImages || [];
-  function addHeroImg() { upShow({ heroImages: [...heros, ""] }); }
-  function setHeroImg(i: number, v: string) { const a = [...heros]; a[i] = v; upShow({ heroImages: a }); }
-  function delHeroImg(i: number) { upShow({ heroImages: heros.filter((_, j) => j !== i) }); }
-  function moveHero(i: number, dir: number) { const a = [...heros]; const j = i + dir; if (j < 0 || j >= a.length) return; const t = a[i]; a[i] = a[j]; a[j] = t; upShow({ heroImages: a }); }
-  function makeMain(i: number) { const a = [...heros]; const chosen = a[i]; const oldMain = (draft.heroUrl || "").trim(); a.splice(i, 1); if (oldMain) a.unshift(oldMain); up({ heroUrl: chosen }); upShow({ heroImages: a }); }
+  const imgs = s.images || [];
+  const POS: [string, string][] = [
+    ["top", "Top (under main image)"],
+    ["after_intro", "After the intro"],
+    ["after_about", "After the About text"],
+    ["after_details", "After the details box"],
+    ["after_highlights", "After the highlights"],
+    ["before_rsvp", "Before the RSVP button"],
+    ["after_yachts", "After the yachts list"],
+    ["end", "At the very end"],
+  ];
+  function addImg() { upShow({ images: [...imgs, { url: "", pos: "top" }] }); }
+  function setImg(i: number, k: "url" | "pos", v: string) { const a = imgs.map(x => ({ ...x })); (a[i] as any)[k] = v; upShow({ images: a }); }
+  function delImg(i: number) { upShow({ images: imgs.filter((_, j) => j !== i) }); }
+  function moveImg(i: number, dir: number) { const a = [...imgs]; const j = i + dir; if (j < 0 || j >= a.length) return; const t = a[i]; a[i] = a[j]; a[j] = t; upShow({ images: a }); }
+  function makeMainImg(i: number) { const a = imgs.map(x => ({ ...x })); const chosen = a[i]; const oldMain = (draft.heroUrl || "").trim(); a.splice(i, 1); if (oldMain) a.unshift({ url: oldMain, pos: "top" }); up({ heroUrl: chosen.url }); upShow({ images: a }); }
   async function uploadImage(file: File): Promise<string> {
     const fd = new FormData(); fd.append("files", file);
     const r = await fetch("/api/listings/upload", { method: "POST", body: fd });
@@ -103,9 +116,9 @@ export default function NewShowCampaign() {
     const f = e.target.files && e.target.files[0]; if (!f) return;
     setBusy("Uploading image..."); try { const url = await uploadImage(f); up({ heroUrl: url }); say("Image uploaded and hosted"); } catch (err: any) { say("Upload failed: " + err.message); } setBusy(""); e.target.value = "";
   }
-  async function onAddHeroFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function onAddImgFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files && e.target.files[0]; if (!f) return;
-    setBusy("Uploading image..."); try { const url = await uploadImage(f); upShow({ heroImages: [...heros, url] }); say("Image uploaded and hosted"); } catch (err: any) { say("Upload failed: " + err.message); } setBusy(""); e.target.value = "";
+    setBusy("Uploading image..."); try { const url = await uploadImage(f); upShow({ images: [...imgs, { url, pos: "top" }] }); say("Image uploaded and hosted"); } catch (err: any) { say("Upload failed: " + err.message); } setBusy(""); e.target.value = "";
   }
   function addFeat() { upShow({ featured: [...feats, { label: "", url: "" }] }); }
   function setFeat(i: number, k: "label" | "url" | "tag" | "year" | "price", v: string) { const f = feats.map(x => ({ ...x })); (f[i] as any)[k] = v; upShow({ featured: f }); }
@@ -269,19 +282,22 @@ export default function NewShowCampaign() {
               <label style={{ ...btn(ORANGE), cursor: "pointer", marginBottom: 0 }}>Upload JPG/PNG<input type="file" accept="image/*" onChange={onMainHeroFile} style={{ display: "none" }} /></label>
               <span style={{ fontSize: 11, color: MUTE }}>Hosted by us, so it loads in every inbox.</span>
             </div>
-            <label style={lbl}>More hero images (stack under the main one, reorder with the arrows)</label>
-            {heros.map((u, i) => (
+            <label style={lbl}>Additional images (place each one where you want in the email)</label>
+            {imgs.map((im, i) => (
               <div key={i} style={{ display: "flex", gap: 4, marginBottom: 6, alignItems: "center", flexWrap: "wrap" }}>
-                <button style={{ ...btn("#f1f5f9", NAVY), padding: "6px 9px" }} title="Move up" onClick={() => moveHero(i, -1)}>▲</button>
-                <button style={{ ...btn("#f1f5f9", NAVY), padding: "6px 9px" }} title="Move down" onClick={() => moveHero(i, 1)}>▼</button>
-                <input style={{ ...inp, marginBottom: 0, flex: 1, minWidth: 160 }} placeholder="https://…/another-photo.jpg" value={u} onChange={e => setHeroImg(i, e.target.value)} />
-                <button style={{ ...btn("#f1f5f9", NAVY), padding: "6px 9px" }} title="Make this the main image" onClick={() => makeMain(i)}>★</button>
-                <button style={btn("#f1f5f9", "#991b1b")} onClick={() => delHeroImg(i)}>✕</button>
+                <button style={{ ...btn("#f1f5f9", NAVY), padding: "6px 9px" }} title="Move up" onClick={() => moveImg(i, -1)}>▲</button>
+                <button style={{ ...btn("#f1f5f9", NAVY), padding: "6px 9px" }} title="Move down" onClick={() => moveImg(i, 1)}>▼</button>
+                <input style={{ ...inp, marginBottom: 0, flex: 1, minWidth: 150 }} placeholder="https://…/photo.jpg" value={im.url} onChange={e => setImg(i, "url", e.target.value)} />
+                <select style={{ ...inp, marginBottom: 0, width: 200 }} value={im.pos} onChange={e => setImg(i, "pos", e.target.value)}>
+                  {POS.map(([k, lab]) => <option key={k} value={k}>{lab}</option>)}
+                </select>
+                <button style={{ ...btn("#f1f5f9", NAVY), padding: "6px 9px" }} title="Make this the main image" onClick={() => makeMainImg(i)}>★</button>
+                <button style={btn("#f1f5f9", "#991b1b")} onClick={() => delImg(i)}>✕</button>
               </div>
             ))}
             <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
-              <button style={btn("#f1f5f9", NAVY)} onClick={addHeroImg}>+ Add image URL</button>
-              <label style={{ ...btn(ORANGE), cursor: "pointer", marginBottom: 0 }}>Upload &amp; add<input type="file" accept="image/*" onChange={onAddHeroFile} style={{ display: "none" }} /></label>
+              <button style={btn("#f1f5f9", NAVY)} onClick={addImg}>+ Add image URL</button>
+              <label style={{ ...btn(ORANGE), cursor: "pointer", marginBottom: 0 }}>Upload &amp; add<input type="file" accept="image/*" onChange={onAddImgFile} style={{ display: "none" }} /></label>
             </div>
             <label style={lbl}>Hero click-through (optional)</label>
             <input style={inp} placeholder="https://www.denisonyachting.com/…" value={draft.linkUrl || ""} onChange={e => up({ linkUrl: e.target.value })} />
